@@ -49,6 +49,8 @@ public final class DbPostprocess {
         }
         long[] componentPoints = new long[probabilities.length];
         long[] hull = new long[probabilities.length * 2];
+        double[] corners = new double[8];
+        double[] sortedCorners = new double[8];
         List<DetectionBox> boxes = new ArrayList<DetectionBox>();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -80,14 +82,14 @@ public final class DbPostprocess {
                 int hullCount = convexHull(componentPoints, pointCount, hull);
                 Rectangle rectangle = minimumRectangle(hull, hullCount);
                 if (rectangle == null) rectangle = axisAlignedRectangle(componentPoints, pointCount);
-                float score = rectangleScore(probabilities, width, height, rectangle);
+                float score = rectangleScore(probabilities, width, height, rectangle, corners);
                 if (score >= boxThreshold) {
                     if (boxes.size() == maxCandidates) {
                         throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB candidate limit exceeded");
                     }
                     float expansion = expansion(rectangle, unclipRatio);
-                    double[] corners = rectanglePoints(rectangle, expansion);
-                    orderClockwise(corners);
+                    rectanglePoints(rectangle, expansion, corners);
+                    orderClockwise(corners, sortedCorners);
                     float[] restored = new float[8];
                     for (int point = 0; point < 4; point++) {
                         restored[point * 2] = (float) (clamp(corners[point * 2], width - 1.0)
@@ -195,8 +197,8 @@ public final class DbPostprocess {
     }
 
     private static float rectangleScore(float[] probabilities, int width, int height,
-                                        Rectangle rectangle) {
-        double[] corners = rectanglePoints(rectangle, 0.0f);
+                                        Rectangle rectangle, double[] corners) {
+        rectanglePoints(rectangle, 0.0f, corners);
         double minX = corners[0];
         double maxX = corners[0];
         double minY = corners[1];
@@ -236,13 +238,11 @@ public final class DbPostprocess {
                 * (unclipRatio - 1.0f) / perimeter);
     }
 
-    private static double[] rectanglePoints(Rectangle rectangle, float expansion) {
-        double[] points = new double[8];
+    private static void rectanglePoints(Rectangle rectangle, float expansion, double[] points) {
         fromProjection(rectangle, rectangle.minU - expansion, rectangle.minV - expansion, points, 0);
         fromProjection(rectangle, rectangle.maxU + expansion, rectangle.minV - expansion, points, 2);
         fromProjection(rectangle, rectangle.maxU + expansion, rectangle.maxV + expansion, points, 4);
         fromProjection(rectangle, rectangle.minU - expansion, rectangle.maxV + expansion, points, 6);
-        return points;
     }
 
     private static void fromProjection(Rectangle rectangle, double projectionU, double projectionV,
@@ -256,8 +256,8 @@ public final class DbPostprocess {
         return value > maximum ? maximum : value;
     }
 
-    private static void orderClockwise(double[] points) {
-        double[] sorted = points.clone();
+    private static void orderClockwise(double[] points, double[] sorted) {
+        System.arraycopy(points, 0, sorted, 0, points.length);
         for (int i = 1; i < 4; i++) {
             double x = sorted[i * 2];
             double y = sorted[i * 2 + 1];
