@@ -51,6 +51,9 @@ jobs:
           java -cp "lw-ppocr-core/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.DbPostprocessPerformanceMain \
             | tee benchmark-results/db-postprocess.json
+          java -cp "lw-ppocr-core/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.PpocrPreprocessPerformanceMain \
+            | tee benchmark-results/ppocr-preprocess.json
       - name: Publish benchmark summary
         run: |
           echo '### LWM loader performance' >> "$GITHUB_STEP_SUMMARY"
@@ -60,6 +63,10 @@ jobs:
           echo '### DB postprocess performance' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/db-postprocess.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### PP-OCR preprocessing performance' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/ppocr-preprocess.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark result
         uses: actions/upload-artifact@v4
