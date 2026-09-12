@@ -18,6 +18,9 @@ and the first scalar graph execution paths. The loader validates the complete
 untrusted model byte stream before publishing an immutable `LwmModel`; the
 planner prepares reusable storage for the graph executor.
 
+The scalar executor currently covers equal-shape elementwise arithmetic,
+ReLU, Sigmoid, NCHW Conv, Transpose, Reshape, Softmax, and rank-2 MatMul.
+
 The runtime intentionally does not parse ONNX. Model conversion remains an
 offline responsibility of `lw.PPOCR.C` and its converter.
 

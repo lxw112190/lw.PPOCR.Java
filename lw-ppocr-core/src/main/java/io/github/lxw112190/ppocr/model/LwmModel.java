@@ -31,6 +31,19 @@ public final class LwmModel implements AutoCloseable {
     public List<TensorInfo> getTensors() { ensureOpen(); return tensors; }
     public List<NodeInfo> getNodes() { ensureOpen(); return nodes; }
 
+    /** Returns a read-only view of one validated operator parameter record. */
+    public ByteBuffer parameterData(int nodeIndex) {
+        ensureOpen();
+        NodeInfo node = nodes.get(nodeIndex);
+        if (node.getParameterSize() > Integer.MAX_VALUE) {
+            throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "operator parameters are too large");
+        }
+        ByteBuffer view = bytes.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+        view.position((int) node.getParameterOffset());
+        view.limit((int) (node.getParameterOffset() + node.getParameterSize()));
+        return view.slice().asReadOnlyBuffer().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
     /** Returns a read-only little-endian view of a validated constant payload. */
     public ByteBuffer constantData(int tensorIndex) {
         ensureOpen();

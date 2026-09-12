@@ -16,6 +16,18 @@ public interface KernelBackend {
 
     void relu(float[] input, int inputOffset, float[] output, int outputOffset, int length);
 
+    void sigmoid(float[] input, int inputOffset, float[] output, int outputOffset, int length);
+
     void matMul(float[] left, int leftOffset, float[] right, int rightOffset,
                 float[] output, int outputOffset, int rows, int inner, int columns);
+
+    void conv(float[] input, int inputOffset, float[] weights, int weightOffset,
+              float[] bias, int biasOffset, float[] output, int outputOffset,
+              int batch, int channels, int height, int width, int outputChannels,
+              int kernelHeight, int kernelWidth, int strideHeight, int strideWidth,
+              int dilationHeight, int dilationWidth, int padTop, int padLeft,
+              int groups, int outputHeight, int outputWidth);
+
+    void softmax(float[] input, int inputOffset, float[] output, int outputOffset,
+                 int outer, int axisLength, int inner);
 }

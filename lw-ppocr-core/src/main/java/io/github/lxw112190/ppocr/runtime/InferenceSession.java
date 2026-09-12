@@ -7,6 +7,7 @@ import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.OperatorType;
 import io.github.lxw112190.ppocr.model.NodeInfo;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.List;
 
@@ -85,6 +86,23 @@ public final class InferenceSession implements AutoCloseable {
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
                 backend.relu(left, leftOffset, storage, offset(output), execution.length(output));
                 break;
+            case SIGMOID:
+                if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
+                backend.sigmoid(left, leftOffset, storage, offset(output), execution.length(output));
+                break;
+            case CONV:
+                executeConv(node, storage, output);
+                break;
+            case TRANSPOSE:
+                executeTranspose(node, storage, output);
+                break;
+            case RESHAPE:
+                if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "reshape element count mismatch");
+                System.arraycopy(left, leftOffset, storage, offset(output), execution.length(output));
+                break;
+            case SOFTMAX:
+                executeSoftmax(node, storage, output);
+                break;
             case MAT_MUL:
                 if (inputs.length != 2 || execution.shapes().get(inputs[0]).getRank() != 2 ||
                         execution.shapes().get(inputs[1]).getRank() != 2 || execution.shapes().get(output).getRank() != 2) {
@@ -101,6 +119,97 @@ public final class InferenceSession implements AutoCloseable {
             default:
                 throw unsupported(node, "operator not implemented by scalar executor");
         }
+    }
+
+    private void executeConv(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length < 2 || inputs.length > 3 || execution.shapes().get(inputs[0]).getRank() != 4 ||
+                execution.shapes().get(inputs[1]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
+            throw unsupported(node, "Conv requires rank-4 input, weights, and output");
+        }
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        TensorShape weightShape = execution.shapes().get(inputs[1]);
+        TensorShape outputShape = execution.shapes().get(output);
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int groups = params.getInt(4);
+        int kernelHeight = params.getInt(8);
+        int kernelWidth = params.getInt(12);
+        int strideHeight = params.getInt(16);
+        int strideWidth = params.getInt(20);
+        int dilationHeight = params.getInt(24);
+        int dilationWidth = params.getInt(28);
+        int padTop = params.getInt(32);
+        int padLeft = params.getInt(36);
+        if (groups <= 0 || inputShape.get(1) % groups != 0 || weightShape.get(0) % groups != 0 ||
+                weightShape.get(1) != inputShape.get(1) / groups || weightShape.get(2) != kernelHeight ||
+                weightShape.get(3) != kernelWidth || outputShape.get(0) != inputShape.get(0) ||
+                outputShape.get(1) != weightShape.get(0)) {
+            throw unsupported(node, "Conv shape or parameter mismatch");
+        }
+        float[] weights = data(inputs[1], storage);
+        float[] bias = inputs.length == 3 ? data(inputs[2], storage) : null;
+        backend.conv(data(inputs[0], storage), offset(inputs[0]), weights, offset(inputs[1]), bias,
+                inputs.length == 3 ? offset(inputs[2]) : 0, storage, offset(output),
+                inputShape.get(0), inputShape.get(1), inputShape.get(2), inputShape.get(3),
+                weightShape.get(0), kernelHeight, kernelWidth, strideHeight, strideWidth,
+                dilationHeight, dilationWidth, padTop, padLeft, groups,
+                outputShape.get(2), outputShape.get(3));
+    }
+
+    private void executeSoftmax(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int axis = params.getInt(4);
+        TensorShape shape = execution.shapes().get(inputs[0]);
+        if (axis < 0) axis += shape.getRank();
+        if (axis < 0 || axis >= shape.getRank()) throw unsupported(node, "Softmax axis is invalid");
+        int outer = 1;
+        for (int i = 0; i < axis; i++) outer *= shape.get(i);
+        int inner = 1;
+        for (int i = axis + 1; i < shape.getRank(); i++) inner *= shape.get(i);
+        backend.softmax(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
+                outer, shape.get(axis), inner);
+    }
+
+    private void executeTranspose(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        TensorShape outputShape = execution.shapes().get(output);
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int rank = params.getShort(2) & 0xffff;
+        if (rank != inputShape.getRank() || rank != outputShape.getRank()) throw unsupported(node, "Transpose rank mismatch");
+        int[] permutation = new int[rank];
+        for (int i = 0; i < rank; i++) permutation[i] = params.getInt(4 + i * 4);
+        int[] inputStrides = strides(inputShape);
+        float[] input = data(inputs[0], storage);
+        for (int linear = 0; linear < execution.length(output); linear++) {
+            int remainder = linear;
+            int source = 0;
+            for (int axis = rank - 1; axis >= 0; axis--) {
+                int coordinate = remainder % outputShape.get(axis);
+                remainder /= outputShape.get(axis);
+                source += coordinate * inputStrides[permutation[axis]];
+            }
+            storage[offset(output) + linear] = input[offset(inputs[0]) + source];
+        }
+    }
+
+    private int[] strides(TensorShape shape) {
+        int[] strides = new int[shape.getRank()];
+        int stride = 1;
+        for (int axis = shape.getRank() - 1; axis >= 0; axis--) {
+            strides[axis] = stride;
+            stride *= shape.get(axis);
+        }
+        return strides;
+    }
+
+    private int indexOf(NodeInfo target) {
+        List<NodeInfo> nodes = execution.model().getNodes();
+        for (int i = 0; i < nodes.size(); i++) if (nodes.get(i) == target) return i;
+        throw new IllegalStateException("prepared node is not owned by model");
     }
 
     private float[] data(int tensorIndex, float[] storage) {
