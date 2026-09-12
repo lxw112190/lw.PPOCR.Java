@@ -19,6 +19,8 @@ public final class InferenceSession implements AutoCloseable {
     private final KernelBackend backend;
     private final ByteBuffer[] parameters;
     private final IdentityHashMap<NodeInfo, Integer> nodeIndexes;
+    private final IdentityHashMap<NodeInfo, int[]> nodeInputs;
+    private final IdentityHashMap<NodeInfo, int[]> nodeOutputs;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -39,9 +41,13 @@ public final class InferenceSession implements AutoCloseable {
         List<NodeInfo> nodes = model.getNodes();
         this.parameters = new ByteBuffer[nodes.size()];
         this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.size());
+        this.nodeInputs = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.nodeOutputs = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
             NodeInfo node = nodes.get(i);
             this.nodeIndexes.put(node, i);
+            this.nodeInputs.put(node, node.getInputs());
+            this.nodeOutputs.put(node, node.getOutputs());
             this.parameters[i] = model.parameterData(i);
         }
     }
@@ -79,8 +85,8 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeNodeUnchecked(NodeInfo node, float[] storage) {
-        int[] inputs = node.getInputs();
-        int[] outputs = node.getOutputs();
+        int[] inputs = nodeInputs.get(node);
+        int[] outputs = nodeOutputs.get(node);
         if (inputs.length == 0) {
             throw unsupported(node, "node has no inputs");
         }
@@ -193,7 +199,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeConv(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length < 2 || inputs.length > 3 || execution.shapes().get(inputs[0]).getRank() != 4 ||
                 execution.shapes().get(inputs[1]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "Conv requires rank-4 input, weights, and output");
@@ -228,7 +234,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeSoftmax(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
         ByteBuffer params = parameterData(node);
         int axis = params.getInt(4);
@@ -244,7 +250,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executePool(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "pool requires rank-4 input and output");
         }
@@ -259,7 +265,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeResize(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "Resize requires rank-4 input and output");
         }
@@ -272,7 +278,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeConvTranspose(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length < 2 || inputs.length > 3 || execution.shapes().get(inputs[0]).getRank() != 4 ||
                 execution.shapes().get(inputs[1]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "ConvTranspose requires rank-4 input, weights, and output");
@@ -304,7 +310,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeReduceMean(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1) throw unsupported(node, "ReduceMean requires one input");
         ByteBuffer params = parameterData(node);
         int count = params.getShort(2) & 0xffff;
@@ -315,7 +321,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeBatchNormalization(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 5 || execution.shapes().get(inputs[0]).getRank() < 2 ||
                 execution.length(inputs[0]) != execution.length(output)) {
             throw unsupported(node, "BatchNormalization requires five inputs and matching output");
@@ -340,7 +346,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeSqueezeOrUnsqueeze(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) {
             throw unsupported(node, "layout operator shape mismatch");
         }
@@ -402,7 +408,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeConcat(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length == 0) throw unsupported(node, "Concat requires inputs");
         ByteBuffer params = parameterData(node);
         int axis = params.getInt(4);
@@ -426,7 +432,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeSlice(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1) throw unsupported(node, "Slice requires one input");
         ByteBuffer params = parameterData(node);
         int count = params.getShort(2) & 0xffff;
@@ -443,7 +449,7 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private void executeTranspose(NodeInfo node, float[] storage, int output) {
-        int[] inputs = node.getInputs();
+        int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
