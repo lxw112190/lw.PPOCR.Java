@@ -53,6 +53,17 @@ public final class InferenceSessionTest {
                 profile.getTotalElapsedNanos());
     }
 
+    @Test
+    public void sharesDecodedConstantsAcrossDynamicSessions() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
+        InferenceSession first = new InferenceSession(model);
+        InferenceSession second = new InferenceSession(model);
+        Assert.assertSame(first.execution().constant(1), second.execution().constant(1));
+        first.close();
+        second.close();
+        model.close();
+    }
+
     private static byte[] addModel() {
         final int inputOffset = 160;
         final int outputOffset = 168;

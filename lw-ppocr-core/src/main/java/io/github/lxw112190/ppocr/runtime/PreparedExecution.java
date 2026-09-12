@@ -1,9 +1,7 @@
 package io.github.lxw112190.ppocr.runtime;
 
-import io.github.lxw112190.ppocr.model.DataType;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.TensorInfo;
-import java.nio.ByteBuffer;
 import java.util.List;
 
 /** Immutable graph metadata prepared once before a session enters its run loop. */
@@ -20,7 +18,6 @@ public final class PreparedExecution {
         this.shapes = ShapeResolver.resolve(model, inputShapes);
         this.workspacePlan = MemoryPlanner.plan(model.getTensors(), model.getNodes(),
                 model.getGraphInputs(), model.getGraphOutputs(), shapes);
-        this.constants = new float[model.getTensors().size()][];
         this.offsets = new int[model.getTensors().size()];
         this.lengths = new int[model.getTensors().size()];
         for (int i = 0; i < model.getTensors().size(); i++) {
@@ -31,10 +28,7 @@ public final class PreparedExecution {
             }
             lengths[i] = (int) elements;
             if (tensor.isConstant()) {
-                if (tensor.getDataType() != DataType.F32) {
-                    throw new IllegalArgumentException("only F32 execution is supported: tensor " + i);
-                }
-                constants[i] = readF32(model.constantData(i), lengths[i]);
+                continue;
             } else {
                 long byteOffset = workspacePlan.getOffset(i);
                 if (byteOffset < 0 || byteOffset % 4 != 0 || byteOffset / 4 > Integer.MAX_VALUE) {
@@ -43,6 +37,7 @@ public final class PreparedExecution {
                 offsets[i] = (int) (byteOffset / 4);
             }
         }
+        this.constants = SharedConstantPool.acquire(model, lengths);
     }
 
     public LwmModel model() { return model; }
@@ -52,11 +47,4 @@ public final class PreparedExecution {
     public int offset(int tensorIndex) { return offsets[tensorIndex]; }
     public int length(int tensorIndex) { return lengths[tensorIndex]; }
 
-    private static float[] readF32(ByteBuffer bytes, int length) {
-        float[] values = new float[length];
-        for (int i = 0; i < length; i++) {
-            values[i] = bytes.getFloat(i * 4);
-        }
-        return values;
-    }
 }
