@@ -49,4 +49,17 @@ public final class DbPostprocessTest {
         Assert.assertArrayEquals(new float[] {0, 0, 2, 0, 2, 0, 0, 0},
                 boxes.get(0).getPoints(), 0.0f);
     }
+
+    @Test
+    public void expandsComponentByUnclipRatioAndClampsToMap() {
+        List<DetectionBox> boxes = DbPostprocess.decode(new float[] {
+                        0.0f, 0.0f, 0.0f,
+                        0.0f, 0.9f, 0.9f,
+                        0.0f, 0.9f, 0.9f
+                }, 3, 3, 0.5f, 0.5f, 1.0f, 1.0f, 2, 2.0f, false);
+        Assert.assertEquals(1, boxes.size());
+        Assert.assertArrayEquals(new float[] {0.75f, 0.75f, 2.0f, 0.75f,
+                        2.0f, 2.0f, 0.75f, 2.0f},
+                boxes.get(0).getPoints(), 0.00001f);
+    }
 }

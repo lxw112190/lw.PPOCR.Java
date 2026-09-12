@@ -20,15 +20,24 @@ public final class DbPostprocess {
                                             float widthRatio, float heightRatio,
                                             int maxCandidates) {
         return decode(probabilities, width, height, bitmapThreshold, boxThreshold,
-                widthRatio, heightRatio, maxCandidates, false);
+                widthRatio, heightRatio, maxCandidates, 1.0f, false);
     }
 
     public static List<DetectionBox> decode(float[] probabilities, int width, int height,
                                             float bitmapThreshold, float boxThreshold,
                                             float widthRatio, float heightRatio,
                                             int maxCandidates, boolean useDilation) {
+        return decode(probabilities, width, height, bitmapThreshold, boxThreshold,
+                widthRatio, heightRatio, maxCandidates, 1.0f, useDilation);
+    }
+
+    public static List<DetectionBox> decode(float[] probabilities, int width, int height,
+                                            float bitmapThreshold, float boxThreshold,
+                                            float widthRatio, float heightRatio,
+                                            int maxCandidates, float unclipRatio,
+                                            boolean useDilation) {
         validate(probabilities, width, height, bitmapThreshold, boxThreshold,
-                widthRatio, heightRatio, maxCandidates);
+                widthRatio, heightRatio, maxCandidates, unclipRatio);
         boolean[] bitmap = new boolean[probabilities.length];
         for (int i = 0; i < probabilities.length; i++) bitmap[i] = probabilities[i] > bitmapThreshold;
         if (useDilation) dilate2x2(bitmap, width, height);
@@ -78,11 +87,16 @@ public final class DbPostprocess {
                     if (boxes.size() == maxCandidates) {
                         throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB candidate limit exceeded");
                     }
+                    float expansion = expansion(minX, maxX, minY, maxY, unclipRatio);
+                    float expandedMinX = Math.max(0.0f, minX - expansion);
+                    float expandedMaxX = Math.min(width - 1.0f, maxX + expansion);
+                    float expandedMinY = Math.max(0.0f, minY - expansion);
+                    float expandedMaxY = Math.min(height - 1.0f, maxY + expansion);
                     boxes.add(new DetectionBox(new float[] {
-                            minX / widthRatio, minY / heightRatio,
-                            maxX / widthRatio, minY / heightRatio,
-                            maxX / widthRatio, maxY / heightRatio,
-                            minX / widthRatio, maxY / heightRatio
+                            expandedMinX / widthRatio, expandedMinY / heightRatio,
+                            expandedMaxX / widthRatio, expandedMinY / heightRatio,
+                            expandedMaxX / widthRatio, expandedMaxY / heightRatio,
+                            expandedMinX / widthRatio, expandedMaxY / heightRatio
                     }, score));
                 }
             }
@@ -105,16 +119,27 @@ public final class DbPostprocess {
         System.arraycopy(dilated, 0, bitmap, 0, bitmap.length);
     }
 
+    private static float expansion(int minX, int maxX, int minY, int maxY, float unclipRatio) {
+        if (unclipRatio <= 1.0f) return 0.0f;
+        float rectangleWidth = maxX - minX;
+        float rectangleHeight = maxY - minY;
+        float perimeter = 2.0f * (rectangleWidth + rectangleHeight);
+        return perimeter <= 0.0f ? 0.0f : rectangleWidth * rectangleHeight
+                * (unclipRatio - 1.0f) / perimeter;
+    }
+
     private static void validate(float[] probabilities, int width, int height,
                                  float bitmapThreshold, float boxThreshold,
-                                 float widthRatio, float heightRatio, int maxCandidates) {
+                                 float widthRatio, float heightRatio, int maxCandidates,
+                                 float unclipRatio) {
         if (probabilities == null || width <= 0 || height <= 0 ||
                 (long) width * height != probabilities.length ||
                 !Float.isFinite(bitmapThreshold) || !Float.isFinite(boxThreshold) ||
                 bitmapThreshold < 0.0f || bitmapThreshold > 1.0f ||
                 boxThreshold < 0.0f || boxThreshold > 1.0f ||
                 !Float.isFinite(widthRatio) || !Float.isFinite(heightRatio) ||
-                widthRatio <= 0.0f || heightRatio <= 0.0f || maxCandidates <= 0) {
+                widthRatio <= 0.0f || heightRatio <= 0.0f || maxCandidates <= 0 ||
+                !Float.isFinite(unclipRatio) || unclipRatio <= 0.0f) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DB probability map or options are invalid");
         }
         for (float probability : probabilities) {
