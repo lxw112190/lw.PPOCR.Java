@@ -19,11 +19,14 @@ untrusted model byte stream before publishing an immutable `LwmModel`; the
 planner prepares reusable storage for the graph executor.
 
 The scalar executor currently covers equal-shape elementwise arithmetic,
-ReLU, Sigmoid, NCHW Conv, Transpose, Reshape, Softmax, and rank-2 MatMul.
+ReLU, Sigmoid, NCHW Conv, ConvTranspose, pooling, Resize, Transpose, Reshape,
+Softmax, and rank-2 MatMul.
 
-REC business-layer groundwork now includes UTF-8 dictionary loading and greedy
-CTC decoding with the same blank, repeat-collapse, space-class, and confidence
-rules as `lw.PPOCR.C`.
+The PP-OCR layer now includes C-compatible DET/CLS/REC preprocessing,
+DB postprocess, perspective crop, UTF-8 dictionary loading, greedy CTC
+decoding, orientation correction, reading-order sorting, and the public
+`PaddleOcr` pipeline. Thresholds and reading policies are supplied through
+immutable `PaddleOcrOptions`.
 
 The runtime intentionally does not parse ONNX. Model conversion remains an
 offline responsibility of `lw.PPOCR.C` and its converter.
@@ -55,6 +58,6 @@ not use it as a release gate.
 
 ## Scope boundaries
 
-The current code does not claim full OCR inference yet. REC graph execution,
-preprocessing, CTC decoding, CLS, DET, DB postprocess, crop, and the public OCR
-facade will be added only after the model contract and loader are stable.
+The current code targets the fixed-shape FP32 PP-OCRv6 Tiny/Small/Medium
+contract. It does not claim arbitrary ONNX topology compatibility, dynamic
+model discovery, image decoding, or a release-ready Vector API backend.
