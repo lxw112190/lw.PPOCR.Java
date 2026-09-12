@@ -427,9 +427,87 @@ public final class VectorBackend implements KernelBackend {
         int outputChannelsPerGroup = outputChannels / groups;
         int inputPlane = height * width;
         int outputPlane = outputHeight * outputWidth;
+        int kernelPlane = kernelHeight * kernelWidth;
         for (int n = 0; n < batch; n++) {
             for (int group = 0; group < groups; group++) {
-                for (int oc = 0; oc < outputChannelsPerGroup; oc++) {
+                int oc = 0;
+                for (; oc + 3 < outputChannelsPerGroup; oc += 4) {
+                    int outputChannel = group * outputChannelsPerGroup + oc;
+                    int outputBase0 = outputOffset +
+                            (n * outputChannels + outputChannel) * outputPlane;
+                    int outputBase1 = outputBase0 + outputPlane;
+                    int outputBase2 = outputBase1 + outputPlane;
+                    int outputBase3 = outputBase2 + outputPlane;
+                    Arrays.fill(output, outputBase0, outputBase0 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel]);
+                    Arrays.fill(output, outputBase1, outputBase1 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 1]);
+                    Arrays.fill(output, outputBase2, outputBase2 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 2]);
+                    Arrays.fill(output, outputBase3, outputBase3 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 3]);
+                    int channelWeightStride = inputChannelsPerGroup * kernelPlane;
+                    for (int ic = 0; ic < inputChannelsPerGroup; ic++) {
+                        int inputChannel = group * inputChannelsPerGroup + ic;
+                        int inputBase = inputOffset +
+                                (n * channels + inputChannel) * inputPlane;
+                        int weightBase0 = weightOffset +
+                                (outputChannel * inputChannelsPerGroup + ic) * kernelPlane;
+                        int weightBase1 = weightBase0 + channelWeightStride;
+                        int weightBase2 = weightBase1 + channelWeightStride;
+                        int weightBase3 = weightBase2 + channelWeightStride;
+                        for (int kh = 0; kh < kernelHeight; kh++) {
+                            for (int kw = 0; kw < kernelWidth; kw++) {
+                                int kernelIndex = kh * kernelWidth + kw;
+                                float weight0 = weights[weightBase0 + kernelIndex];
+                                float weight1 = weights[weightBase1 + kernelIndex];
+                                float weight2 = weights[weightBase2 + kernelIndex];
+                                float weight3 = weights[weightBase3 + kernelIndex];
+                                int shift = padLeft - kw * dilationWidth;
+                                int start = Math.max(0, ceilDiv(shift, 2));
+                                int end = Math.min(outputWidth, ceilDiv(width + shift, 2));
+                                int vectorEnd = start +
+                                        SPECIES.loopBound(Math.max(0, end - start));
+                                for (int oh = 0; oh < outputHeight; oh++) {
+                                    int ih = oh * strideHeight - padTop + kh * dilationHeight;
+                                    if (ih < 0 || ih >= height) continue;
+                                    int source = inputBase + ih * width + start * 2 - shift;
+                                    int destination0 = outputBase0 + oh * outputWidth;
+                                    int destination1 = outputBase1 + oh * outputWidth;
+                                    int destination2 = outputBase2 + oh * outputWidth;
+                                    int destination3 = outputBase3 + oh * outputWidth;
+                                    int ow = start;
+                                    for (; ow < vectorEnd; ow += SPECIES.length()) {
+                                        FloatVector sample = FloatVector.fromArray(
+                                                SPECIES, input, source, STRIDE_TWO_INDEXES, 0);
+                                        FloatVector.fromArray(SPECIES, output, destination0 + ow)
+                                                .add(sample.mul(weight0))
+                                                .intoArray(output, destination0 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination1 + ow)
+                                                .add(sample.mul(weight1))
+                                                .intoArray(output, destination1 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination2 + ow)
+                                                .add(sample.mul(weight2))
+                                                .intoArray(output, destination2 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination3 + ow)
+                                                .add(sample.mul(weight3))
+                                                .intoArray(output, destination3 + ow);
+                                        source += SPECIES.length() * 2;
+                                    }
+                                    for (; ow < end; ow++) {
+                                        float sample = input[source];
+                                        output[destination0 + ow] += sample * weight0;
+                                        output[destination1 + ow] += sample * weight1;
+                                        output[destination2 + ow] += sample * weight2;
+                                        output[destination3 + ow] += sample * weight3;
+                                        source += 2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                for (; oc < outputChannelsPerGroup; oc++) {
                     int outputChannel = group * outputChannelsPerGroup + oc;
                     int outputBase = outputOffset + (n * outputChannels + outputChannel) * outputPlane;
                     Arrays.fill(output, outputBase, outputBase + outputPlane,
@@ -438,7 +516,7 @@ public final class VectorBackend implements KernelBackend {
                         int inputChannel = group * inputChannelsPerGroup + ic;
                         int inputBase = inputOffset + (n * channels + inputChannel) * inputPlane;
                         int weightBase = weightOffset +
-                                (outputChannel * inputChannelsPerGroup + ic) * kernelHeight * kernelWidth;
+                                (outputChannel * inputChannelsPerGroup + ic) * kernelPlane;
                         for (int kh = 0; kh < kernelHeight; kh++) {
                             for (int kw = 0; kw < kernelWidth; kw++) {
                                 float weight = weights[weightBase + kh * kernelWidth + kw];

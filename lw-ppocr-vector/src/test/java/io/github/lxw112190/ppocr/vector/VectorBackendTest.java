@@ -156,15 +156,15 @@ public final class VectorBackendTest {
     @Test
     public void matchesScalarStrideTwoConvolution() {
         float[] input = values(4 * 7 * 15, 0.001953125f, -0.375f);
-        float[] weights = values(6 * 2 * 3 * 3, 0.0078125f, -0.25f);
-        float[] bias = values(6, 0.03125f, -0.0625f);
-        float[] expected = new float[6 * 4 * 8];
+        float[] weights = values(10 * 2 * 3 * 3, 0.0078125f, -0.25f);
+        float[] bias = values(10, 0.03125f, -0.0625f);
+        float[] expected = new float[10 * 4 * 8];
         float[] actual = new float[expected.length];
         scalar.conv(input, 0, weights, 0, bias, 0, expected, 0,
-                1, 4, 7, 15, 6, 3, 3, 2, 2, 1, 1,
+                1, 4, 7, 15, 10, 3, 3, 2, 2, 1, 1,
                 1, 1, 1, 1, 2, 4, 8);
         vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
-                1, 4, 7, 15, 6, 3, 3, 2, 2, 1, 1,
+                1, 4, 7, 15, 10, 3, 3, 2, 2, 1, 1,
                 1, 1, 1, 1, 2, 4, 8);
         Assert.assertArrayEquals(expected, actual, 0.000001f);
     }
