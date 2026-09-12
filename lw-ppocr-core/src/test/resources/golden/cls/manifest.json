@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/lxw112190/lw.PPOCR.C",
+  "source_commit": "9b31f1b",
+  "model": "cls.lwm",
+  "model_sha256": "d426c23f4758c9f21c5cbd0550ea9b90f1e7c0dd0289e1541e9754dee2e6ed61",
+  "source_file": "sample-crop.ppm",
+  "expected": {"label": 0, "orientation": 0, "score": 0.99998593, "resized_width": 160}
+}
