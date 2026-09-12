@@ -54,6 +54,8 @@ public final class FullOcrPerformanceMain {
         String backendName = args.length > 3 ? args[3] : "scalar";
         int recognitionParallelism = args.length > 4
                 ? positive(args[4], "recognition parallelism") : 1;
+        int classificationParallelism = args.length > 5
+                ? positive(args[5], "classification parallelism") : 1;
         if (detectorLimit < 32) throw new IllegalArgumentException("detector limit must be at least 32");
         KernelBackend backend = createBackend(backendName);
 
@@ -61,7 +63,8 @@ public final class FullOcrPerformanceMain {
         MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
         long heapBefore = stabilizedHeap(memory);
         long loadStart = System.nanoTime();
-        try (ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend, recognitionParallelism)) {
+        try (ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend,
+                recognitionParallelism, classificationParallelism)) {
             long modelLoadNanos = System.nanoTime() - loadStart;
             long heapAfterLoad = stabilizedHeap(memory);
             StageSample cold = pipeline.recognize(image);
@@ -121,6 +124,7 @@ public final class FullOcrPerformanceMain {
             String profileScope = "all-threads";
             System.out.printf(Locale.ROOT,
                     "{\"schema\":3,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                            + "\"classification_parallelism\":%d,"
                             + "\"recognition_parallelism\":%d,"
                             + "\"operator_profile_scope\":\"%s\","
                             + "\"operator_profile_iterations\":1,\"operator_profile_ms\":%.3f,"
@@ -141,7 +145,8 @@ public final class FullOcrPerformanceMain {
                             + "\"transient_heap_bytes\":%d,"
                             + "\"heap_peak_method\":\"mxbean-pool-sum\",\"gc_count_delta\":%d,"
                             + "\"gc_time_ms_delta\":%d,\"operators\":%s}%n",
-                    benchmark, backendName, recognitionParallelism, profileScope,
+                    benchmark, backendName, classificationParallelism,
+                    recognitionParallelism, profileScope,
                     milliseconds(profiledSample.totalNanos),
                     image.width(), image.height(), detectorLimit, lineCount,
                     warmup, iterations, milliseconds(modelLoadNanos), milliseconds(cold.totalNanos),
@@ -169,7 +174,8 @@ public final class FullOcrPerformanceMain {
     }
 
     private static ProfiledPipeline loadPipeline(int detectorLimit, KernelBackend backend,
-                                                 int recognitionParallelism) throws IOException {
+                                                 int recognitionParallelism,
+                                                 int classificationParallelism) throws IOException {
         LwmModel detectorModel = loadModel(DET_MODEL);
         PaddleOcrDetector detector = null;
         LwmModel classifierModel = null;
@@ -184,7 +190,8 @@ public final class FullOcrPerformanceMain {
             recognizerModel = loadModel(REC_MODEL);
             dictionary = loadDictionary();
             recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary, backend);
-            return new ProfiledPipeline(detector, classifier, recognizer, recognitionParallelism);
+            return new ProfiledPipeline(detector, classifier, recognizer,
+                    recognitionParallelism, classificationParallelism);
         } catch (RuntimeException e) {
             if (recognizer != null) recognizer.close();
             else {
@@ -335,13 +342,16 @@ public final class FullOcrPerformanceMain {
         private final PerspectiveCrop.Workspace cropper = new PerspectiveCrop.Workspace();
         private final PaddleOcrOptions options = PaddleOcrOptions.defaults();
         private final int recognitionParallelism;
+        private final int classificationParallelism;
 
         private ProfiledPipeline(PaddleOcrDetector detector, PaddleOcrClassifier classifier,
-                                 PaddleOcrRecognizer recognizer, int recognitionParallelism) {
+                                 PaddleOcrRecognizer recognizer, int recognitionParallelism,
+                                 int classificationParallelism) {
             this.detector = detector;
             this.classifier = classifier;
             this.recognizer = recognizer;
             this.recognitionParallelism = recognitionParallelism;
+            this.classificationParallelism = classificationParallelism;
         }
 
         private StageSample recognize(BgrImage source) {
@@ -356,17 +366,21 @@ public final class FullOcrPerformanceMain {
 
             List<OcrLineResult> lines = new ArrayList<OcrLineResult>(boxes.size());
             List<BgrImage> crops = new ArrayList<BgrImage>(boxes.size());
-            List<ClsClassificationResult> classifications = new ArrayList<ClsClassificationResult>(boxes.size());
             List<Boolean> rotations = new ArrayList<Boolean>(boxes.size());
             for (int line = 0; line < boxes.size(); line++) {
                 DetectionBox box = boxes.get(line);
                 start = System.nanoTime();
                 BgrImage crop = cropper.crop(source, box, line);
                 sample.cropNanos += System.nanoTime() - start;
-
-                start = System.nanoTime();
-                ClsClassificationResult classification = classifier.classify(crop);
-                sample.classificationNanos += System.nanoTime() - start;
+                crops.add(crop);
+            }
+            start = System.nanoTime();
+            List<ClsClassificationResult> classifications = classifier.classifyAll(
+                    crops, classificationParallelism);
+            sample.classificationNanos = System.nanoTime() - start;
+            for (int line = 0; line < boxes.size(); line++) {
+                BgrImage crop = crops.get(line);
+                ClsClassificationResult classification = classifications.get(line);
                 boolean rotated = false;
                 if (classification.requiresRotation(options.getClassifierThreshold())) {
                     start = System.nanoTime();
@@ -374,9 +388,7 @@ public final class FullOcrPerformanceMain {
                     sample.rotationNanos += System.nanoTime() - start;
                     rotated = true;
                 }
-
-                crops.add(crop);
-                classifications.add(classification);
+                crops.set(line, crop);
                 rotations.add(rotated);
             }
             start = System.nanoTime();

@@ -45,11 +45,12 @@ DET 的 2 倍上采样 ConvTranspose、广播、激活、归约和 MatMul；其�
 ```
 
 完整 OCR 可以直接加载同一个无状态 Vector 后端，并配置动态 DET 最大边和
-REC 宽度组并行：
+CLS 行并行及 REC 宽度组并行：
 
 ```java
 PaddleOcrOptions options = PaddleOcrOptions.builder()
         .setDetectionMaximumSideLength(320)
+        .setClassificationParallelism(4)
         .setRecognitionParallelism(4)
         .build();
 
@@ -137,24 +138,27 @@ try (OcrWorkerPool pool = new OcrWorkerPool(Arrays.asList(
 
 Worker pool 会共享不可变模型内容的语义由各 worker 管理；每个 worker 的执行工作区彼此独立。关闭 pool 会等待正在执行的请求完成。
 
-单张图片包含多行文字时，可以显式开启 REC 宽度组并行：
+单张图片包含多行文字时，可以分别开启 CLS 行并行和 REC 宽度组并行：
 
 ```java
 PaddleOcrOptions options = PaddleOcrOptions.builder()
+        .setClassificationParallelism(4)
         .setRecognitionParallelism(4)
         .build();
 ```
 
-实现会先按 192/320/480/640/960 目标宽度分组：同一宽度组内顺序执行，不同
+CLS 会把固定形状的文字行分配到独立 Session worker，所有 worker 共享已解码的
+模型常量，只保留各自的执行和预处理工作区。REC 会先按 192/320/480/640/960
+目标宽度分组：同一宽度组内顺序执行，不同
 宽度组按预估工作量从大到小进入共享任务队列，空闲线程会继续领取下一组，最终仍
-按原输入及阅读顺序返回。Session 和模型常量不会按文字行重复创建。默认值为 1，
+按原输入及阅读顺序返回。Session 和模型常量不会按文字行重复创建。两项默认值均为 1，
 低核或严格限制线程的环境无需改动。
 
 ## 性能与内存结果
 
 仓库中的 `sample.jpg` 位于
 `lw-ppocr-core/src/test/resources/golden/ocr/sample.jpg`，CI 使用它验证 16 行完整
-OCR。性能摘要明确区分 Scalar、Vector 和 Vector REC×4，并报告 DET/CLS/REC
+OCR。性能摘要明确区分 Scalar、Vector 和 Vector CLS×4/REC×4，并报告 DET/CLS/REC
 阶段耗时、模型常驻堆、GC 后存活堆、峰值堆和 GC 次数。不同 GitHub Runner
 之间波动较大，应只比较同一环境、同一参数和相同提交附近的结果。schema 3
 在关闭算子探针时采集计时与内存数据，再额外运行一次已预热 OCR 生成全线程算子

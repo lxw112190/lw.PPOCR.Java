@@ -29,6 +29,7 @@ public final class VectorFullOcrGoldenTest {
         copyResource(dictionary, FullOcrGoldenFixture.ROOT + "rec/ppocr_keys.txt");
         PaddleOcrOptions options = PaddleOcrOptions.builder()
                 .setDetectionMaximumSideLength(320)
+                .setClassificationParallelism(4)
                 .setRecognitionParallelism(4)
                 .build();
         try (PaddleOcr ocr = PaddleOcr.load(detector, classifier, recognizer,

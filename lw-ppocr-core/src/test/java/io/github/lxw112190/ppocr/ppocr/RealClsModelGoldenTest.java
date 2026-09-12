@@ -2,10 +2,13 @@ package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.golden.GoldenTestSupport;
 import io.github.lxw112190.ppocr.image.BgrImage;
+import io.github.lxw112190.ppocr.image.BgrTransforms;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -30,6 +33,22 @@ public final class RealClsModelGoldenTest {
             Assert.assertEquals(0, result.getOrientationDegrees());
             Assert.assertEquals(160, result.getResizedWidth());
             Assert.assertEquals(0.99998593f, result.getScore(), 2.0e-4f);
+
+            BgrImage rotated = BgrTransforms.rotate180(source);
+            List<BgrImage> inputs = Arrays.asList(source, rotated, rotated, source);
+            List<ClsClassificationResult> expected = Arrays.asList(
+                    classifier.classify(source), classifier.classify(rotated),
+                    classifier.classify(rotated), classifier.classify(source));
+            List<ClsClassificationResult> parallel = classifier.classifyAll(inputs, 4);
+            Assert.assertEquals(4, parallel.size());
+            for (int i = 0; i < parallel.size(); i++) {
+                Assert.assertEquals(expected.get(i).getLabel(), parallel.get(i).getLabel());
+                Assert.assertEquals(expected.get(i).getOrientationDegrees(),
+                        parallel.get(i).getOrientationDegrees());
+                Assert.assertEquals(expected.get(i).getResizedWidth(),
+                        parallel.get(i).getResizedWidth());
+                Assert.assertEquals(expected.get(i).getScore(), parallel.get(i).getScore(), 0.0f);
+            }
         }
     }
 

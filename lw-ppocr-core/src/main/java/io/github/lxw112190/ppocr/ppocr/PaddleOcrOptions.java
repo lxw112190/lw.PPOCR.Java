@@ -12,13 +12,15 @@ public final class PaddleOcrOptions {
     private final int maxDetectionCandidates;
     private final float classifierThreshold;
     private final int readingOrder;
+    private final int classificationParallelism;
     private final int recognitionParallelism;
     private final int detectionMaximumSideLength;
 
     private PaddleOcrOptions(float detectionBitmapThreshold, float detectionBoxThreshold,
                              float detectionUnclipRatio, boolean detectionDilation,
                              int maxDetectionCandidates, float classifierThreshold,
-                             int readingOrder, int recognitionParallelism,
+                             int readingOrder, int classificationParallelism,
+                             int recognitionParallelism,
                              int detectionMaximumSideLength) {
         if (!Float.isFinite(detectionBitmapThreshold) || detectionBitmapThreshold < 0.0f ||
                 detectionBitmapThreshold > 1.0f || !Float.isFinite(detectionBoxThreshold) ||
@@ -28,6 +30,7 @@ public final class PaddleOcrOptions {
                 maxDetectionCandidates <= 0 || !Float.isFinite(classifierThreshold) ||
                 classifierThreshold < 0.0f || classifierThreshold > 1.0f ||
                 readingOrder < ReadingOrder.HORIZONTAL_LTR || readingOrder > ReadingOrder.VERTICAL_LTR ||
+                classificationParallelism <= 0 || classificationParallelism > 64 ||
                 recognitionParallelism <= 0 || recognitionParallelism > 64 ||
                 detectionMaximumSideLength < 32) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "OCR options are invalid");
@@ -39,6 +42,7 @@ public final class PaddleOcrOptions {
         this.maxDetectionCandidates = maxDetectionCandidates;
         this.classifierThreshold = classifierThreshold;
         this.readingOrder = readingOrder;
+        this.classificationParallelism = classificationParallelism;
         this.recognitionParallelism = recognitionParallelism;
         this.detectionMaximumSideLength = detectionMaximumSideLength;
     }
@@ -58,6 +62,7 @@ public final class PaddleOcrOptions {
     public int getMaxDetectionCandidates() { return maxDetectionCandidates; }
     public float getClassifierThreshold() { return classifierThreshold; }
     public int getReadingOrder() { return readingOrder; }
+    public int getClassificationParallelism() { return classificationParallelism; }
     public int getRecognitionParallelism() { return recognitionParallelism; }
     public int getDetectionMaximumSideLength() { return detectionMaximumSideLength; }
 
@@ -69,6 +74,7 @@ public final class PaddleOcrOptions {
         private int maxDetectionCandidates = 1000;
         private float classifierThreshold = 0.9f;
         private int readingOrder = ReadingOrder.HORIZONTAL_LTR;
+        private int classificationParallelism = 1;
         private int recognitionParallelism = 1;
         private int detectionMaximumSideLength = 960;
 
@@ -107,6 +113,12 @@ public final class PaddleOcrOptions {
             return this;
         }
 
+        /** Sets the maximum number of fixed-shape CLS evaluations run concurrently. */
+        public Builder setClassificationParallelism(int value) {
+            classificationParallelism = value;
+            return this;
+        }
+
         /** Sets the maximum number of REC width groups evaluated concurrently. */
         public Builder setRecognitionParallelism(int value) {
             recognitionParallelism = value;
@@ -122,7 +134,8 @@ public final class PaddleOcrOptions {
         public PaddleOcrOptions build() {
             return new PaddleOcrOptions(detectionBitmapThreshold, detectionBoxThreshold,
                     detectionUnclipRatio, detectionDilation, maxDetectionCandidates,
-                    classifierThreshold, readingOrder, recognitionParallelism,
+                    classifierThreshold, readingOrder, classificationParallelism,
+                    recognitionParallelism,
                     detectionMaximumSideLength);
         }
     }

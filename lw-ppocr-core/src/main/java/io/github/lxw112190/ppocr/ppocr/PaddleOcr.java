@@ -91,22 +91,28 @@ public final class PaddleOcr implements AutoCloseable {
                 options.getMaxDetectionCandidates());
         List<OcrLineResult> lines = new ArrayList<OcrLineResult>(boxes.size());
         List<BgrImage> crops = new ArrayList<BgrImage>(boxes.size());
-        List<ClsClassificationResult> classifications = new ArrayList<ClsClassificationResult>(boxes.size());
         List<Boolean> rotations = new ArrayList<Boolean>(boxes.size());
         for (int i = 0; i < boxes.size(); i++) {
-            DetectionBox box = boxes.get(i);
-            BgrImage crop = cropper.crop(source, box, i);
-            ClsClassificationResult classification = null;
+            crops.add(cropper.crop(source, boxes.get(i), i));
+        }
+        List<ClsClassificationResult> classifications;
+        if (classifier == null) {
+            classifications = new ArrayList<ClsClassificationResult>(boxes.size());
+            for (int i = 0; i < boxes.size(); i++) classifications.add(null);
+        } else {
+            classifications = classifier.classifyAll(crops,
+                    options.getClassificationParallelism());
+        }
+        for (int i = 0; i < boxes.size(); i++) {
+            BgrImage crop = crops.get(i);
+            ClsClassificationResult classification = classifications.get(i);
             boolean rotated = false;
-            if (classifier != null) {
-                classification = classifier.classify(crop);
-                if (classification.requiresRotation(options.getClassifierThreshold())) {
-                    crop = BgrTransforms.rotate180(crop);
-                    rotated = true;
-                }
+            if (classification != null &&
+                    classification.requiresRotation(options.getClassifierThreshold())) {
+                crop = BgrTransforms.rotate180(crop);
+                crops.set(i, crop);
+                rotated = true;
             }
-            crops.add(crop);
-            classifications.add(classification);
             rotations.add(rotated);
         }
         List<RecRecognitionResult> recognitions = recognizer.recognizeAll(

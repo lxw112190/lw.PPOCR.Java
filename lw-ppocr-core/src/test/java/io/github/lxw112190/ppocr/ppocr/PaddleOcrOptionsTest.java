@@ -14,6 +14,7 @@ public class PaddleOcrOptionsTest {
         Assert.assertEquals(1000, options.getMaxDetectionCandidates());
         Assert.assertEquals(0.9f, options.getClassifierThreshold(), 0.0f);
         Assert.assertEquals(ReadingOrder.HORIZONTAL_LTR, options.getReadingOrder());
+        Assert.assertEquals(1, options.getClassificationParallelism());
         Assert.assertEquals(1, options.getRecognitionParallelism());
         Assert.assertEquals(960, options.getDetectionMaximumSideLength());
     }
@@ -28,6 +29,7 @@ public class PaddleOcrOptionsTest {
                 .setMaxDetectionCandidates(42)
                 .setClassifierThreshold(0.8f)
                 .setReadingOrder(ReadingOrder.VERTICAL_RTL)
+                .setClassificationParallelism(3)
                 .setRecognitionParallelism(4)
                 .setDetectionMaximumSideLength(320);
         PaddleOcrOptions first = builder.build();
@@ -36,6 +38,7 @@ public class PaddleOcrOptionsTest {
         Assert.assertEquals(84, second.getMaxDetectionCandidates());
         Assert.assertTrue(first.isDetectionDilation());
         Assert.assertEquals(ReadingOrder.VERTICAL_RTL, first.getReadingOrder());
+        Assert.assertEquals(3, first.getClassificationParallelism());
         Assert.assertEquals(4, first.getRecognitionParallelism());
         Assert.assertEquals(320, first.getDetectionMaximumSideLength());
     }
@@ -53,6 +56,11 @@ public class PaddleOcrOptionsTest {
     @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)
     public void rejectsInvalidRecognitionParallelism() {
         PaddleOcrOptions.builder().setRecognitionParallelism(0).build();
+    }
+
+    @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)
+    public void rejectsInvalidClassificationParallelism() {
+        PaddleOcrOptions.builder().setClassificationParallelism(65).build();
     }
 
     @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)

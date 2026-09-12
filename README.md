@@ -30,11 +30,13 @@ decoding, orientation correction, reading-order sorting, and the public
 immutable `PaddleOcrOptions`; concurrent callers can use `OcrWorkerPool` with
 independent sessions.
 
-REC can optionally evaluate different dynamic-width groups concurrently while
-preserving input and reading order. The default parallelism is one; applications
-opt in through `PaddleOcrOptions.setRecognitionParallelism`. Parallel execution
-queues the largest estimated width-group workloads first so idle workers can
-immediately take the next group without creating duplicate sessions.
+CLS and REC expose independent optional parallelism while preserving input and
+reading order. Applications opt in through
+`PaddleOcrOptions.setClassificationParallelism` and `setRecognitionParallelism`;
+both default to one. CLS distributes fixed-shape line evaluations over sessions
+that share decoded model constants. REC queues the largest estimated width-group
+workloads first so idle workers can immediately take the next group without
+creating duplicate sessions.
 
 The optional JDK 25 Vector API backend accelerates all Conv configurations used
 by the Tiny models, the DET 2x upsampling ConvTranspose path, MatMul, reductions,
@@ -67,7 +69,7 @@ lw-ppocr-benchmark/  Dependency-free loader benchmark harness
 GitHub Actions is the build authority for this repository. It compiles and
 tests on JDK 25 across Linux, Windows, and macOS. The Linux performance job
 reports loading, DB postprocess, preprocessing, model workload, and complete
-OCR results for Scalar, Vector, and Vector with four REC width workers. Full OCR
+OCR results for Scalar, Vector, and Vector with four CLS and REC workers. Full OCR
 JSON separates stage timing, GC activity, model memory, retained heap, and
 transient heap. Schema 3 measures wall time without the operator profiler and
 runs one separate warmed diagnostic invocation; parallel operator time is the
