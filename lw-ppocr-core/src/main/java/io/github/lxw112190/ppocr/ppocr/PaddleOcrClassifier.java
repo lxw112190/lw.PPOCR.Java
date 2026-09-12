@@ -19,6 +19,7 @@ public final class PaddleOcrClassifier implements AutoCloseable {
     private final LwmModel model;
     private final InferenceSession session;
     private final float[] probabilities;
+    private final ClsPreprocess.Workspace preprocess;
     private boolean closed;
 
     public PaddleOcrClassifier(LwmModel model) {
@@ -33,6 +34,7 @@ public final class PaddleOcrClassifier implements AutoCloseable {
             throw e;
         }
         this.probabilities = new float[2];
+        this.preprocess = new ClsPreprocess.Workspace();
     }
 
     public static PaddleOcrClassifier load(Path path) {
@@ -47,9 +49,9 @@ public final class PaddleOcrClassifier implements AutoCloseable {
 
     public ClsClassificationResult classify(BgrImage source) {
         ensureOpen();
-        ClsPreprocessResult preprocessed = ClsPreprocess.resizeNormalize(source);
-        session.run(preprocessed.getChw(), probabilities);
-        return ClsPostprocess.decode(probabilities, preprocessed.getResizedWidth());
+        preprocess.resizeNormalize(source);
+        session.run(preprocess.getChw(), probabilities);
+        return ClsPostprocess.decode(probabilities, preprocess.getResizedWidth());
     }
 
     @Override

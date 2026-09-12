@@ -53,6 +53,60 @@ public final class ClsPreprocess {
         return new ClsPreprocessResult(output, resizedWidth);
     }
 
+    /** Reusable CLS preprocessing buffer; callers must not invoke it concurrently. */
+    public static final class Workspace {
+        private final float[] output;
+        private int resizedWidth;
+
+        public Workspace() {
+            long plane = (long) INPUT_HEIGHT * INPUT_WIDTH;
+            this.output = new float[(int) (3L * plane)];
+        }
+
+        public void resizeNormalize(BgrImage source) {
+            if (source == null) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "source image is required");
+            }
+            long scaledWidth = (long) INPUT_HEIGHT * source.width();
+            resizedWidth = (int) Math.min(INPUT_WIDTH,
+                    (scaledWidth + source.height() - 1L) / source.height());
+            long plane = (long) INPUT_HEIGHT * INPUT_WIDTH;
+            java.util.Arrays.fill(output, -1.0f);
+            byte[] pixels = source.pixels();
+            for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {
+                double sourceY = ((double) outputY + 0.5) * source.height() / INPUT_HEIGHT - 0.5;
+                int sourceY0Raw = (int) Math.floor(sourceY);
+                int sourceY1Raw = sourceY0Raw + 1;
+                int sourceY0 = clamp(sourceY0Raw, source.height());
+                int sourceY1 = clamp(sourceY1Raw, source.height());
+                double weightY = sourceY - sourceY0Raw;
+                for (int outputX = 0; outputX < resizedWidth; outputX++) {
+                    double sourceX = ((double) outputX + 0.5) * source.width() / resizedWidth - 0.5;
+                    int sourceX0Raw = (int) Math.floor(sourceX);
+                    int sourceX1Raw = sourceX0Raw + 1;
+                    int sourceX0 = clamp(sourceX0Raw, source.width());
+                    int sourceX1 = clamp(sourceX1Raw, source.width());
+                    double weightX = sourceX - sourceX0Raw;
+                    for (int channel = 0; channel < 3; channel++) {
+                        double topLeft = pixels[sourceY0 * source.stride() + sourceX0 * 3 + channel] & 0xff;
+                        double topRight = pixels[sourceY0 * source.stride() + sourceX1 * 3 + channel] & 0xff;
+                        double bottomLeft = pixels[sourceY1 * source.stride() + sourceX0 * 3 + channel] & 0xff;
+                        double bottomRight = pixels[sourceY1 * source.stride() + sourceX1 * 3 + channel] & 0xff;
+                        double top = topLeft + (topRight - topLeft) * weightX;
+                        double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
+                        double value = top + (bottom - top) * weightY;
+                        int index = (int) (channel * plane + (long) outputY * INPUT_WIDTH + outputX);
+                        output[index] = (float) (value * NORMALIZE_SCALE - 1.0);
+                    }
+                }
+            }
+        }
+
+        public float[] getChw() { return output; }
+        public int getResizedWidth() { return resizedWidth; }
+    }
+
     private static int clamp(int coordinate, int limit) {
         if (coordinate < 0) return 0;
         if (coordinate >= limit) return limit - 1;

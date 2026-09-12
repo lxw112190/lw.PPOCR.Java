@@ -23,4 +23,20 @@ public final class ClsPreprocessTest {
                 output[2 * 80 * 160], 0.00001f);
         Assert.assertEquals(-1.0f, output[10], 0.00001f);
     }
+
+    @Test
+    public void reusableWorkspaceMatchesOneShotPreprocessAndClearsPadding() {
+        BgrImage source = new BgrImage(new byte[2 * 16 * 3], 2, 16, 6);
+        ClsPreprocessResult oneShot = ClsPreprocess.resizeNormalize(source);
+        ClsPreprocess.Workspace workspace = new ClsPreprocess.Workspace();
+        workspace.resizeNormalize(source);
+        Assert.assertEquals(oneShot.getResizedWidth(), workspace.getResizedWidth());
+        Assert.assertArrayEquals(oneShot.getChw(), workspace.getChw(), 0.0f);
+
+        byte[] bright = new byte[80 * 80 * 3];
+        java.util.Arrays.fill(bright, (byte) 255);
+        workspace.resizeNormalize(new BgrImage(bright, 80, 80, 240));
+        Assert.assertEquals(80, workspace.getResizedWidth());
+        Assert.assertEquals(1.0f, workspace.getChw()[80 * 160 + 20], 0.00001f);
+    }
 }
