@@ -38,4 +38,9 @@ public class PaddleOcrOptionsTest {
     public void rejectsInvalidThreshold() {
         PaddleOcrOptions.builder().setDetectionBoxThreshold(1.1f).build();
     }
+
+    @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)
+    public void rejectsExcessiveUnclipRatio() {
+        PaddleOcrOptions.builder().setDetectionUnclipRatio(10.1f).build();
+    }
 }

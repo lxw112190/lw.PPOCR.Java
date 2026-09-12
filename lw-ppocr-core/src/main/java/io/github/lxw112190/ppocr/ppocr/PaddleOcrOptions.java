@@ -21,6 +21,7 @@ public final class PaddleOcrOptions {
                 detectionBitmapThreshold > 1.0f || !Float.isFinite(detectionBoxThreshold) ||
                 detectionBoxThreshold < 0.0f || detectionBoxThreshold > 1.0f ||
                 !Float.isFinite(detectionUnclipRatio) || detectionUnclipRatio <= 0.0f ||
+                detectionUnclipRatio > 10.0f ||
                 maxDetectionCandidates <= 0 || !Float.isFinite(classifierThreshold) ||
                 classifierThreshold < 0.0f || classifierThreshold > 1.0f ||
                 readingOrder < ReadingOrder.HORIZONTAL_LTR || readingOrder > ReadingOrder.VERTICAL_LTR) {

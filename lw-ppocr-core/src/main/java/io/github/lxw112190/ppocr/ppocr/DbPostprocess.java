@@ -410,7 +410,7 @@ public final class DbPostprocess {
                 boxThreshold < 0.0f || boxThreshold > 1.0f ||
                 !Float.isFinite(widthRatio) || !Float.isFinite(heightRatio) ||
                 widthRatio <= 0.0f || heightRatio <= 0.0f || maxCandidates <= 0 ||
-                !Float.isFinite(unclipRatio) || unclipRatio <= 0.0f) {
+                !Float.isFinite(unclipRatio) || unclipRatio <= 0.0f || unclipRatio > 10.0f) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DB probability map or options are invalid");
         }
         for (float probability : probabilities) {
