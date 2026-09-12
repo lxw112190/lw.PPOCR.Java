@@ -2,6 +2,8 @@ package io.github.lxw112190.ppocr.runtime;
 
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
+import io.github.lxw112190.ppocr.model.OcrErrorCode;
+import io.github.lxw112190.ppocr.model.OcrException;
 import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -16,6 +18,24 @@ public final class InferenceSessionTest {
         float[] output = new float[4];
         session.run(new float[] {1, 2, 3, 4}, output);
         Assert.assertArrayEquals(new float[] {2, 4, 6, 8}, output, 0.0f);
+    }
+
+    @Test
+    public void reportsZeroInputNodeAsUnsupportedModel() {
+        byte[] bytes = addModel();
+        ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putShort(418, (short) 0);
+        buffer.putInt(428, 0);
+        buffer.putLong(128, 0);
+        buffer.putLong(128, fnv1a(bytes));
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(bytes));
+        InferenceSession session = new InferenceSession(model);
+        try {
+            session.run(new float[] {1, 2, 3, 4}, new float[4]);
+            Assert.fail("expected unsupported model");
+        } catch (OcrException e) {
+            Assert.assertEquals(OcrErrorCode.UNSUPPORTED_OPERATOR, e.getCode());
+        }
     }
 
     private static byte[] addModel() {

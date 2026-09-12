@@ -60,6 +60,9 @@ public final class InferenceSession implements AutoCloseable {
     private void executeNode(NodeInfo node, float[] storage) {
         int[] inputs = node.getInputs();
         int[] outputs = node.getOutputs();
+        if (inputs.length == 0) {
+            throw unsupported(node, "node has no inputs");
+        }
         if (outputs.length != 1) {
             throw unsupported(node, "multiple outputs");
         }
