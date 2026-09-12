@@ -90,8 +90,10 @@ public final class DbPostprocess {
                     orderClockwise(corners);
                     float[] restored = new float[8];
                     for (int point = 0; point < 4; point++) {
-                        restored[point * 2] = (float) (corners[point * 2] / widthRatio);
-                        restored[point * 2 + 1] = (float) (corners[point * 2 + 1] / heightRatio);
+                        restored[point * 2] = (float) (clamp(corners[point * 2], width - 1.0)
+                                / widthRatio);
+                        restored[point * 2 + 1] = (float) (clamp(corners[point * 2 + 1], height - 1.0)
+                                / heightRatio);
                     }
                     boxes.add(new DetectionBox(restored, score));
                 }
@@ -247,6 +249,11 @@ public final class DbPostprocess {
                                        double[] points, int offset) {
         points[offset] = projectionU * rectangle.ux + projectionV * rectangle.vx;
         points[offset + 1] = projectionU * rectangle.uy + projectionV * rectangle.vy;
+    }
+
+    private static double clamp(double value, double maximum) {
+        if (value < 0.0) return 0.0;
+        return value > maximum ? maximum : value;
     }
 
     private static void orderClockwise(double[] points) {
