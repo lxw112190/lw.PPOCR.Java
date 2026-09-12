@@ -19,15 +19,26 @@ public final class DbPostprocess {
                                             float bitmapThreshold, float boxThreshold,
                                             float widthRatio, float heightRatio,
                                             int maxCandidates) {
+        return decode(probabilities, width, height, bitmapThreshold, boxThreshold,
+                widthRatio, heightRatio, maxCandidates, false);
+    }
+
+    public static List<DetectionBox> decode(float[] probabilities, int width, int height,
+                                            float bitmapThreshold, float boxThreshold,
+                                            float widthRatio, float heightRatio,
+                                            int maxCandidates, boolean useDilation) {
         validate(probabilities, width, height, bitmapThreshold, boxThreshold,
                 widthRatio, heightRatio, maxCandidates);
+        boolean[] bitmap = new boolean[probabilities.length];
+        for (int i = 0; i < probabilities.length; i++) bitmap[i] = probabilities[i] > bitmapThreshold;
+        if (useDilation) dilate2x2(bitmap, width, height);
         boolean[] visited = new boolean[probabilities.length];
         int[] queue = new int[probabilities.length];
         List<DetectionBox> boxes = new ArrayList<DetectionBox>();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int start = y * width + x;
-                if (visited[start] || probabilities[start] < bitmapThreshold) continue;
+                if (visited[start] || !bitmap[start]) continue;
                 visited[start] = true;
                 int head = 0;
                 int tail = 0;
@@ -55,7 +66,7 @@ public final class DbPostprocess {
                             int neighborY = currentY + deltaY;
                             if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height) continue;
                             int neighbor = neighborY * width + neighborX;
-                            if (!visited[neighbor] && probabilities[neighbor] >= bitmapThreshold) {
+                            if (!visited[neighbor] && bitmap[neighbor]) {
                                 visited[neighbor] = true;
                                 queue[tail++] = neighbor;
                             }
@@ -77,6 +88,21 @@ public final class DbPostprocess {
             }
         }
         return Collections.unmodifiableList(boxes);
+    }
+
+    private static void dilate2x2(boolean[] bitmap, int width, int height) {
+        boolean[] dilated = new boolean[bitmap.length];
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                int index = y * width + x;
+                if (!bitmap[index]) continue;
+                dilated[index] = true;
+                if (x + 1 < width) dilated[index + 1] = true;
+                if (y + 1 < height) dilated[index + width] = true;
+                if (x + 1 < width && y + 1 < height) dilated[index + width + 1] = true;
+            }
+        }
+        System.arraycopy(dilated, 0, bitmap, 0, bitmap.length);
     }
 
     private static void validate(float[] probabilities, int width, int height,

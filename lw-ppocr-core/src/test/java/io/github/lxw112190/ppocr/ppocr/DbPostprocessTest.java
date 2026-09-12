@@ -40,4 +40,13 @@ public final class DbPostprocessTest {
             Assert.assertEquals(OcrErrorCode.RESOURCE_LIMIT, e.getCode());
         }
     }
+
+    @Test
+    public void optionalTwoByTwoDilationJoinsForwardNeighbors() {
+        List<DetectionBox> boxes = DbPostprocess.decode(new float[] {0.9f, 0.0f, 0.9f},
+                3, 1, 0.5f, 0.5f, 1.0f, 1.0f, 1, true);
+        Assert.assertEquals(1, boxes.size());
+        Assert.assertArrayEquals(new float[] {0, 0, 2, 0, 2, 0, 0, 0},
+                boxes.get(0).getPoints(), 0.0f);
+    }
 }
