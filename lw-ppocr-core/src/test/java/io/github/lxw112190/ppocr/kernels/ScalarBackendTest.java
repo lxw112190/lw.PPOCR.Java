@@ -1,5 +1,7 @@
 package io.github.lxw112190.ppocr.kernels;
 
+import io.github.lxw112190.ppocr.runtime.BinaryPlan;
+import io.github.lxw112190.ppocr.runtime.TensorShape;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -56,6 +58,21 @@ public final class ScalarBackendTest {
                 new float[] {7, 8, 9, 10, 11, 12}, 0,
                 output, 0, 2, 3, 2);
         Assert.assertArrayEquals(new float[] {58, 64, 139, 154}, output, 0.0f);
+    }
+
+    @Test
+    public void computesLeftAndRightScalarBroadcasts() {
+        TensorShape vector = new TensorShape(4);
+        TensorShape scalar = new TensorShape(1);
+        float[] output = new float[4];
+        backend.binary(BinaryOp.MUL, new float[] {1, 2, 3, 4}, 0,
+                new float[] {2}, 0, output, 0, new BinaryPlan(vector, scalar, vector));
+        Assert.assertArrayEquals(new float[] {2, 4, 6, 8}, output, 0.0f);
+
+        backend.binary(BinaryOp.SUB, new float[] {10}, 0,
+                new float[] {1, 2, 3, 4}, 0, output, 0,
+                new BinaryPlan(scalar, vector, vector));
+        Assert.assertArrayEquals(new float[] {9, 8, 7, 6}, output, 0.0f);
     }
 
     @Test

@@ -44,6 +44,20 @@ public final class ScalarBackend implements KernelBackend {
             }
             return;
         }
+        if (plan.getVariant() == BinaryVariant.RIGHT_SCALAR) {
+            float scalar = right[rightOffset];
+            for (int i = 0; i < plan.getOutputLength(); i++) {
+                output[outputOffset + i] = applyBinary(operation, left[leftOffset + i], scalar);
+            }
+            return;
+        }
+        if (plan.getVariant() == BinaryVariant.LEFT_SCALAR) {
+            float scalar = left[leftOffset];
+            for (int i = 0; i < plan.getOutputLength(); i++) {
+                output[outputOffset + i] = applyBinary(operation, scalar, right[rightOffset + i]);
+            }
+            return;
+        }
         for (int linear = 0; linear < plan.getOutputLength(); linear++) {
             int remainder = linear;
             int leftIndex = 0;
@@ -312,7 +326,70 @@ public final class ScalarBackend implements KernelBackend {
         int outputPlane = outputHeight * outputWidth;
         for (int n = 0; n < batch; n++) {
             for (int group = 0; group < groups; group++) {
-                for (int oc = 0; oc < outputChannelsPerGroup; oc++) {
+                int oc = 0;
+                for (; oc + 3 < outputChannelsPerGroup; oc += 4) {
+                    int channel0 = group * outputChannelsPerGroup + oc;
+                    int channel1 = channel0 + 1;
+                    int channel2 = channel0 + 2;
+                    int channel3 = channel0 + 3;
+                    int output0 = outputOffset + (n * outputChannels + channel0) * outputPlane;
+                    int output1 = output0 + outputPlane;
+                    int output2 = output1 + outputPlane;
+                    int output3 = output2 + outputPlane;
+                    Arrays.fill(output, output0, output0 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + channel0]);
+                    Arrays.fill(output, output1, output1 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + channel1]);
+                    Arrays.fill(output, output2, output2 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + channel2]);
+                    Arrays.fill(output, output3, output3 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + channel3]);
+                    int weight0 = weightOffset + channel0 * inputChannelsPerGroup;
+                    int weight1 = weightOffset + channel1 * inputChannelsPerGroup;
+                    int weight2 = weightOffset + channel2 * inputChannelsPerGroup;
+                    int weight3 = weightOffset + channel3 * inputChannelsPerGroup;
+                    for (int ic = 0; ic < inputChannelsPerGroup; ic++) {
+                        int inputChannel = group * inputChannelsPerGroup + ic;
+                        int inputBase = inputOffset + (n * channels + inputChannel) * inputPlane;
+                        float value0 = weights[weight0 + ic];
+                        float value1 = weights[weight1 + ic];
+                        float value2 = weights[weight2 + ic];
+                        float value3 = weights[weight3 + ic];
+                        for (int oh = 0; oh < outputHeight; oh++) {
+                            int ih = oh * strideHeight - padTop;
+                            if (ih < 0 || ih >= height) continue;
+                            int inputRow = inputBase + ih * width;
+                            int row0 = output0 + oh * outputWidth;
+                            int row1 = output1 + oh * outputWidth;
+                            int row2 = output2 + oh * outputWidth;
+                            int row3 = output3 + oh * outputWidth;
+                            if (strideWidth == 1) {
+                                int start = Math.max(0, padLeft);
+                                int end = Math.min(outputWidth, width + padLeft);
+                                int source = inputRow + start - padLeft;
+                                for (int ow = start; ow < end; ow++) {
+                                    float sample = input[source++];
+                                    output[row0 + ow] += sample * value0;
+                                    output[row1 + ow] += sample * value1;
+                                    output[row2 + ow] += sample * value2;
+                                    output[row3 + ow] += sample * value3;
+                                }
+                            } else {
+                                for (int ow = 0; ow < outputWidth; ow++) {
+                                    int iw = ow * strideWidth - padLeft;
+                                    if (iw >= 0 && iw < width) {
+                                        float sample = input[inputRow + iw];
+                                        output[row0 + ow] += sample * value0;
+                                        output[row1 + ow] += sample * value1;
+                                        output[row2 + ow] += sample * value2;
+                                        output[row3 + ow] += sample * value3;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                for (; oc < outputChannelsPerGroup; oc++) {
                     int outputChannel = group * outputChannelsPerGroup + oc;
                     int outputBase = outputOffset + (n * outputChannels + outputChannel) * outputPlane;
                     float initial = bias == null ? 0.0f : bias[biasOffset + outputChannel];
