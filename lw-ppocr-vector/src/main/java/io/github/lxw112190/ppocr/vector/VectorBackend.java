@@ -14,6 +14,7 @@ import jdk.incubator.vector.VectorSpecies;
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
 public final class VectorBackend implements KernelBackend {
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+    private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
     private final ScalarBackend scalar = new ScalarBackend();
 
     @Override
@@ -368,10 +369,84 @@ public final class VectorBackend implements KernelBackend {
                     padTop, padLeft, groups, outputHeight, outputWidth);
             return;
         }
+        if (strideWidth == 2) {
+            generalStrideTwo(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                    output, outputOffset, batch, channels, height, width, outputChannels,
+                    kernelHeight, kernelWidth, strideHeight, dilationHeight, dilationWidth,
+                    padTop, padLeft, groups, outputHeight, outputWidth);
+            return;
+        }
         scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset, output, outputOffset,
                 batch, channels, height, width, outputChannels, kernelHeight, kernelWidth,
                 strideHeight, strideWidth, dilationHeight, dilationWidth, padTop, padLeft,
                 padBottom, padRight, groups, outputHeight, outputWidth);
+    }
+
+    private static void generalStrideTwo(float[] input, int inputOffset, float[] weights,
+                                         int weightOffset, float[] bias, int biasOffset,
+                                         float[] output, int outputOffset, int batch, int channels,
+                                         int height, int width, int outputChannels, int kernelHeight,
+                                         int kernelWidth, int strideHeight, int dilationHeight,
+                                         int dilationWidth, int padTop, int padLeft, int groups,
+                                         int outputHeight, int outputWidth) {
+        int inputChannelsPerGroup = channels / groups;
+        int outputChannelsPerGroup = outputChannels / groups;
+        int inputPlane = height * width;
+        int outputPlane = outputHeight * outputWidth;
+        for (int n = 0; n < batch; n++) {
+            for (int group = 0; group < groups; group++) {
+                for (int oc = 0; oc < outputChannelsPerGroup; oc++) {
+                    int outputChannel = group * outputChannelsPerGroup + oc;
+                    int outputBase = outputOffset + (n * outputChannels + outputChannel) * outputPlane;
+                    Arrays.fill(output, outputBase, outputBase + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel]);
+                    for (int ic = 0; ic < inputChannelsPerGroup; ic++) {
+                        int inputChannel = group * inputChannelsPerGroup + ic;
+                        int inputBase = inputOffset + (n * channels + inputChannel) * inputPlane;
+                        int weightBase = weightOffset +
+                                (outputChannel * inputChannelsPerGroup + ic) * kernelHeight * kernelWidth;
+                        for (int kh = 0; kh < kernelHeight; kh++) {
+                            for (int kw = 0; kw < kernelWidth; kw++) {
+                                float weight = weights[weightBase + kh * kernelWidth + kw];
+                                int shift = padLeft - kw * dilationWidth;
+                                int start = Math.max(0, ceilDiv(shift, 2));
+                                int end = Math.min(outputWidth, ceilDiv(width + shift, 2));
+                                int vectorEnd = start + SPECIES.loopBound(Math.max(0, end - start));
+                                for (int oh = 0; oh < outputHeight; oh++) {
+                                    int ih = oh * strideHeight - padTop + kh * dilationHeight;
+                                    if (ih < 0 || ih >= height) continue;
+                                    int source = inputBase + ih * width + start * 2 - shift;
+                                    int destination = outputBase + oh * outputWidth;
+                                    int ow = start;
+                                    for (; ow < vectorEnd; ow += SPECIES.length()) {
+                                        FloatVector result = FloatVector.fromArray(
+                                                SPECIES, output, destination + ow)
+                                                .add(FloatVector.fromArray(SPECIES, input, source,
+                                                        STRIDE_TWO_INDEXES, 0).mul(weight));
+                                        result.intoArray(output, destination + ow);
+                                        source += SPECIES.length() * 2;
+                                    }
+                                    for (; ow < end; ow++) {
+                                        output[destination + ow] += input[source] * weight;
+                                        source += 2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static int ceilDiv(int value, int divisor) {
+        return -Math.floorDiv(-value, divisor);
+    }
+
+    private static int[] strideIndexes(int stride) {
+        int[] indexes = new int[SPECIES.length()];
+        for (int lane = 0; lane < indexes.length; lane++) indexes[lane] = lane * stride;
+        return indexes;
     }
 
     private static void generalStrideOne(float[] input, int inputOffset, float[] weights,

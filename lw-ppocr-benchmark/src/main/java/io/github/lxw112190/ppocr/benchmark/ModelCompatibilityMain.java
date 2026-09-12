@@ -52,6 +52,10 @@ public final class ModelCompatibilityMain {
             long pointwiseMacs = 0L;
             long depthwiseMacs = 0L;
             long generalMacs = 0L;
+            int vectorCovered = 0;
+            int scalarFallback = 0;
+            long vectorCoveredMacs = 0L;
+            long scalarFallbackMacs = 0L;
             List<NodeInfo> nodes = model.getNodes();
             for (int nodeIndex = 0; nodeIndex < nodes.size(); nodeIndex++) {
                 NodeInfo node = nodes.get(nodeIndex);
@@ -67,8 +71,17 @@ public final class ModelCompatibilityMain {
                 int groups = parameters.getInt(4);
                 int kernelHeight = parameters.getInt(8);
                 int kernelWidth = parameters.getInt(12);
+                int strideWidth = parameters.getInt(20);
                 long macs = Math.multiplyExact(output.getElementCount(),
                         (long) weights.get(1) * kernelHeight * kernelWidth);
+                boolean covered = strideWidth == 1 || strideWidth == 2;
+                if (covered) {
+                    vectorCovered++;
+                    vectorCoveredMacs += macs;
+                } else {
+                    scalarFallback++;
+                    scalarFallbackMacs += macs;
+                }
                 if (kernelHeight == 1 && kernelWidth == 1) {
                     pointwise++;
                     pointwiseMacs += macs;
@@ -95,6 +108,10 @@ public final class ModelCompatibilityMain {
                     .append(",\"pointwise_macs\":").append(pointwiseMacs)
                     .append(",\"depthwise_macs\":").append(depthwiseMacs)
                     .append(",\"general_macs\":").append(generalMacs)
+                    .append(",\"vector_covered\":").append(vectorCovered)
+                    .append(",\"scalar_fallback\":").append(scalarFallback)
+                    .append(",\"vector_covered_macs\":").append(vectorCoveredMacs)
+                    .append(",\"scalar_fallback_macs\":").append(scalarFallbackMacs)
                     .append("},\"operators\":{");
             boolean first = true;
             for (OperatorType operator : OperatorType.values()) {
