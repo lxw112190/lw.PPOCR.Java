@@ -60,7 +60,8 @@ public final class ShapeResolver {
             }
             int outputIndex = outputs[0];
             if (resolved.get(outputIndex) == null) {
-                TensorShape inferred = inferNode(node, nodeIndex, inputValues, model.parameterData(nodeIndex));
+                TensorShape inferred = inferNode(node, nodeIndex, inputValues,
+                        model.getTensors().get(outputIndex).getDimensions(), model.parameterData(nodeIndex));
                 resolved.set(outputIndex, bindOutput(model.getTensors().get(outputIndex).getDimensions(), inferred,
                         outputIndex));
             }
@@ -99,7 +100,8 @@ public final class ShapeResolver {
         return inferred;
     }
 
-    private static TensorShape inferNode(NodeInfo node, int nodeIndex, TensorShape[] inputs, ByteBuffer parameters) {
+    private static TensorShape inferNode(NodeInfo node, int nodeIndex, TensorShape[] inputs,
+                                         int[] declaredOutput, ByteBuffer parameters) {
         OperatorType type = node.getOperator();
         switch (type) {
             case ADD:
@@ -108,17 +110,17 @@ public final class ShapeResolver {
             case DIV:
             case POW:
                 requireInputCount(inputs, 2, nodeIndex);
-                requireSameShape(inputs[0], inputs[1], nodeIndex);
-                return inputs[0];
+                return broadcastShape(inputs[0], inputs[1], nodeIndex);
             case RELU:
             case SIGMOID:
             case ERF:
             case HARD_SIGMOID:
             case SQRT:
-            case BATCH_NORMALIZATION:
             case SOFTMAX:
                 requireInputCount(inputs, 1, nodeIndex);
                 return inputs[0];
+            case BATCH_NORMALIZATION:
+                return batchNormalizationShape(inputs, parameters, nodeIndex);
             case REDUCE_MEAN:
                 requireInputCount(inputs, 1, nodeIndex);
                 return reduceMeanShape(inputs[0], parameters, nodeIndex);
@@ -148,15 +150,19 @@ public final class ShapeResolver {
                 return squeezeShape(inputs[0], parameters, nodeIndex, true);
             case RESHAPE:
                 requireInputCount(inputs, 1, nodeIndex);
-                return inputs[0];
+                return reshapeShape(inputs[0], declaredOutput, nodeIndex);
             case MAT_MUL:
                 requireInputCount(inputs, 2, nodeIndex);
-                requireRank(inputs[0], 2, nodeIndex);
                 requireRank(inputs[1], 2, nodeIndex);
-                if (inputs[0].get(1) != inputs[1].get(0)) {
+                if (inputs[0].getRank() != 2 && inputs[0].getRank() != 3) {
+                    throw invalid("MAT_MUL left input must have rank 2 or 3 at node " + nodeIndex);
+                }
+                int inner = inputs[0].get(inputs[0].getRank() - 1);
+                if (inner != inputs[1].get(0)) {
                     throw invalid("MAT_MUL dimensions do not match at node " + nodeIndex);
                 }
-                return new TensorShape(inputs[0].get(0), inputs[1].get(1));
+                if (inputs[0].getRank() == 2) return new TensorShape(inputs[0].get(0), inputs[1].get(1));
+                return new TensorShape(inputs[0].get(0), inputs[0].get(1), inputs[1].get(1));
             default:
                 throw invalid("shape inference is not implemented for " + type + " at node " + nodeIndex);
         }
@@ -194,6 +200,70 @@ public final class ShapeResolver {
             width = convOut(width, strideWidth, padLeft, dilationWidth, kernelWidth, nodeIndex);
         }
         return new TensorShape(input.get(0), channels, height, width);
+    }
+
+    private static TensorShape broadcastShape(TensorShape left, TensorShape right, int nodeIndex) {
+        int rank = Math.max(left.getRank(), right.getRank());
+        int[] output = new int[rank];
+        for (int axis = 0; axis < rank; axis++) {
+            int leftAxis = axis - (rank - left.getRank());
+            int rightAxis = axis - (rank - right.getRank());
+            int leftDimension = leftAxis < 0 ? 1 : left.get(leftAxis);
+            int rightDimension = rightAxis < 0 ? 1 : right.get(rightAxis);
+            if (leftDimension != rightDimension && leftDimension != 1 && rightDimension != 1) {
+                throw invalid("broadcast dimensions do not match at node " + nodeIndex);
+            }
+            output[axis] = Math.max(leftDimension, rightDimension);
+        }
+        return new TensorShape(output);
+    }
+
+    private static TensorShape batchNormalizationShape(TensorShape[] inputs, ByteBuffer parameters, int nodeIndex) {
+        requireInputCount(inputs, 5, nodeIndex);
+        requireMinimumRank(inputs[0], 2, nodeIndex);
+        int channels = inputs[0].get(1);
+        for (int i = 1; i < inputs.length; i++) {
+            requireRank(inputs[i], 1, nodeIndex);
+            if (inputs[i].get(0) != channels) {
+                throw invalid("BatchNormalization channel dimensions do not match at node " + nodeIndex);
+            }
+        }
+        float epsilon = parameters.getFloat(4);
+        if (!Float.isFinite(epsilon) || epsilon <= 0.0f) {
+            throw invalid("BatchNormalization epsilon is invalid at node " + nodeIndex);
+        }
+        return inputs[0];
+    }
+
+    private static TensorShape reshapeShape(TensorShape input, int[] declaredOutput, int nodeIndex) {
+        if (declaredOutput.length == 0) throw invalid("RESHAPE output rank is invalid at node " + nodeIndex);
+        int unknown = -1;
+        long known = 1;
+        int[] output = declaredOutput.clone();
+        for (int axis = 0; axis < output.length; axis++) {
+            if (output[axis] == -1) {
+                if (unknown >= 0) throw invalid("RESHAPE has multiple inferred dimensions at node " + nodeIndex);
+                unknown = axis;
+            } else if (output[axis] > 0) {
+                known *= output[axis];
+            } else {
+                throw invalid("RESHAPE dimension is invalid at node " + nodeIndex);
+            }
+        }
+        long inputElements = input.getElementCount();
+        if (known <= 0 || inputElements % known != 0) {
+            throw invalid("RESHAPE element count does not match at node " + nodeIndex);
+        }
+        if (unknown >= 0) {
+            long inferred = inputElements / known;
+            if (inferred <= 0 || inferred > Integer.MAX_VALUE) {
+                throw invalid("RESHAPE inferred dimension is invalid at node " + nodeIndex);
+            }
+            output[unknown] = (int) inferred;
+        } else if (known != inputElements) {
+            throw invalid("RESHAPE element count does not match at node " + nodeIndex);
+        }
+        return new TensorShape(output);
     }
 
     private static TensorShape poolShape(TensorShape input, ByteBuffer p, int nodeIndex) {
@@ -350,6 +420,10 @@ public final class ShapeResolver {
 
     private static void requireRank(TensorShape shape, int rank, int nodeIndex) {
         if (shape.getRank() != rank) throw invalid("unexpected tensor rank at node " + nodeIndex);
+    }
+
+    private static void requireMinimumRank(TensorShape shape, int rank, int nodeIndex) {
+        if (shape.getRank() < rank) throw invalid("unexpected tensor rank at node " + nodeIndex);
     }
 
     private static void requireSameRank(TensorShape left, TensorShape right, int nodeIndex) {

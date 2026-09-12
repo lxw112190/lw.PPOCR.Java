@@ -1,5 +1,7 @@
 package io.github.lxw112190.ppocr.kernels;
 
+import io.github.lxw112190.ppocr.runtime.BinaryPlan;
+
 /** Scalar/SIMD-independent kernel contract used by the graph executor. */
 public interface KernelBackend {
     void add(float[] left, int leftOffset, float[] right, int rightOffset,
@@ -13,6 +15,9 @@ public interface KernelBackend {
 
     void sub(float[] left, int leftOffset, float[] right, int rightOffset,
              float[] output, int outputOffset, int length);
+
+    void binary(BinaryOp operation, float[] left, int leftOffset, float[] right, int rightOffset,
+                float[] output, int outputOffset, BinaryPlan plan);
 
     void relu(float[] input, int inputOffset, float[] output, int outputOffset, int length);
 

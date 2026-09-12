@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/lxw112190/lw.PPOCR.C",
+  "source_commit": "9b31f1b",
+  "model": "rec.lwm",
+  "model_sha256": "59440146ae64068b70441f9c16b5878ccba21e75b41cb27220c8d9cc2d61e0ae",
+  "dictionary": "ppocr_keys.txt",
+  "dictionary_sha256": "46e1b34ef45684cb46d75ac76d355341fe7f0a2c38d6ee02e63ae6b3878019fc",
+  "input_pattern": "((index * 17) % 257 - 128) / 127.0",
+  "cases": [
+    {
+      "name": "width-7",
+      "input_shape": [1, 3, 48, 7],
+      "output_shape": [1, 1, 6906],
+      "output_file": "width-7.c-output.f32"
+    },
+    {
+      "name": "width-17",
+      "input_shape": [1, 3, 48, 17],
+      "output_shape": [1, 2, 6906],
+      "output_file": "width-17.c-output.f32"
+    }
+  ]
+}

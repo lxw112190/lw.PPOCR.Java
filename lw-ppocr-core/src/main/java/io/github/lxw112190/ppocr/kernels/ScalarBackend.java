@@ -1,5 +1,8 @@
 package io.github.lxw112190.ppocr.kernels;
 
+import io.github.lxw112190.ppocr.runtime.BinaryPlan;
+import io.github.lxw112190.ppocr.runtime.BinaryVariant;
+
 /** Readable reference kernels; optimized backends must preserve their semantics. */
 public final class ScalarBackend implements KernelBackend {
     @Override
@@ -24,6 +27,36 @@ public final class ScalarBackend implements KernelBackend {
     public void sub(float[] left, int leftOffset, float[] right, int rightOffset,
                     float[] output, int outputOffset, int length) {
         binary(left, leftOffset, right, rightOffset, output, outputOffset, length, 3);
+    }
+
+    @Override
+    public void binary(BinaryOp operation, float[] left, int leftOffset, float[] right, int rightOffset,
+                       float[] output, int outputOffset, BinaryPlan plan) {
+        if (plan.getVariant() == BinaryVariant.SAME_SHAPE) {
+            switch (operation) {
+                case ADD: add(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); break;
+                case MUL: mul(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); break;
+                case DIV: div(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); break;
+                case SUB: sub(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); break;
+                case POW: pow(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); break;
+                default: throw new AssertionError("unknown binary operation");
+            }
+            return;
+        }
+        for (int linear = 0; linear < plan.getOutputLength(); linear++) {
+            int remainder = linear;
+            int leftIndex = 0;
+            int rightIndex = 0;
+            for (int axis = plan.getRank() - 1; axis >= 0; axis--) {
+                int coordinate = remainder % plan.getOutputDimension(axis);
+                remainder /= plan.getOutputDimension(axis);
+                leftIndex += coordinate * plan.getLeftStride(axis);
+                rightIndex += coordinate * plan.getRightStride(axis);
+            }
+            float a = left[leftOffset + leftIndex];
+            float b = right[rightOffset + rightIndex];
+            output[outputOffset + linear] = applyBinary(operation, a, b);
+        }
     }
 
     @Override
@@ -394,6 +427,17 @@ public final class ScalarBackend implements KernelBackend {
                 case 3: output[outputOffset + i] = a - b; break;
                 default: throw new AssertionError("unknown scalar operation");
             }
+        }
+    }
+
+    private static float applyBinary(BinaryOp operation, float left, float right) {
+        switch (operation) {
+            case ADD: return left + right;
+            case MUL: return left * right;
+            case DIV: return left / right;
+            case SUB: return left - right;
+            case POW: return (float) Math.pow(left, right);
+            default: throw new AssertionError("unknown binary operation");
         }
     }
 }

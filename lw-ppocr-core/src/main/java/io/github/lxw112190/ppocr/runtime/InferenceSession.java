@@ -1,6 +1,7 @@
 package io.github.lxw112190.ppocr.runtime;
 
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
@@ -29,6 +30,7 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, int[]> sliceSteps;
     private final IdentityHashMap<NodeInfo, ConcatPlan> concatPlans;
     private final IdentityHashMap<NodeInfo, int[]> layoutAxes;
+    private final IdentityHashMap<NodeInfo, BinaryPlan> binaryPlans;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -59,12 +61,14 @@ public final class InferenceSession implements AutoCloseable {
         this.sliceSteps = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.concatPlans = new IdentityHashMap<NodeInfo, ConcatPlan>(nodes.size());
         this.layoutAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.binaryPlans = new IdentityHashMap<NodeInfo, BinaryPlan>(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
             NodeInfo node = nodes.get(i);
             this.nodeIndexes.put(node, i);
             this.nodeInputs.put(node, node.getInputs());
             this.nodeOutputs.put(node, node.getOutputs());
             this.parameters[i] = model.parameterData(i);
+            prepareBinary(node);
             prepareTranspose(node);
             prepareReduceMean(node);
             prepareSlice(node);
@@ -121,17 +125,7 @@ public final class InferenceSession implements AutoCloseable {
         int rightOffset;
         switch (node.getOperator()) {
             case ADD: case MUL: case DIV: case SUB:
-                if (inputs.length != 2 || execution.length(inputs[0]) != execution.length(inputs[1]) ||
-                        execution.length(inputs[0]) != execution.length(output)) {
-                    throw unsupported(node, "only equal-length binary tensors are supported");
-                }
-                right = data(inputs[1], storage);
-                rightOffset = offset(inputs[1]);
-                int length = execution.length(output);
-                if (node.getOperator() == OperatorType.ADD) backend.add(left, leftOffset, right, rightOffset, storage, offset(output), length);
-                else if (node.getOperator() == OperatorType.MUL) backend.mul(left, leftOffset, right, rightOffset, storage, offset(output), length);
-                else if (node.getOperator() == OperatorType.DIV) backend.div(left, leftOffset, right, rightOffset, storage, offset(output), length);
-                else backend.sub(left, leftOffset, right, rightOffset, storage, offset(output), length);
+                executeBinary(node, storage, output, binaryOperation(node.getOperator()));
                 break;
             case RELU:
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
@@ -159,11 +153,7 @@ public final class InferenceSession implements AutoCloseable {
                 backend.sqrt(left, leftOffset, storage, offset(output), execution.length(output));
                 break;
             case POW:
-                if (inputs.length != 2 || execution.length(inputs[0]) != execution.length(inputs[1]) ||
-                        execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "only equal-length Pow tensors are supported");
-                right = data(inputs[1], storage);
-                rightOffset = offset(inputs[1]);
-                backend.pow(left, leftOffset, right, rightOffset, storage, offset(output), execution.length(output));
+                executeBinary(node, storage, output, BinaryOp.POW);
                 break;
             case REDUCE_MEAN:
                 executeReduceMean(node, storage, output);
@@ -202,20 +192,72 @@ public final class InferenceSession implements AutoCloseable {
                 executeSoftmax(node, storage, output);
                 break;
             case MAT_MUL:
-                if (inputs.length != 2 || execution.shapes().get(inputs[0]).getRank() != 2 ||
-                        execution.shapes().get(inputs[1]).getRank() != 2 || execution.shapes().get(output).getRank() != 2) {
-                    throw unsupported(node, "MatMul requires three rank-2 tensors");
+                if (inputs.length != 2 || execution.shapes().get(inputs[1]).getRank() != 2) {
+                    throw unsupported(node, "MatMul requires two inputs and a rank-2 right input");
                 }
                 right = data(inputs[1], storage);
                 rightOffset = offset(inputs[1]);
                 TensorShape a = execution.shapes().get(inputs[0]);
                 TensorShape b = execution.shapes().get(inputs[1]);
                 TensorShape c = execution.shapes().get(output);
-                if (a.get(1) != b.get(0) || c.get(0) != a.get(0) || c.get(1) != b.get(1)) throw unsupported(node, "MatMul shape mismatch");
-                backend.matMul(left, leftOffset, right, rightOffset, storage, offset(output), a.get(0), a.get(1), b.get(1));
+                if (a.getRank() == 2 && c.getRank() == 2) {
+                    if (a.get(1) != b.get(0) || c.get(0) != a.get(0) || c.get(1) != b.get(1)) throw unsupported(node, "MatMul shape mismatch");
+                    backend.matMul(left, leftOffset, right, rightOffset, storage, offset(output), a.get(0), a.get(1), b.get(1));
+                } else if (a.getRank() == 3 && c.getRank() == 3 && a.get(2) == b.get(0) &&
+                        c.get(0) == a.get(0) && c.get(1) == a.get(1) && c.get(2) == b.get(1)) {
+                    int batch = a.get(0);
+                    int rows = a.get(1);
+                    int inner = a.get(2);
+                    int columns = b.get(1);
+                    int leftBatch = rows * inner;
+                    int outputBatch = rows * columns;
+                    for (int i = 0; i < batch; i++) {
+                        backend.matMul(left, leftOffset + i * leftBatch, right, rightOffset,
+                                storage, offset(output) + i * outputBatch, rows, inner, columns);
+                    }
+                } else {
+                    throw unsupported(node, "MatMul shape mismatch");
+                }
                 break;
             default:
                 throw unsupported(node, "operator not implemented by scalar executor");
+        }
+    }
+
+    private void executeBinary(NodeInfo node, float[] storage, int output, BinaryOp operation) {
+        int[] inputs = nodeInputs.get(node);
+        if (inputs.length != 2) throw unsupported(node, "binary operator requires two inputs");
+        BinaryPlan plan = binaryPlans.get(node);
+        if (plan == null) {
+            if (execution.length(inputs[0]) != execution.length(inputs[1]) ||
+                    execution.length(inputs[0]) != execution.length(output)) {
+                throw unsupported(node, "binary tensor shape mismatch");
+            }
+            plan = new BinaryPlan(execution.shapes().get(inputs[0]), execution.shapes().get(inputs[1]),
+                    execution.shapes().get(output));
+        }
+        backend.binary(operation, data(inputs[0], storage), offset(inputs[0]),
+                data(inputs[1], storage), offset(inputs[1]), storage, offset(output), plan);
+    }
+
+    private void prepareBinary(NodeInfo node) {
+        OperatorType operator = node.getOperator();
+        if (operator != OperatorType.ADD && operator != OperatorType.MUL && operator != OperatorType.DIV &&
+                operator != OperatorType.SUB && operator != OperatorType.POW) return;
+        int[] inputs = nodeInputs.get(node);
+        int[] outputs = nodeOutputs.get(node);
+        if (inputs.length != 2 || outputs.length != 1) return;
+        binaryPlans.put(node, new BinaryPlan(execution.shapes().get(inputs[0]), execution.shapes().get(inputs[1]),
+                execution.shapes().get(outputs[0])));
+    }
+
+    private static BinaryOp binaryOperation(OperatorType operator) {
+        switch (operator) {
+            case ADD: return BinaryOp.ADD;
+            case MUL: return BinaryOp.MUL;
+            case DIV: return BinaryOp.DIV;
+            case SUB: return BinaryOp.SUB;
+            default: throw new IllegalArgumentException("not a binary operator: " + operator);
         }
     }
 
