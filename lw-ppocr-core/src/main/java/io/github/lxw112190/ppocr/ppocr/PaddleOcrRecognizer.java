@@ -82,7 +82,8 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         }
         TensorInfo input = model.getTensors().get(model.getGraphInputs().get(0));
         int[] dimensions = input.getDimensions();
-        if (input.getDataType() != DataType.F32 || dimensions.length != 4 || dimensions[0] != 1 ||
+        if (input.getDataType() != DataType.F32 || dimensions.length != 4 ||
+                (dimensions[0] != -1 && dimensions[0] != 1) ||
                 dimensions[1] != 3 || dimensions[2] != RecPreprocess.INPUT_HEIGHT ||
                 (dimensions[3] != -1 && dimensions[3] <= 0)) {
             throw invalid("REC input must be FP32 [1,3,48,W]");

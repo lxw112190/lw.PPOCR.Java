@@ -8,8 +8,8 @@ public final class TensorShape {
     private final long elementCount;
 
     public TensorShape(int... dimensions) {
-        if (dimensions == null || dimensions.length == 0) {
-            throw new IllegalArgumentException("tensor shape must have at least one dimension");
+        if (dimensions == null) {
+            throw new IllegalArgumentException("tensor shape dimensions are required");
         }
         long count = 1;
         for (int dimension : dimensions) {
