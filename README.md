@@ -86,7 +86,9 @@ benchmark tracks its 2x2 stride-one MaxPool under the same policy. The DET
 stride-two benchmark covers both the `[1,3,320,320]` stem and the
 `[1,32,160,160]` downsample layer, each with 16 output channels. Two additional
 benchmarks cover the same-size 2x2 DET layers with `16 -> 8` and `8 -> 16`
-channels.
+channels. A same-run Scalar and Vector benchmark also covers the repeated 5x5
+depthwise CLS layer (`[1,64,5,80]`), so runner-wide load changes can be
+separated from backend speedups.
 Performance output is a development signal only; v0.x does not use it as a release gate.
 
 Prepared inference sessions, preprocessing arrays, DB geometry scratch space,

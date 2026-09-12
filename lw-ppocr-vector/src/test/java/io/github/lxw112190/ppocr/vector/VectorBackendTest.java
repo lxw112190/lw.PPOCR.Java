@@ -195,6 +195,42 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarFiveByFiveDepthwiseWithOffsetsAndSpatialTails() {
+        assertFiveByFiveDepthwiseMatchesScalar(2, 3, 5, 37, true);
+        assertFiveByFiveDepthwiseMatchesScalar(1, 5, 3, 43, false);
+    }
+
+    private void assertFiveByFiveDepthwiseMatchesScalar(int batch, int channels,
+                                                         int height, int width,
+                                                         boolean withBias) {
+        int inputOffset = 5;
+        int weightOffset = 7;
+        int biasOffset = 3;
+        int outputOffset = 11;
+        float[] input = values(inputOffset + batch * channels * height * width + 3,
+                0.001953125f, -0.375f);
+        float[] weights = values(weightOffset + channels * 25 + 3,
+                0.0078125f, -0.25f);
+        float[] bias = withBias
+                ? values(biasOffset + channels + 3, 0.03125f, -0.0625f) : null;
+        float[] expected = new float[outputOffset + batch * channels * height * width + 3];
+        float[] actual = new float[expected.length];
+        Arrays.fill(expected, -17.0f);
+        Arrays.fill(actual, -17.0f);
+
+        scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                expected, outputOffset, batch, channels, height, width, channels,
+                5, 5, 1, 1, 1, 1, 2, 2, 2, 2,
+                channels, height, width);
+        vector.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                actual, outputOffset, batch, channels, height, width, channels,
+                5, 5, 1, 1, 1, 1, 2, 2, 2, 2,
+                channels, height, width);
+
+        Assert.assertArrayEquals(expected, actual, 0.0f);
+    }
+
+    @Test
     public void matchesScalarGroupedGeneralConvolution() {
         int outputChannels = 18;
         float[] input = values(4 * 5 * 13, 0.00390625f, -0.5f);

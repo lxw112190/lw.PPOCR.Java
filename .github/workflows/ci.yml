@@ -89,6 +89,14 @@ jobs:
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.MaxPoolPerformanceMain vector \
             | tee benchmark-results/det-max-pool.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.DepthwiseConvPerformanceMain scalar cls 50 100 \
+            | tee benchmark-results/cls-depthwise-scalar.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.DepthwiseConvPerformanceMain vector cls 50 100 \
+            | tee benchmark-results/cls-depthwise-vector.json
           java -Xms64m -Xmx512m -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 \
             | tee benchmark-results/full-ocr-det320.json
@@ -152,6 +160,11 @@ jobs:
           echo '### DET MaxPool performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/det-max-pool.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### CLS 5x5 depthwise performance (same-run Scalar and Vector)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/cls-depthwise-scalar.json >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/cls-depthwise-vector.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### Full OCR performance and JVM heap (Scalar baseline, DET 320)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"

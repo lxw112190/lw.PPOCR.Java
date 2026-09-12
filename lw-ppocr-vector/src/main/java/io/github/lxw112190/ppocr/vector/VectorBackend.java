@@ -510,6 +510,15 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
             return;
         }
         if (groups == channels && outputChannels == channels && strideWidth == 1) {
+            if (kernelHeight == 5 && kernelWidth == 5 && strideHeight == 1
+                    && dilationHeight == 1 && dilationWidth == 1
+                    && padTop == 2 && padLeft == 2 && padBottom == 2 && padRight == 2
+                    && outputHeight == height && outputWidth == width
+                    && height == 5 && width >= 5) {
+                depthwiseFiveByFive(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                        output, outputOffset, batch, channels, height, width);
+                return;
+            }
             depthwise(input, inputOffset, weights, weightOffset, bias, biasOffset, output,
                     outputOffset, batch, channels, height, width, kernelHeight, kernelWidth,
                     strideHeight, dilationHeight, dilationWidth, padTop, padLeft,
@@ -555,6 +564,74 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
                 batch, channels, height, width, outputChannels, kernelHeight, kernelWidth,
                 strideHeight, strideWidth, dilationHeight, dilationWidth, padTop, padLeft,
                 padBottom, padRight, groups, outputHeight, outputWidth);
+    }
+
+    private static void depthwiseFiveByFive(float[] input, int inputOffset, float[] weights,
+                                             int weightOffset, float[] bias, int biasOffset,
+                                             float[] output, int outputOffset, int batch,
+                                             int channels, int height, int width) {
+        int plane = height * width;
+        int fullColumnStart = 2;
+        int fullColumnEnd = width - 2;
+        int vectorStart = fullColumnEnd - fullColumnStart >= SPECIES.length()
+                ? fullColumnStart : fullColumnEnd;
+        int lastVectorStart = fullColumnEnd - SPECIES.length();
+        for (int n = 0; n < batch; n++) {
+            for (int channel = 0; channel < channels; channel++) {
+                int inputBase = inputOffset + (n * channels + channel) * plane;
+                int outputBase = outputOffset + (n * channels + channel) * plane;
+                int kernelBase = weightOffset + channel * 25;
+                float initial = bias == null ? 0.0f : bias[biasOffset + channel];
+                for (int oh = 0; oh < height; oh++) {
+                    int outputRow = outputBase + oh * width;
+                    int ow = vectorStart;
+                    // Shift the final block left to avoid a scalar interior tail.
+                    while (ow < fullColumnEnd) {
+                        FloatVector sum = FloatVector.broadcast(SPECIES, initial);
+                        for (int kh = 0; kh < 5; kh++) {
+                            int ih = oh - 2 + kh;
+                            if (ih < 0 || ih >= height) continue;
+                            int inputRow = inputBase + ih * width + ow - 2;
+                            int kernelRow = kernelBase + kh * 5;
+                            for (int kw = 0; kw < 5; kw++) {
+                                sum = sum.add(FloatVector.fromArray(SPECIES, input,
+                                        inputRow + kw).mul(weights[kernelRow + kw]));
+                            }
+                        }
+                        sum.intoArray(output, outputRow + ow);
+                        if (ow == lastVectorStart) break;
+                        ow = Math.min(ow + SPECIES.length(), lastVectorStart);
+                    }
+                    depthwiseFiveByFiveScalar(input, inputBase, weights, kernelBase,
+                            output, outputRow, initial, height, width, oh,
+                            0, vectorStart);
+                    depthwiseFiveByFiveScalar(input, inputBase, weights, kernelBase,
+                            output, outputRow, initial, height, width, oh,
+                            fullColumnEnd, width);
+                }
+            }
+        }
+    }
+
+    private static void depthwiseFiveByFiveScalar(float[] input, int inputBase,
+                                                   float[] weights, int kernelBase,
+                                                   float[] output, int outputRow,
+                                                   float initial, int height, int width,
+                                                   int oh, int firstColumn, int lastColumn) {
+        for (int ow = firstColumn; ow < lastColumn; ow++) {
+            float value = initial;
+            for (int kh = 0; kh < 5; kh++) {
+                int ih = oh - 2 + kh;
+                if (ih < 0 || ih >= height) continue;
+                int kernelRow = kernelBase + kh * 5;
+                for (int kw = 0; kw < 5; kw++) {
+                    int iw = ow - 2 + kw;
+                    if (iw < 0 || iw >= width) continue;
+                    value += input[inputBase + ih * width + iw] * weights[kernelRow + kw];
+                }
+            }
+            output[outputRow + ow] = value;
+        }
     }
 
     private static void twoByTwoStrideOne(float[] input, int inputOffset, float[] weights,
