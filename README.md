@@ -26,7 +26,8 @@ The PP-OCR layer now includes C-compatible DET/CLS/REC preprocessing,
 DB postprocess, perspective crop, UTF-8 dictionary loading, greedy CTC
 decoding, orientation correction, reading-order sorting, and the public
 `PaddleOcr` pipeline. Thresholds and reading policies are supplied through
-immutable `PaddleOcrOptions`.
+immutable `PaddleOcrOptions`; concurrent callers can use `OcrWorkerPool` with
+independent sessions.
 
 The runtime intentionally does not parse ONNX. Model conversion remains an
 offline responsibility of `lw.PPOCR.C` and its converter.
