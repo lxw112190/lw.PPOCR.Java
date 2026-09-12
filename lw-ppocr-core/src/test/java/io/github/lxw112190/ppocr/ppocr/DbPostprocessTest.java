@@ -17,8 +17,8 @@ public final class DbPostprocessTest {
         List<DetectionBox> boxes = DbPostprocess.decode(probabilities, 4, 3,
                 0.5f, 0.7f, 2.0f, 3.0f, 4);
         Assert.assertEquals(1, boxes.size());
-        Assert.assertArrayEquals(new float[] {0.5f, 0.33333334f, 1.0f, 0.33333334f,
-                        1.0f, 0.6666667f, 0.5f, 0.6666667f},
+        Assert.assertArrayEquals(new float[] {0.375f, 0.25f, 1.125f, 0.25f,
+                        1.125f, 0.6666667f, 0.375f, 0.6666667f},
                 boxes.get(0).getPoints(), 0.00001f);
         Assert.assertEquals(0.825f, boxes.get(0).getScore(), 0.00001f);
     }
@@ -58,8 +58,8 @@ public final class DbPostprocessTest {
                         0.0f, 0.9f, 0.9f
                 }, 3, 3, 0.5f, 0.5f, 1.0f, 1.0f, 2, 2.0f, false);
         Assert.assertEquals(1, boxes.size());
-                Assert.assertArrayEquals(new float[] {0.75f, 0.75f, 2.0f, 0.75f,
-                        2.0f, 2.0f, 0.75f, 2.0f},
+                Assert.assertArrayEquals(new float[] {0.5f, 0.5f, 2.0f, 0.5f,
+                        2.0f, 2.0f, 0.5f, 2.0f},
                 boxes.get(0).getPoints(), 0.00001f);
     }
 

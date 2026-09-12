@@ -41,7 +41,19 @@ public final class PaddleOcrDetector implements AutoCloseable {
     }
 
     public PaddleOcrDetector(LwmModel model) {
+        this(model, DEFAULT_DYNAMIC_LIMIT_SIDE);
+    }
+
+    /**
+     * Creates a detector with an explicit maximum side length for dynamic models.
+     * Static models keep their declared dimensions; the value is retained for API symmetry.
+     */
+    public PaddleOcrDetector(LwmModel model, int maximumSideLength) {
         if (model == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DET model is required");
+        if (maximumSideLength < 32) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "DET maximum side length must be at least 32");
+        }
         int inputIndex = model.getGraphInputs().size() == 1 ? model.getGraphInputs().get(0) : -1;
         int outputIndex = model.getGraphOutputs().size() == 1 ? model.getGraphOutputs().get(0) : -1;
         if (inputIndex < 0 || outputIndex < 0) throw invalid("DET model must have one input and one output");
@@ -70,7 +82,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
         this.fixedInputHeight = resolvedInputHeight;
         this.fixedInputWidth = resolvedInputWidth;
         this.dynamicInput = dynamicInput;
-        this.maximumSideLength = dynamicInput ? DEFAULT_DYNAMIC_LIMIT_SIDE : 0;
+        this.maximumSideLength = dynamicInput ? maximumSideLength : 0;
         this.sessions = new DetSessionCache(DYNAMIC_CACHE_CAPACITY);
         if (!dynamicInput) {
             try {

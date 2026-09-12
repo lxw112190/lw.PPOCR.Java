@@ -251,12 +251,14 @@ public final class DbPostprocess {
     }
 
     private static float expansion(Rectangle rectangle, float unclipRatio) {
-        if (unclipRatio <= 1.0f) return 0.0f;
+        // Keep the same interpretation as the C reference implementation:
+        // the unclip ratio scales the area/perimeter offset directly.
+        if (unclipRatio <= 0.0f) return 0.0f;
         double rectangleWidth = rectangle.maxU - rectangle.minU;
         double rectangleHeight = rectangle.maxV - rectangle.minV;
         double perimeter = 2.0 * (rectangleWidth + rectangleHeight);
         return perimeter <= 0.0 ? 0.0f : (float) (rectangleWidth * rectangleHeight
-                * (unclipRatio - 1.0f) / perimeter);
+                * unclipRatio / perimeter);
     }
 
     private static void rectanglePoints(Rectangle rectangle, float expansion, double[] points) {

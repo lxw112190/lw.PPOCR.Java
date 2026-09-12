@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/lxw112190/lw.PPOCR.C",
+  "source_commit": "9b31f1b",
+  "image": "sample.jpg",
+  "image_sha256": "30c417c9f758a3b62718729f5a944f7d2e10cdd2bde0e8ce6785523ddb68ffe9",
+  "image_shape": [500, 500],
+  "detector_limit_side_length": 320,
+  "recognizer_max_width": 960,
+  "expected_lines": 16,
+  "box_tolerance": 2.0,
+  "model_sha256": {
+    "detector": "ba9164d371ac7003f90710c3106a344aeb906df2b0f1e7617fcf4608fa8cd66c",
+    "classifier": "d426c23f4758c9f21c5cbd0550ea9b90f1e7c0dd0289e1541e9754dee2e6ed61",
+    "recognizer": "59440146ae64068b70441f9c16b5878ccba21e75b41cb27220c8d9cc2d61e0ae",
+    "dictionary": "5911341b8d8bdef3924e1ab7c85094f09cf05107d9983476a10c0ee57dac1d82"
+  }
+}
