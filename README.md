@@ -47,6 +47,7 @@ mvn test
 
 ```text
 lw-ppocr-core/    LWM model layer and scalar-safe foundation
+lw-ppocr-imageio/ Optional standard-Java BufferedImage/ImageIO adapter
 lw-ppocr-vector/  Reserved optional Vector API backend
 lw-ppocr-benchmark/  Dependency-free loader benchmark harness
 ```
@@ -60,4 +61,5 @@ not use it as a release gate.
 
 The current code targets the fixed-shape FP32 PP-OCRv6 Tiny/Small/Medium
 contract. It does not claim arbitrary ONNX topology compatibility, dynamic
-model discovery, image decoding, or a release-ready Vector API backend.
+model discovery, or a release-ready Vector API backend. Image decoding is
+available separately through the optional `lw-ppocr-imageio` module.

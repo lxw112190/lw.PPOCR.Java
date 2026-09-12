@@ -15,6 +15,7 @@
 
     <modules>
         <module>lw-ppocr-core</module>
+        <module>lw-ppocr-imageio</module>
         <module>lw-ppocr-vector</module>
         <module>lw-ppocr-benchmark</module>
     </modules>
