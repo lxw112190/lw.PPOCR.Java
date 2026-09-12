@@ -62,4 +62,20 @@ public final class DbPostprocessTest {
                         2.0f, 2.0f, 0.75f, 2.0f},
                 boxes.get(0).getPoints(), 0.00001f);
     }
+
+    @Test
+    public void fitsRotatedRectangleToSlantedComponent() {
+        float[] probabilities = new float[8 * 6];
+        int[] foreground = {1 * 8 + 2, 1 * 8 + 3, 2 * 8 + 3, 2 * 8 + 4,
+                3 * 8 + 4, 3 * 8 + 5, 4 * 8 + 5, 4 * 8 + 6};
+        for (int index : foreground) probabilities[index] = 0.9f;
+
+        List<DetectionBox> boxes = DbPostprocess.decode(probabilities, 8, 6,
+                0.5f, 0.5f, 1.0f, 1.0f, 4, 1.0f, false);
+
+        Assert.assertEquals(1, boxes.size());
+        float[] points = boxes.get(0).getPoints();
+        Assert.assertNotEquals(points[1], points[3], 0.00001f);
+        Assert.assertNotEquals(points[3], points[5], 0.00001f);
+    }
 }
