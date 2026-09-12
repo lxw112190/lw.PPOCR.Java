@@ -147,7 +147,10 @@ public final class InferenceSession implements AutoCloseable {
                     .append(params.getInt(12)).append(",stride=")
                     .append(params.getInt(16)).append('x').append(params.getInt(20))
                     .append(",dilation=").append(params.getInt(24)).append('x')
-                    .append(params.getInt(28));
+                    .append(params.getInt(28)).append(",pads=")
+                    .append(params.getInt(32)).append(',').append(params.getInt(36))
+                    .append(',').append(params.getInt(40)).append(',')
+                    .append(params.getInt(44));
         } else if (node.getOperator() == OperatorType.MAX_POOL
                 || node.getOperator() == OperatorType.AVERAGE_POOL) {
             ByteBuffer params = parameterData(node);

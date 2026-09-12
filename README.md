@@ -84,7 +84,9 @@ full-pipeline scheduling noise. A `[1,64,80,80]` to `[1,16,80,80]` benchmark
 tracks the largest DET stride-one Conv, and a `[1,16,160,160]` same-size
 benchmark tracks its 2x2 stride-one MaxPool under the same policy. The DET
 stride-two benchmark covers both the `[1,3,320,320]` stem and the
-`[1,32,160,160]` downsample layer, each with 16 output channels.
+`[1,32,160,160]` downsample layer, each with 16 output channels. Two additional
+benchmarks cover the same-size 2x2 DET layers with `16 -> 8` and `8 -> 16`
+channels.
 Performance output is a development signal only; v0.x does not use it as a release gate.
 
 Prepared inference sessions, preprocessing arrays, DB geometry scratch space,

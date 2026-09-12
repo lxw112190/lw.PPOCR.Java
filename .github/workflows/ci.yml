@@ -79,6 +79,14 @@ jobs:
             | tee benchmark-results/det-stride-one-conv.json
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.TwoByTwoConvPerformanceMain vector reduce \
+            | tee benchmark-results/det-two-by-two-reduce.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.TwoByTwoConvPerformanceMain vector expand \
+            | tee benchmark-results/det-two-by-two-expand.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.MaxPoolPerformanceMain vector \
             | tee benchmark-results/det-max-pool.json
           java -Xms64m -Xmx512m -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
@@ -132,6 +140,14 @@ jobs:
           echo '### DET stride-one Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/det-stride-one-conv.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### DET 2x2 reduce Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/det-two-by-two-reduce.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### DET 2x2 expand Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/det-two-by-two-expand.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### DET MaxPool performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"

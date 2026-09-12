@@ -212,6 +212,40 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarSameSizeTwoByTwoConvolutionWithOffsetsAndTails() {
+        int batch = 2;
+        int channels = 5;
+        int height = 5;
+        int width = 37;
+        int outputChannels = 16;
+        int inputOffset = 5;
+        int weightOffset = 7;
+        int biasOffset = 3;
+        int outputOffset = 11;
+        float[] input = values(inputOffset + batch * channels * height * width + 3,
+                0.001953125f, -0.375f);
+        float[] weights = values(weightOffset + outputChannels * channels * 4 + 3,
+                0.0078125f, -0.25f);
+        float[] bias = values(biasOffset + outputChannels + 3, 0.03125f, -0.0625f);
+        float[] expected = new float[outputOffset
+                + batch * outputChannels * height * width + 3];
+        float[] actual = new float[expected.length];
+        Arrays.fill(expected, -17.0f);
+        Arrays.fill(actual, -17.0f);
+
+        scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                expected, outputOffset, batch, channels, height, width, outputChannels,
+                2, 2, 1, 1, 1, 1, 0, 0, 1, 1,
+                1, height, width);
+        vector.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                actual, outputOffset, batch, channels, height, width, outputChannels,
+                2, 2, 1, 1, 1, 1, 0, 0, 1, 1,
+                1, height, width);
+
+        Assert.assertArrayEquals(expected, actual, 0.0f);
+    }
+
+    @Test
     public void matchesScalarStrideTwoConvolution() {
         int outputChannels = 34;
         float[] input = values(4 * 7 * 15, 0.001953125f, -0.375f);
