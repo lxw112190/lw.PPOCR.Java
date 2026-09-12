@@ -196,16 +196,17 @@ public final class VectorBackendTest {
 
     @Test
     public void matchesScalarGroupedGeneralConvolution() {
+        int outputChannels = 18;
         float[] input = values(4 * 5 * 13, 0.00390625f, -0.5f);
-        float[] weights = values(6 * 2 * 3 * 3, 0.0078125f, -0.25f);
-        float[] bias = values(6, 0.03125f, -0.0625f);
-        float[] expected = new float[6 * 5 * 13];
+        float[] weights = values(outputChannels * 2 * 3 * 3, 0.0078125f, -0.25f);
+        float[] bias = values(outputChannels, 0.03125f, -0.0625f);
+        float[] expected = new float[outputChannels * 5 * 13];
         float[] actual = new float[expected.length];
         scalar.conv(input, 0, weights, 0, bias, 0, expected, 0,
-                1, 4, 5, 13, 6, 3, 3, 1, 1, 1, 1,
+                1, 4, 5, 13, outputChannels, 3, 3, 1, 1, 1, 1,
                 1, 1, 1, 1, 2, 5, 13);
         vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
-                1, 4, 5, 13, 6, 3, 3, 1, 1, 1, 1,
+                1, 4, 5, 13, outputChannels, 3, 3, 1, 1, 1, 1,
                 1, 1, 1, 1, 2, 5, 13);
         Assert.assertArrayEquals(expected, actual, 0.000001f);
     }
