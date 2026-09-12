@@ -57,6 +57,22 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarDepthwiseConvolution() {
+        float[] input = values(2 * 4 * 7, 0.015625f, -0.75f);
+        float[] weights = values(2 * 3 * 3, 0.03125f, -0.25f);
+        float[] bias = {0.125f, -0.25f};
+        float[] expected = new float[2 * 4 * 7];
+        float[] actual = new float[expected.length];
+        scalar.conv(input, 0, weights, 0, bias, 0, expected, 0,
+                1, 2, 4, 7, 2, 3, 3, 1, 1, 1, 1,
+                1, 1, 1, 1, 2, 4, 7);
+        vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
+                1, 2, 4, 7, 2, 3, 3, 1, 1, 1, 1,
+                1, 1, 1, 1, 2, 4, 7);
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
     public void matchesScalarBroadcastVariants() {
         assertBroadcast(BinaryOp.ADD, new int[] {2, 3, 5}, new int[] {1}, new int[] {2, 3, 5});
         assertBroadcast(BinaryOp.SUB, new int[] {1}, new int[] {2, 3, 5}, new int[] {2, 3, 5});

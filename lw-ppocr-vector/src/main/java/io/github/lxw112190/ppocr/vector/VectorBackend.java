@@ -294,6 +294,13 @@ public final class VectorBackend implements KernelBackend {
                     outputOffset, batch, channels, height * width, outputChannels, groups);
             return;
         }
+        if (groups == channels && outputChannels == channels && strideWidth == 1) {
+            depthwise(input, inputOffset, weights, weightOffset, bias, biasOffset, output,
+                    outputOffset, batch, channels, height, width, kernelHeight, kernelWidth,
+                    strideHeight, dilationHeight, dilationWidth, padTop, padLeft,
+                    outputHeight, outputWidth);
+            return;
+        }
         scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset, output, outputOffset,
                 batch, channels, height, width, outputChannels, kernelHeight, kernelWidth,
                 strideHeight, strideWidth, dilationHeight, dilationWidth, padTop, padLeft,
@@ -315,53 +322,122 @@ public final class VectorBackend implements KernelBackend {
                     int output1 = output0 + plane;
                     int output2 = output1 + plane;
                     int output3 = output2 + plane;
-                    Arrays.fill(output, output0, output0 + plane, bias == null ? 0.0f : bias[biasOffset + channel0]);
-                    Arrays.fill(output, output1, output1 + plane, bias == null ? 0.0f : bias[biasOffset + channel0 + 1]);
-                    Arrays.fill(output, output2, output2 + plane, bias == null ? 0.0f : bias[biasOffset + channel0 + 2]);
-                    Arrays.fill(output, output3, output3 + plane, bias == null ? 0.0f : bias[biasOffset + channel0 + 3]);
                     int weight0 = weightOffset + channel0 * inputsPerGroup;
                     int weight1 = weight0 + inputsPerGroup;
                     int weight2 = weight1 + inputsPerGroup;
                     int weight3 = weight2 + inputsPerGroup;
-                    for (int ic = 0; ic < inputsPerGroup; ic++) {
-                        int inputBase = inputOffset + (n * channels + group * inputsPerGroup + ic) * plane;
-                        float w0 = weights[weight0 + ic];
-                        float w1 = weights[weight1 + ic];
-                        float w2 = weights[weight2 + ic];
-                        float w3 = weights[weight3 + ic];
-                        int i = 0;
-                        for (; i < bound; i += SPECIES.length()) {
+                    float bias0 = bias == null ? 0.0f : bias[biasOffset + channel0];
+                    float bias1 = bias == null ? 0.0f : bias[biasOffset + channel0 + 1];
+                    float bias2 = bias == null ? 0.0f : bias[biasOffset + channel0 + 2];
+                    float bias3 = bias == null ? 0.0f : bias[biasOffset + channel0 + 3];
+                    int i = 0;
+                    for (; i < bound; i += SPECIES.length()) {
+                        FloatVector result0 = FloatVector.broadcast(SPECIES, bias0);
+                        FloatVector result1 = FloatVector.broadcast(SPECIES, bias1);
+                        FloatVector result2 = FloatVector.broadcast(SPECIES, bias2);
+                        FloatVector result3 = FloatVector.broadcast(SPECIES, bias3);
+                        for (int ic = 0; ic < inputsPerGroup; ic++) {
+                            int inputBase = inputOffset +
+                                    (n * channels + group * inputsPerGroup + ic) * plane;
                             FloatVector sample = FloatVector.fromArray(SPECIES, input, inputBase + i);
-                            FloatVector.fromArray(SPECIES, output, output0 + i).add(sample.mul(w0)).intoArray(output, output0 + i);
-                            FloatVector.fromArray(SPECIES, output, output1 + i).add(sample.mul(w1)).intoArray(output, output1 + i);
-                            FloatVector.fromArray(SPECIES, output, output2 + i).add(sample.mul(w2)).intoArray(output, output2 + i);
-                            FloatVector.fromArray(SPECIES, output, output3 + i).add(sample.mul(w3)).intoArray(output, output3 + i);
+                            result0 = result0.add(sample.mul(weights[weight0 + ic]));
+                            result1 = result1.add(sample.mul(weights[weight1 + ic]));
+                            result2 = result2.add(sample.mul(weights[weight2 + ic]));
+                            result3 = result3.add(sample.mul(weights[weight3 + ic]));
                         }
-                        for (; i < plane; i++) {
+                        result0.intoArray(output, output0 + i);
+                        result1.intoArray(output, output1 + i);
+                        result2.intoArray(output, output2 + i);
+                        result3.intoArray(output, output3 + i);
+                    }
+                    for (; i < plane; i++) {
+                        float result0 = bias0;
+                        float result1 = bias1;
+                        float result2 = bias2;
+                        float result3 = bias3;
+                        for (int ic = 0; ic < inputsPerGroup; ic++) {
+                            int inputBase = inputOffset +
+                                    (n * channels + group * inputsPerGroup + ic) * plane;
                             float sample = input[inputBase + i];
-                            output[output0 + i] += sample * w0;
-                            output[output1 + i] += sample * w1;
-                            output[output2 + i] += sample * w2;
-                            output[output3 + i] += sample * w3;
+                            result0 += sample * weights[weight0 + ic];
+                            result1 += sample * weights[weight1 + ic];
+                            result2 += sample * weights[weight2 + ic];
+                            result3 += sample * weights[weight3 + ic];
                         }
+                        output[output0 + i] = result0;
+                        output[output1 + i] = result1;
+                        output[output2 + i] = result2;
+                        output[output3 + i] = result3;
                     }
                 }
                 for (; oc < outputsPerGroup; oc++) {
                     int channel = group * outputsPerGroup + oc;
                     int outputBase = outputOffset + (n * outputChannels + channel) * plane;
-                    Arrays.fill(output, outputBase, outputBase + plane,
-                            bias == null ? 0.0f : bias[biasOffset + channel]);
                     int weightBase = weightOffset + channel * inputsPerGroup;
-                    for (int ic = 0; ic < inputsPerGroup; ic++) {
-                        int inputBase = inputOffset + (n * channels + group * inputsPerGroup + ic) * plane;
-                        float weight = weights[weightBase + ic];
-                        int i = 0;
-                        for (; i < bound; i += SPECIES.length()) {
-                            FloatVector result = FloatVector.fromArray(SPECIES, output, outputBase + i)
-                                    .add(FloatVector.fromArray(SPECIES, input, inputBase + i).mul(weight));
-                            result.intoArray(output, outputBase + i);
+                    float initial = bias == null ? 0.0f : bias[biasOffset + channel];
+                    int i = 0;
+                    for (; i < bound; i += SPECIES.length()) {
+                        FloatVector result = FloatVector.broadcast(SPECIES, initial);
+                        for (int ic = 0; ic < inputsPerGroup; ic++) {
+                            int inputBase = inputOffset +
+                                    (n * channels + group * inputsPerGroup + ic) * plane;
+                            result = result.add(FloatVector.fromArray(SPECIES, input, inputBase + i)
+                                    .mul(weights[weightBase + ic]));
                         }
-                        for (; i < plane; i++) output[outputBase + i] += input[inputBase + i] * weight;
+                        result.intoArray(output, outputBase + i);
+                    }
+                    for (; i < plane; i++) {
+                        float result = initial;
+                        for (int ic = 0; ic < inputsPerGroup; ic++) {
+                            int inputBase = inputOffset +
+                                    (n * channels + group * inputsPerGroup + ic) * plane;
+                            result += input[inputBase + i] * weights[weightBase + ic];
+                        }
+                        output[outputBase + i] = result;
+                    }
+                }
+            }
+        }
+    }
+
+    private static void depthwise(float[] input, int inputOffset, float[] weights,
+                                  int weightOffset, float[] bias, int biasOffset,
+                                  float[] output, int outputOffset, int batch, int channels,
+                                  int height, int width, int kernelHeight, int kernelWidth,
+                                  int strideHeight, int dilationHeight, int dilationWidth,
+                                  int padTop, int padLeft, int outputHeight, int outputWidth) {
+        int inputPlane = height * width;
+        int outputPlane = outputHeight * outputWidth;
+        int kernelPlane = kernelHeight * kernelWidth;
+        for (int n = 0; n < batch; n++) {
+            for (int channel = 0; channel < channels; channel++) {
+                int inputBase = inputOffset + (n * channels + channel) * inputPlane;
+                int outputBase = outputOffset + (n * channels + channel) * outputPlane;
+                Arrays.fill(output, outputBase, outputBase + outputPlane,
+                        bias == null ? 0.0f : bias[biasOffset + channel]);
+                int kernelBase = weightOffset + channel * kernelPlane;
+                for (int kh = 0; kh < kernelHeight; kh++) {
+                    for (int kw = 0; kw < kernelWidth; kw++) {
+                        float weight = weights[kernelBase + kh * kernelWidth + kw];
+                        int shift = padLeft - kw * dilationWidth;
+                        int start = Math.max(0, shift);
+                        int end = Math.min(outputWidth, width + shift);
+                        int vectorEnd = start + SPECIES.loopBound(end - start);
+                        for (int oh = 0; oh < outputHeight; oh++) {
+                            int ih = oh * strideHeight - padTop + kh * dilationHeight;
+                            if (ih < 0 || ih >= height) continue;
+                            int inputRow = inputBase + ih * width;
+                            int outputRow = outputBase + oh * outputWidth;
+                            int source = inputRow + start - shift;
+                            int ow = start;
+                            for (; ow < vectorEnd; ow += SPECIES.length()) {
+                                FloatVector result = FloatVector.fromArray(SPECIES, output, outputRow + ow)
+                                        .add(FloatVector.fromArray(SPECIES, input, source).mul(weight));
+                                result.intoArray(output, outputRow + ow);
+                                source += SPECIES.length();
+                            }
+                            for (; ow < end; ow++) output[outputRow + ow] += input[source++] * weight;
+                        }
                     }
                 }
             }
