@@ -1579,9 +1579,67 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
                                int kernelWidth, int strideHeight, int strideWidth, int padTop,
                                int padLeft, int padBottom, int padRight, int outputHeight,
                                int outputWidth, boolean maximum, boolean countIncludePad) {
+        if (maximum && kernelHeight == 2 && kernelWidth == 2
+                && strideHeight == 1 && strideWidth == 1
+                && padTop == 0 && padLeft == 0 && padBottom == 1 && padRight == 1
+                && outputHeight == height && outputWidth == width && width >= 2) {
+            maxPoolTwoByTwoStrideOne(input, inputOffset, output, outputOffset,
+                    batch, channels, height, width);
+            return;
+        }
         scalar.pool(input, inputOffset, output, outputOffset, batch, channels, height, width,
                 kernelHeight, kernelWidth, strideHeight, strideWidth, padTop, padLeft,
                 padBottom, padRight, outputHeight, outputWidth, maximum, countIncludePad);
+    }
+
+    private static void maxPoolTwoByTwoStrideOne(float[] input, int inputOffset,
+                                                  float[] output, int outputOffset,
+                                                  int batch, int channels,
+                                                  int height, int width) {
+        int plane = height * width;
+        int interiorLength = width - 1;
+        int vectorLength = SPECIES.loopBound(interiorLength);
+        for (int n = 0; n < batch; n++) {
+            for (int channel = 0; channel < channels; channel++) {
+                int inputPlane = inputOffset + (n * channels + channel) * plane;
+                int outputPlane = outputOffset + (n * channels + channel) * plane;
+                for (int oh = 0; oh < height; oh++) {
+                    int firstInputRow = inputPlane + oh * width;
+                    int secondInputRow = firstInputRow + width;
+                    boolean hasSecondRow = oh + 1 < height;
+                    int outputRow = outputPlane + oh * width;
+
+                    int ow = 0;
+                    int vectorEnd = vectorLength;
+                    for (; ow < vectorEnd; ow += SPECIES.length()) {
+                        FloatVector value = FloatVector.fromArray(SPECIES, input,
+                                firstInputRow + ow).max(FloatVector.fromArray(SPECIES, input,
+                                firstInputRow + ow + 1));
+                        if (hasSecondRow) {
+                            value = value.max(FloatVector.fromArray(SPECIES, input,
+                                    secondInputRow + ow)).max(FloatVector.fromArray(SPECIES,
+                                    input, secondInputRow + ow + 1));
+                        }
+                        value.intoArray(output, outputRow + ow);
+                    }
+                    for (; ow < width - 1; ow++) {
+                        float value = Math.max(input[firstInputRow + ow],
+                                input[firstInputRow + ow + 1]);
+                        if (hasSecondRow) {
+                            value = Math.max(value, input[secondInputRow + ow]);
+                            value = Math.max(value, input[secondInputRow + ow + 1]);
+                        }
+                        output[outputRow + ow] = value;
+                    }
+
+                    float right = input[firstInputRow + width - 1];
+                    if (hasSecondRow) {
+                        right = Math.max(right, input[secondInputRow + width - 1]);
+                    }
+                    output[outputRow + width - 1] = right;
+                }
+            }
+        }
     }
     @Override public void resizeNearest(float[] input, int inputOffset, float[] output, int outputOffset,
                                         int batch, int channels, int inputHeight, int inputWidth,

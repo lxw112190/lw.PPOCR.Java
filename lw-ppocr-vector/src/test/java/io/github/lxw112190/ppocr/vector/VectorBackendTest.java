@@ -229,6 +229,52 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarTwoByTwoStrideOneMaxPoolWithOffsetsAndTails() {
+        int batch = 2;
+        int channels = 3;
+        int height = 5;
+        int width = 37;
+        int inputOffset = 5;
+        int outputOffset = 7;
+        float[] input = values(inputOffset + batch * channels * height * width + 3,
+                0.03125f, -4.0f);
+        for (int i = inputOffset; i < input.length; i += 11) input[i] = -input[i];
+        input[inputOffset + 17] = Float.NaN;
+        input[inputOffset + 18] = Float.POSITIVE_INFINITY;
+        input[inputOffset + 36] = -0.0f;
+        input[inputOffset + 37] = 0.0f;
+        float[] expected = new float[outputOffset + batch * channels * height * width + 3];
+        float[] actual = new float[expected.length];
+        Arrays.fill(expected, -17.0f);
+        Arrays.fill(actual, -17.0f);
+
+        scalar.pool(input, inputOffset, expected, outputOffset,
+                batch, channels, height, width, 2, 2, 1, 1,
+                0, 0, 1, 1, height, width, true, false);
+        vector.pool(input, inputOffset, actual, outputOffset,
+                batch, channels, height, width, 2, 2, 1, 1,
+                0, 0, 1, 1, height, width, true, false);
+
+        Assert.assertArrayEquals(expected, actual, 0.0f);
+        for (int i = 0; i < expected.length; i++) {
+            Assert.assertEquals("float bits at " + i, Float.floatToIntBits(expected[i]),
+                    Float.floatToIntBits(actual[i]));
+        }
+    }
+
+    @Test
+    public void fallsBackForOtherPoolConfigurations() {
+        float[] input = values(2 * 5 * 7, 0.0625f, -1.0f);
+        float[] expected = new float[2 * 3 * 4];
+        float[] actual = new float[expected.length];
+        scalar.pool(input, 0, expected, 0, 1, 2, 5, 7,
+                2, 2, 2, 2, 0, 0, 0, 0, 3, 4, false, true);
+        vector.pool(input, 0, actual, 0, 1, 2, 5, 7,
+                2, 2, 2, 2, 0, 0, 0, 0, 3, 4, false, true);
+        Assert.assertArrayEquals(expected, actual, 0.0f);
+    }
+
+    @Test
     public void matchesScalarTwoByTwoTransposeConvolution() {
         int batch = 2;
         int inputChannels = 3;
