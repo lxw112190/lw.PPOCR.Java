@@ -1,6 +1,8 @@
 package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.image.BgrImage;
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.DataType;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
@@ -23,12 +25,19 @@ public final class PaddleOcrClassifier implements AutoCloseable {
     private boolean closed;
 
     public PaddleOcrClassifier(LwmModel model) {
-        if (model == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "CLS model is required");
+        this(model, new ScalarBackend());
+    }
+
+    /** Creates a classifier using the supplied stateless kernel backend. */
+    public PaddleOcrClassifier(LwmModel model, KernelBackend backend) {
+        if (model == null || backend == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "CLS model and backend are required");
+        }
         validateModel(model);
         this.model = model;
         try {
             this.session = new InferenceSession(model,
-                    Collections.singletonList(new TensorShape(INPUT_DIMENSIONS)));
+                    Collections.singletonList(new TensorShape(INPUT_DIMENSIONS)), backend);
         } catch (RuntimeException e) {
             model.close();
             throw e;

@@ -1,5 +1,6 @@
 package io.github.lxw112190.ppocr.ppocr;
 
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -17,10 +18,10 @@ final class DetSessionCache implements AutoCloseable {
 
     DetSessionContext get(DetShapeKey key) { return entries.get(key); }
 
-    DetSessionContext getOrCreate(DetShapeKey key, LwmModel model) {
+    DetSessionContext getOrCreate(DetShapeKey key, LwmModel model, KernelBackend backend) {
         DetSessionContext existing = entries.get(key);
         if (existing != null) return existing;
-        DetSessionContext created = new DetSessionContext(model, key.height(), key.width());
+        DetSessionContext created = new DetSessionContext(model, key.height(), key.width(), backend);
         entries.put(key, created);
         if (entries.size() > capacity) {
             Map.Entry<DetShapeKey, DetSessionContext> eldest = entries.entrySet().iterator().next();

@@ -1,5 +1,6 @@
 package io.github.lxw112190.ppocr.ppocr;
 
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
@@ -14,11 +15,11 @@ final class DetSessionContext implements AutoCloseable {
     final DbPostprocess.Decoder postprocessor;
     final float[] probabilityMap;
 
-    DetSessionContext(LwmModel model, int width, int height) {
+    DetSessionContext(LwmModel model, int width, int height, KernelBackend backend) {
         this.width = width;
         this.height = height;
         InferenceSession prepared = new InferenceSession(model,
-                Collections.singletonList(new TensorShape(1, 3, height, width)));
+                Collections.singletonList(new TensorShape(1, 3, height, width)), backend);
         try {
             TensorShape output = prepared.execution().shapes().get(
                     model.getGraphOutputs().get(0));

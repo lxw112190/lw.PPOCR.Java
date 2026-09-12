@@ -1,6 +1,8 @@
 package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.image.BgrImage;
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.DataType;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
@@ -18,13 +20,21 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     private final PaddleOcrDictionary dictionary;
     private final int maximumWidth;
     private final boolean dynamicWidth;
+    private final KernelBackend backend;
     private final Map<Integer, RecSessionContext> sessions;
     private boolean closed;
 
     /** Takes ownership of the model and dictionary and closes both on close(). */
     public PaddleOcrRecognizer(LwmModel model, PaddleOcrDictionary dictionary) {
-        if (model == null || dictionary == null) {
-            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "REC model and dictionary are required");
+        this(model, dictionary, new ScalarBackend());
+    }
+
+    /** Creates a recognizer using the supplied stateless kernel backend. */
+    public PaddleOcrRecognizer(LwmModel model, PaddleOcrDictionary dictionary,
+                               KernelBackend backend) {
+        if (model == null || dictionary == null || backend == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "REC model, dictionary, and backend are required");
         }
         int inputIndex = validateModel(model, dictionary);
         TensorInfo input = model.getTensors().get(inputIndex);
@@ -33,6 +43,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         int declaredWidth = input.getDimensions()[3];
         this.dynamicWidth = declaredWidth == -1;
         this.maximumWidth = dynamicWidth ? DEFAULT_MAXIMUM_WIDTH : declaredWidth;
+        this.backend = backend;
         this.sessions = new HashMap<Integer, RecSessionContext>();
     }
 
@@ -54,7 +65,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         int targetWidth = dynamicWidth ? RecWidthPolicy.chooseTargetWidth(source, maximumWidth) : maximumWidth;
         RecSessionContext context = sessions.get(targetWidth);
         if (context == null) {
-            context = new RecSessionContext(model, targetWidth, dictionary.classCount());
+            context = new RecSessionContext(model, targetWidth, dictionary.classCount(), backend);
             sessions.put(targetWidth, context);
         }
         context.preprocess.resizeNormalize(source);

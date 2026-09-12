@@ -1,6 +1,8 @@
 package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.image.BgrImage;
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.DataType;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
@@ -20,6 +22,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
     private final int fixedInputWidth;
     private final boolean dynamicInput;
     private final int maximumSideLength;
+    private final KernelBackend backend;
     private final DetSessionCache sessions;
     private boolean closed;
 
@@ -41,7 +44,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
     }
 
     public PaddleOcrDetector(LwmModel model) {
-        this(model, DEFAULT_DYNAMIC_LIMIT_SIDE);
+        this(model, DEFAULT_DYNAMIC_LIMIT_SIDE, new ScalarBackend());
     }
 
     /**
@@ -49,7 +52,14 @@ public final class PaddleOcrDetector implements AutoCloseable {
      * Static models keep their declared dimensions; the value is retained for API symmetry.
      */
     public PaddleOcrDetector(LwmModel model, int maximumSideLength) {
-        if (model == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DET model is required");
+        this(model, maximumSideLength, new ScalarBackend());
+    }
+
+    /** Creates a detector using the supplied stateless kernel backend. */
+    public PaddleOcrDetector(LwmModel model, int maximumSideLength, KernelBackend backend) {
+        if (model == null || backend == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DET model and backend are required");
+        }
         if (maximumSideLength < 32) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
                     "DET maximum side length must be at least 32");
@@ -83,10 +93,11 @@ public final class PaddleOcrDetector implements AutoCloseable {
         this.fixedInputWidth = resolvedInputWidth;
         this.dynamicInput = dynamicInput;
         this.maximumSideLength = dynamicInput ? maximumSideLength : 0;
+        this.backend = backend;
         this.sessions = new DetSessionCache(DYNAMIC_CACHE_CAPACITY);
         if (!dynamicInput) {
             try {
-                sessions.getOrCreate(new DetShapeKey(fixedInputHeight, fixedInputWidth), model);
+                sessions.getOrCreate(new DetShapeKey(fixedInputHeight, fixedInputWidth), model, backend);
             } catch (RuntimeException e) {
                 model.close();
                 throw e;
@@ -129,6 +140,6 @@ public final class PaddleOcrDetector implements AutoCloseable {
         if (source == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image is required");
         if (!dynamicInput) return sessions.get(new DetShapeKey(fixedInputHeight, fixedInputWidth));
         DetInputShape shape = DetInputShapePolicy.choose(source, maximumSideLength);
-        return sessions.getOrCreate(new DetShapeKey(shape.getInputHeight(), shape.getInputWidth()), model);
+        return sessions.getOrCreate(new DetShapeKey(shape.getInputHeight(), shape.getInputWidth()), model, backend);
     }
 }

@@ -1,5 +1,6 @@
 package io.github.lxw112190.ppocr.ppocr;
 
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
@@ -14,10 +15,11 @@ final class RecSessionContext implements AutoCloseable {
     final float[] logits;
     final int timeSteps;
 
-    RecSessionContext(io.github.lxw112190.ppocr.model.LwmModel model, int width, int classCount) {
+    RecSessionContext(io.github.lxw112190.ppocr.model.LwmModel model, int width, int classCount,
+                      KernelBackend backend) {
         this.width = width;
         this.session = new InferenceSession(model,
-                Collections.singletonList(new TensorShape(1, 3, RecPreprocess.INPUT_HEIGHT, width)));
+                Collections.singletonList(new TensorShape(1, 3, RecPreprocess.INPUT_HEIGHT, width)), backend);
         int outputIndex = model.getGraphOutputs().get(0);
         TensorShape output = session.execution().shapes().get(outputIndex);
         if ((output.getRank() != 2 && output.getRank() != 3) ||
