@@ -94,7 +94,16 @@ public final class MemoryPlanner {
                 selected = new Block(start, bytes, deaths[tensorIndex], tensorIndex);
             } else {
                 free.remove(selected);
-                selected = new Block(selected.offset, bytes, deaths[tensorIndex], tensorIndex);
+                long blockEnd = addExact(selected.offset, selected.capacity);
+                long remainderOffset = align(addExact(selected.offset, bytes));
+                long allocationCapacity = selected.capacity;
+                if (remainderOffset < blockEnd) {
+                    allocationCapacity = remainderOffset - selected.offset;
+                    free.add(new Block(remainderOffset, blockEnd - remainderOffset, -1, -1));
+                    coalesceFree(free);
+                }
+                selected = new Block(selected.offset, allocationCapacity,
+                        deaths[tensorIndex], tensorIndex);
             }
             offsets[tensorIndex] = selected.offset;
             active.add(selected);
@@ -107,9 +116,33 @@ public final class MemoryPlanner {
             Block block = active.get(i);
             if (block.death < birth) {
                 active.remove(i);
-                free.add(block);
+                free.add(new Block(block.offset, block.capacity, -1, -1));
             }
         }
+        coalesceFree(free);
+    }
+
+    private static void coalesceFree(List<Block> free) {
+        if (free.size() < 2) return;
+        Collections.sort(free, new Comparator<Block>() {
+            @Override
+            public int compare(Block left, Block right) {
+                return Long.compare(left.offset, right.offset);
+            }
+        });
+        int destination = 0;
+        for (int source = 1; source < free.size(); source++) {
+            Block previous = free.get(destination);
+            Block current = free.get(source);
+            if (addExact(previous.offset, previous.capacity) == current.offset) {
+                free.set(destination, new Block(previous.offset,
+                        addExact(previous.capacity, current.capacity), -1, -1));
+            } else {
+                destination++;
+                free.set(destination, current);
+            }
+        }
+        while (free.size() > destination + 1) free.remove(free.size() - 1);
     }
 
     private static Block bestFit(List<Block> free, long bytes) {

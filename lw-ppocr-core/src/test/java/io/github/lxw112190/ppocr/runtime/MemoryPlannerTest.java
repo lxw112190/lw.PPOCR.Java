@@ -31,6 +31,25 @@ public final class MemoryPlannerTest {
         Assert.assertEquals(16L, plan.getSize(0));
     }
 
+    @Test
+    public void splitsAndCoalescesReusedBlocks() {
+        List<TensorInfo> tensors = Arrays.asList(
+                tensor(2), tensor(0), tensor(0), tensor(4), tensor(4));
+        List<NodeInfo> nodes = Arrays.asList(
+                new NodeInfo(OperatorType.ADD, new int[] {0}, new int[] {2}, 0, 0),
+                new NodeInfo(OperatorType.ADD, new int[] {2}, new int[] {3, 4}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(32), TensorShape.of(1), TensorShape.of(4),
+                TensorShape.of(4), TensorShape.of(4));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Arrays.asList(0, 1), Arrays.asList(3, 4), shapes);
+
+        Assert.assertEquals(208L, plan.getTotalBytes());
+        Assert.assertEquals(0L, plan.getOffset(3));
+        Assert.assertEquals(64L, plan.getOffset(4));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void rejectsInvalidShape() {
         TensorShape.of(4, 0);
