@@ -1,0 +1,11 @@
+{
+  "source_width": 7,
+  "source_height": 5,
+  "source_stride": 21,
+  "target_width": 192,
+  "resized_width": 68,
+  "time_steps": 24,
+  "text": "2",
+  "score": 0.217422441,
+  "emitted_count": 1
+}

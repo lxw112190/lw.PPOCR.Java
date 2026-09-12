@@ -39,6 +39,25 @@ public final class RealRecModelGoldenTest {
         }
     }
 
+    @Test
+    public void matchesPinnedCPipelineForBgrCrop() throws Exception {
+        String expected = readText(RESOURCE_ROOT + "crop-7x5.expected.json");
+        Assert.assertTrue(expected.contains("\"text\": \"2\""));
+        Assert.assertTrue(expected.contains("\"resized_width\": 68"));
+        byte[] pixels = readBytes(RESOURCE_ROOT + "crop-7x5.bgr");
+        Assert.assertEquals(7 * 5 * 3, pixels.length);
+        try (LwmModel model = LwmLoader.load(resource(RESOURCE_ROOT + "rec.lwm"));
+             PaddleOcrDictionary dictionary = PaddleOcrDictionary.load(resource(RESOURCE_ROOT + "ppocr_keys.txt"));
+             PaddleOcrRecognizer recognizer = new PaddleOcrRecognizer(model, dictionary)) {
+            RecRecognitionResult result = recognizer.recognize(new io.github.lxw112190.ppocr.image.BgrImage(
+                    pixels, 7, 5, 21));
+            Assert.assertEquals("2", result.getText());
+            Assert.assertEquals(1, result.getEmittedCount());
+            Assert.assertEquals(68, result.getResizedWidth());
+            Assert.assertEquals(0.217422441f, result.getScore(), 1.0e-4f);
+        }
+    }
+
     private static void assertGraphCase(LwmModel model, int width, int timeSteps, String outputFile)
             throws IOException {
         int inputLength = 3 * 48 * width;

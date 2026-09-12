@@ -7,6 +7,13 @@
   "dictionary": "ppocr_keys.txt",
   "dictionary_sha256": "46e1b34ef45684cb46d75ac76d355341fe7f0a2c38d6ee02e63ae6b3878019fc",
   "input_pattern": "((index * 17) % 257 - 128) / 127.0",
+  "api_cases": [
+    {
+      "name": "crop-7x5",
+      "source_file": "crop-7x5.bgr",
+      "expected_file": "crop-7x5.expected.json"
+    }
+  ],
   "cases": [
     {
       "name": "width-7",
