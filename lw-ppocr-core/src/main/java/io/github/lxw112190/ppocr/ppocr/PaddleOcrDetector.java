@@ -7,25 +7,20 @@ import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
-import io.github.lxw112190.ppocr.runtime.InferenceSession;
-import io.github.lxw112190.ppocr.runtime.TensorShape;
 import java.nio.file.Path;
-import java.util.Collections;
 import java.util.List;
 
-/** Fixed-shape DET facade: preprocessing, LWM execution, and DB postprocess. */
+/** DET facade with static compatibility and cached C-compatible dynamic shapes. */
 public final class PaddleOcrDetector implements AutoCloseable {
-    private static final int DEFAULT_DYNAMIC_INPUT_SIZE = 320;
+    private static final int DEFAULT_DYNAMIC_LIMIT_SIDE = 960;
+    private static final int DYNAMIC_CACHE_CAPACITY = 3;
 
     private final LwmModel model;
-    private final InferenceSession session;
-    private final int inputHeight;
-    private final int inputWidth;
-    private final int mapHeight;
-    private final int mapWidth;
-    private final DetPreprocess.Workspace preprocess;
-    private final DbPostprocess.Decoder postprocessor;
-    private final float[] probabilities;
+    private final int fixedInputHeight;
+    private final int fixedInputWidth;
+    private final boolean dynamicInput;
+    private final int maximumSideLength;
+    private final DetSessionCache sessions;
     private boolean closed;
 
     /** Uses C-compatible defaults: bitmap 0.3, box 0.6, unclip 1.6, no dilation. */
@@ -36,10 +31,12 @@ public final class PaddleOcrDetector implements AutoCloseable {
     public List<DetectionBox> detect(BgrImage source, float bitmapThreshold, float boxThreshold,
                                      float unclipRatio, boolean useDilation, int maxCandidates) {
         ensureOpen();
-        preprocess.resizeNormalize(source);
-        session.run(preprocess.getChw(), probabilities);
-        return postprocessor.decodeToSource(probabilities, bitmapThreshold, boxThreshold,
-                preprocess.getWidthRatio(), preprocess.getHeightRatio(),
+        DetSessionContext context = contextFor(source);
+        context.preprocess.resizeNormalize(source);
+        context.session.run(context.preprocess.getChw(), context.probabilityMap);
+        return context.postprocessor.decodeToSource(
+                context.probabilityMap, bitmapThreshold, boxThreshold,
+                context.preprocess.getWidthRatio(), context.preprocess.getHeightRatio(),
                 maxCandidates, unclipRatio, useDilation, source.width(), source.height());
     }
 
@@ -65,43 +62,23 @@ public final class PaddleOcrDetector implements AutoCloseable {
                 throw invalid("DET probability map has unsupported leading dimensions");
             }
         }
-        int resolvedInputHeight = inputDimensions[2] == -1 ? DEFAULT_DYNAMIC_INPUT_SIZE : inputDimensions[2];
-        int resolvedInputWidth = inputDimensions[3] == -1 ? DEFAULT_DYNAMIC_INPUT_SIZE : inputDimensions[3];
+        boolean dynamicInput = inputDimensions[2] == -1 || inputDimensions[3] == -1;
+        int resolvedInputHeight = dynamicInput ? 0 : inputDimensions[2];
+        int resolvedInputWidth = dynamicInput ? 0 : inputDimensions[3];
         this.model = model;
-        try {
-            this.session = new InferenceSession(model,
-                    Collections.singletonList(new TensorShape(1, 3, resolvedInputHeight, resolvedInputWidth)));
-        } catch (RuntimeException e) {
-            model.close();
-            throw e;
-        }
-        TensorShape resolvedOutput = this.session.execution().shapes().get(outputIndex);
-        if (resolvedOutput.getRank() < 2) {
-            this.session.close();
-            model.close();
-            throw invalid("DET probability map rank is invalid");
-        }
-        for (int axis = 0; axis < resolvedOutput.getRank() - 2; axis++) {
-            if (resolvedOutput.get(axis) != 1) {
-                this.session.close();
+        this.fixedInputHeight = resolvedInputHeight;
+        this.fixedInputWidth = resolvedInputWidth;
+        this.dynamicInput = dynamicInput;
+        this.maximumSideLength = dynamicInput ? DEFAULT_DYNAMIC_LIMIT_SIDE : 0;
+        this.sessions = new DetSessionCache(DYNAMIC_CACHE_CAPACITY);
+        if (!dynamicInput) {
+            try {
+                sessions.getOrCreate(new DetShapeKey(fixedInputHeight, fixedInputWidth), model);
+            } catch (RuntimeException e) {
                 model.close();
-                throw invalid("DET probability map has unsupported leading dimensions");
+                throw e;
             }
         }
-        int mapHeight = resolvedOutput.get(resolvedOutput.getRank() - 2);
-        int mapWidth = resolvedOutput.get(resolvedOutput.getRank() - 1);
-        if (mapHeight <= 0 || mapWidth <= 0 || (long) mapHeight * mapWidth > Integer.MAX_VALUE) {
-            this.session.close();
-            model.close();
-            throw invalid("DET probability map dimensions are invalid");
-        }
-        this.inputHeight = resolvedInputHeight;
-        this.inputWidth = resolvedInputWidth;
-        this.mapHeight = mapHeight;
-        this.mapWidth = mapWidth;
-        this.preprocess = new DetPreprocess.Workspace(inputWidth, inputHeight);
-        this.postprocessor = DbPostprocess.createDecoder(mapWidth, mapHeight);
-        this.probabilities = new float[mapHeight * mapWidth];
     }
 
     public static PaddleOcrDetector load(Path path) {
@@ -118,7 +95,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
     public void close() {
         if (!closed) {
             closed = true;
-            session.close();
+            sessions.close();
             model.close();
         }
     }
@@ -133,5 +110,12 @@ public final class PaddleOcrDetector implements AutoCloseable {
 
     private void ensureOpen() {
         if (closed) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DET detector is closed");
+    }
+
+    private DetSessionContext contextFor(BgrImage source) {
+        if (source == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image is required");
+        if (!dynamicInput) return sessions.get(new DetShapeKey(fixedInputHeight, fixedInputWidth));
+        DetInputShape shape = DetInputShapePolicy.choose(source, maximumSideLength);
+        return sessions.getOrCreate(new DetShapeKey(shape.getInputHeight(), shape.getInputWidth()), model);
     }
 }
