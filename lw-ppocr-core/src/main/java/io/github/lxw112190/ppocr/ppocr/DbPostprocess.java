@@ -46,14 +46,15 @@ public final class DbPostprocess {
                 widthRatio, heightRatio, maxCandidates, unclipRatio);
         return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
                 widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
-                new Scratch(width, height));
+                -1, -1, new Scratch(width, height));
     }
 
     private static List<DetectionBox> decodeInternal(float[] probabilities, int width, int height,
                                                      float bitmapThreshold, float boxThreshold,
                                                      float widthRatio, float heightRatio,
                                                      int maxCandidates, float unclipRatio,
-                                                     boolean useDilation, Scratch scratch) {
+                                                     boolean useDilation, int sourceWidth,
+                                                     int sourceHeight, Scratch scratch) {
         boolean[] bitmap = scratch.bitmap;
         for (int i = 0; i < probabilities.length; i++) bitmap[i] = probabilities[i] > bitmapThreshold;
         if (useDilation) dilate2x2(bitmap, width, height);
@@ -105,10 +106,17 @@ public final class DbPostprocess {
                     orderClockwise(corners, sortedCorners);
                     float[] restored = new float[8];
                     for (int point = 0; point < 4; point++) {
-                        restored[point * 2] = (float) (clamp(corners[point * 2], width - 1.0)
-                                / widthRatio);
-                        restored[point * 2 + 1] = (float) (clamp(corners[point * 2 + 1], height - 1.0)
-                                / heightRatio);
+                        double restoredX = corners[point * 2] / widthRatio;
+                        double restoredY = corners[point * 2 + 1] / heightRatio;
+                        if (sourceWidth > 0 && sourceHeight > 0) {
+                            restoredX = clamp(restoredX, sourceWidth - 1.0);
+                            restoredY = clamp(restoredY, sourceHeight - 1.0);
+                        } else {
+                            restoredX = clamp(corners[point * 2], width - 1.0) / widthRatio;
+                            restoredY = clamp(corners[point * 2 + 1], height - 1.0) / heightRatio;
+                        }
+                        restored[point * 2] = (float) restoredX;
+                        restored[point * 2 + 1] = (float) restoredY;
                     }
                     boxes.add(new DetectionBox(restored, score));
                 }
@@ -288,7 +296,25 @@ public final class DbPostprocess {
             validate(probabilities, width, height, bitmapThreshold, boxThreshold,
                     widthRatio, heightRatio, maxCandidates, unclipRatio);
             return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
-                    widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation, scratch);
+                    widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
+                    -1, -1, scratch);
+        }
+
+        /** Decodes boxes and clamps restored coordinates to the source image bounds. */
+        public List<DetectionBox> decodeToSource(float[] probabilities, float bitmapThreshold,
+                                                 float boxThreshold, float widthRatio,
+                                                 float heightRatio, int maxCandidates,
+                                                 float unclipRatio, boolean useDilation,
+                                                 int sourceWidth, int sourceHeight) {
+            if (sourceWidth <= 0 || sourceHeight <= 0) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "Source image dimensions are invalid");
+            }
+            validate(probabilities, width, height, bitmapThreshold, boxThreshold,
+                    widthRatio, heightRatio, maxCandidates, unclipRatio);
+            return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
+                    widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
+                    sourceWidth, sourceHeight, scratch);
         }
     }
 

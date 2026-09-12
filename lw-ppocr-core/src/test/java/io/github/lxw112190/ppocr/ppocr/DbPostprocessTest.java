@@ -58,9 +58,23 @@ public final class DbPostprocessTest {
                         0.0f, 0.9f, 0.9f
                 }, 3, 3, 0.5f, 0.5f, 1.0f, 1.0f, 2, 2.0f, false);
         Assert.assertEquals(1, boxes.size());
-        Assert.assertArrayEquals(new float[] {0.75f, 0.75f, 2.0f, 0.75f,
+                Assert.assertArrayEquals(new float[] {0.75f, 0.75f, 2.0f, 0.75f,
                         2.0f, 2.0f, 0.75f, 2.0f},
                 boxes.get(0).getPoints(), 0.00001f);
+    }
+
+    @Test
+    public void clampsRestoredCoordinatesToSourceBounds() {
+        DbPostprocess.Decoder decoder = DbPostprocess.createDecoder(3, 3);
+        List<DetectionBox> boxes = decoder.decodeToSource(new float[] {
+                        0.0f, 0.0f, 0.0f,
+                        0.0f, 0.9f, 0.9f,
+                        0.0f, 0.9f, 0.9f
+                }, 0.5f, 0.5f, 1.5f, 1.5f, 2, 2.0f, false, 2, 2);
+        Assert.assertEquals(1, boxes.size());
+        for (float point : boxes.get(0).getPoints()) {
+            Assert.assertTrue(point >= 0.0f && point <= 1.0f);
+        }
     }
 
     @Test

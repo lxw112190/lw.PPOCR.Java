@@ -35,9 +35,9 @@ public final class PaddleOcrDetector implements AutoCloseable {
         ensureOpen();
         DetPreprocessResult preprocessed = DetPreprocess.resizeNormalize(source, inputWidth, inputHeight);
         session.run(preprocessed.getChw(), probabilities);
-        return postprocessor.decode(probabilities, bitmapThreshold, boxThreshold,
+        return postprocessor.decodeToSource(probabilities, bitmapThreshold, boxThreshold,
                 preprocessed.getWidthRatio(), preprocessed.getHeightRatio(),
-                maxCandidates, unclipRatio, useDilation);
+                maxCandidates, unclipRatio, useDilation, source.width(), source.height());
     }
 
     public PaddleOcrDetector(LwmModel model) {
