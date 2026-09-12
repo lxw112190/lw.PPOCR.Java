@@ -44,6 +44,29 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarFourRowBlockedMatmulWithOffsetsAndTails() {
+        int rows = 5;
+        int inner = 7;
+        int columns = 139;
+        int leftOffset = 3;
+        int rightOffset = 5;
+        int outputOffset = 7;
+        float[] left = values(leftOffset + rows * inner + 2, 0.03125f, -0.75f);
+        float[] right = values(rightOffset + inner * columns + 2, 0.0078125f, -0.5f);
+        float[] expected = new float[outputOffset + rows * columns + 2];
+        float[] actual = new float[expected.length];
+        Arrays.fill(expected, -17.0f);
+        Arrays.fill(actual, -17.0f);
+
+        scalar.matMul(left, leftOffset, right, rightOffset, expected, outputOffset,
+                rows, inner, columns);
+        vector.matMul(left, leftOffset, right, rightOffset, actual, outputOffset,
+                rows, inner, columns);
+
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
     public void matchesScalarErfApproximation() {
         float[] input = values(37, 0.16666667f, -3.0f);
         float[] expected = new float[input.length];

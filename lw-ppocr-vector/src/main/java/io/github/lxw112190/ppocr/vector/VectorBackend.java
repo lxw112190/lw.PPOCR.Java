@@ -314,7 +314,57 @@ public final class VectorBackend implements KernelBackend {
         int vectorWidth = SPECIES.length();
         int blockWidth = vectorWidth * 4;
         int blockBound = columns - columns % blockWidth;
-        for (int row = 0; row < rows; row++) {
+        int row = 0;
+        for (; row + 3 < rows; row += 4) {
+            int leftRow0 = leftOffset + row * inner;
+            int leftRow1 = leftRow0 + inner;
+            int leftRow2 = leftRow1 + inner;
+            int leftRow3 = leftRow2 + inner;
+            int outputRow0 = outputOffset + row * columns;
+            int outputRow1 = outputRow0 + columns;
+            int outputRow2 = outputRow1 + columns;
+            int outputRow3 = outputRow2 + columns;
+            int column = 0;
+            for (; column < bound; column += vectorWidth) {
+                FloatVector sum0 = FloatVector.zero(SPECIES);
+                FloatVector sum1 = FloatVector.zero(SPECIES);
+                FloatVector sum2 = FloatVector.zero(SPECIES);
+                FloatVector sum3 = FloatVector.zero(SPECIES);
+                int rightRow = rightOffset + column;
+                for (int k = 0; k < inner; k++) {
+                    FloatVector values = FloatVector.fromArray(SPECIES, right, rightRow);
+                    sum0 = sum0.add(values.mul(left[leftRow0 + k]));
+                    sum1 = sum1.add(values.mul(left[leftRow1 + k]));
+                    sum2 = sum2.add(values.mul(left[leftRow2 + k]));
+                    sum3 = sum3.add(values.mul(left[leftRow3 + k]));
+                    rightRow += columns;
+                }
+                sum0.intoArray(output, outputRow0 + column);
+                sum1.intoArray(output, outputRow1 + column);
+                sum2.intoArray(output, outputRow2 + column);
+                sum3.intoArray(output, outputRow3 + column);
+            }
+            for (; column < columns; column++) {
+                float sum0 = 0.0f;
+                float sum1 = 0.0f;
+                float sum2 = 0.0f;
+                float sum3 = 0.0f;
+                int rightIndex = rightOffset + column;
+                for (int k = 0; k < inner; k++) {
+                    float value = right[rightIndex];
+                    sum0 += left[leftRow0 + k] * value;
+                    sum1 += left[leftRow1 + k] * value;
+                    sum2 += left[leftRow2 + k] * value;
+                    sum3 += left[leftRow3 + k] * value;
+                    rightIndex += columns;
+                }
+                output[outputRow0 + column] = sum0;
+                output[outputRow1 + column] = sum1;
+                output[outputRow2 + column] = sum2;
+                output[outputRow3 + column] = sum3;
+            }
+        }
+        for (; row < rows; row++) {
             int outputRow = outputOffset + row * columns;
             int leftRow = leftOffset + row * inner;
             int column = 0;
