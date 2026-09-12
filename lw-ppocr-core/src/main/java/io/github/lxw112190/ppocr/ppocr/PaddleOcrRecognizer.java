@@ -19,6 +19,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     private final InferenceSession session;
     private final int timeSteps;
     private final float[] logits;
+    private final RecPreprocess.Workspace preprocess;
     private boolean closed;
 
     /** Takes ownership of the model and dictionary and closes both on close(). */
@@ -40,6 +41,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         try {
             this.session = new InferenceSession(model, Collections.singletonList(inputShape));
             this.logits = new float[(int) outputLength];
+            this.preprocess = new RecPreprocess.Workspace(input.getDimensions()[3]);
         } catch (RuntimeException e) {
             dictionary.close();
             model.close();
@@ -63,14 +65,12 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
 
     public RecRecognitionResult recognize(BgrImage source) {
         ensureOpen();
-        TensorInfo input = model.getTensors().get(model.getGraphInputs().get(0));
-        int targetWidth = input.getDimensions()[3];
-        RecPreprocessResult preprocessed = RecPreprocess.resizeNormalize(source, targetWidth);
-        session.run(preprocessed.getChw(), logits);
+        preprocess.resizeNormalize(source);
+        session.run(preprocess.getChw(), logits);
         CtcDecodeResult decoded = CtcDecoder.decodeGreedy(logits, timeSteps,
                 dictionary.classCount(), dictionary);
         return new RecRecognitionResult(decoded.getText(), decoded.getScore(),
-                decoded.getEmittedCount(), preprocessed.getResizedWidth());
+                decoded.getEmittedCount(), preprocess.getResizedWidth());
     }
 
     @Override

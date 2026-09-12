@@ -22,4 +22,20 @@ public final class RecPreprocessTest {
         Assert.assertEquals(128.0f * 2.0f / 255.0f - 1.0f, output[2 * 48 * 8], 0.00001f);
         Assert.assertEquals(128.0f * 2.0f / 255.0f - 1.0f, output[6], 0.00001f);
     }
+
+    @Test
+    public void reusableWorkspaceMatchesOneShotPreprocessAndClearsPadding() {
+        BgrImage source = new BgrImage(new byte[2 * 16 * 3], 2, 16, 6);
+        RecPreprocessResult oneShot = RecPreprocess.resizeNormalize(source, 32);
+        RecPreprocess.Workspace workspace = new RecPreprocess.Workspace(32);
+        workspace.resizeNormalize(source);
+        Assert.assertEquals(oneShot.getResizedWidth(), workspace.getResizedWidth());
+        Assert.assertArrayEquals(oneShot.getChw(), workspace.getChw(), 0.0f);
+
+        byte[] bright = new byte[16 * 16 * 3];
+        java.util.Arrays.fill(bright, (byte) 255);
+        workspace.resizeNormalize(new BgrImage(bright, 16, 16, 48));
+        Assert.assertEquals(32, workspace.getResizedWidth());
+        Assert.assertEquals(1.0f, workspace.getChw()[32 * 48 + 8], 0.00001f);
+    }
 }
