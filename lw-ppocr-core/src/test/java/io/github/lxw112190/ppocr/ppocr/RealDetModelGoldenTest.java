@@ -29,6 +29,15 @@ public final class RealDetModelGoldenTest {
         }
     }
 
+    @Test
+    public void acceptsDynamicBatchModelFacade() {
+        try (LwmModel model = LwmLoader.load(GoldenTestSupport.resource(
+                RealDetModelGoldenTest.class, RESOURCE_ROOT + "det.lwm"));
+             PaddleOcrDetector detector = new PaddleOcrDetector(model)) {
+            Assert.assertNotNull(detector);
+        }
+    }
+
     private static void assertGraphCase(LwmModel model, int height, int width, String outputFile)
             throws IOException {
         float[] input = new float[3 * height * width];

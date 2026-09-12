@@ -47,7 +47,8 @@ public final class PaddleOcrDetector implements AutoCloseable {
         if (inputIndex < 0 || outputIndex < 0) throw invalid("DET model must have one input and one output");
         TensorInfo input = model.getTensors().get(inputIndex);
         int[] inputDimensions = input.getDimensions();
-        if (input.getDataType() != DataType.F32 || inputDimensions.length != 4 || inputDimensions[0] != 1 ||
+        if (input.getDataType() != DataType.F32 || inputDimensions.length != 4 ||
+                (inputDimensions[0] != -1 && inputDimensions[0] != 1) ||
                 inputDimensions[1] != 3 || !validDetectorDimension(inputDimensions[2]) ||
                 !validDetectorDimension(inputDimensions[3])) {
             throw invalid("DET input must be FP32 [1,3,H,W] with 32-pixel dimensions");
