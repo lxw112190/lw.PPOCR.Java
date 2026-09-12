@@ -1,4 +1,5 @@
 target/
+.maven-repository/
 *.class
 *.jar
 .idea/
@@ -7,4 +8,3 @@ target/
 .project
 .settings/
 hs_err_pid*
-

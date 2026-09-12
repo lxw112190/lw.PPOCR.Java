@@ -14,7 +14,7 @@ import org.junit.Test;
 public final class RealRecModelGoldenTest {
     private static final String RESOURCE_ROOT = "/golden/rec/";
     private static final String MODEL_SHA256 = "59440146ae64068b70441f9c16b5878ccba21e75b41cb27220c8d9cc2d61e0ae";
-    private static final String DICTIONARY_SHA256 = "46e1b34ef45684cb46d75ac76d355341fe7f0a2c38d6ee02e63ae6b3878019fc";
+    private static final String DICTIONARY_SHA256 = "5911341b8d8bdef3924e1ab7c85094f09cf05107d9983476a10c0ee57dac1d82";
     private static final int CLASS_COUNT = 6906;
 
     @Test

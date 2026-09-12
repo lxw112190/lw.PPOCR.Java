@@ -5,7 +5,7 @@
   "model": "rec.lwm",
   "model_sha256": "59440146ae64068b70441f9c16b5878ccba21e75b41cb27220c8d9cc2d61e0ae",
   "dictionary": "ppocr_keys.txt",
-  "dictionary_sha256": "46e1b34ef45684cb46d75ac76d355341fe7f0a2c38d6ee02e63ae6b3878019fc",
+  "dictionary_sha256": "5911341b8d8bdef3924e1ab7c85094f09cf05107d9983476a10c0ee57dac1d82",
   "input_pattern": "((index * 17) % 257 - 128) / 127.0",
   "tolerance": {"relative": 0.003, "absolute": 0.00003, "mean_absolute": 0.0003, "max_absolute": 0.03},
   "api_cases": [

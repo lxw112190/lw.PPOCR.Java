@@ -96,7 +96,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         }
         int classAxis = outputDimensions.length - 1;
         if (outputDimensions[classAxis] != dictionary.classCount() ||
-                (outputDimensions.length == 3 && outputDimensions[0] != 1) ||
+                (outputDimensions.length == 3 && outputDimensions[0] != -1 && outputDimensions[0] != 1) ||
                 (outputDimensions[outputDimensions.length - 2] != -1 &&
                         outputDimensions[outputDimensions.length - 2] <= 0)) {
             throw invalid("REC output class count does not match dictionary");
