@@ -78,4 +78,16 @@ public final class DbPostprocessTest {
         Assert.assertNotEquals(points[1], points[3], 0.00001f);
         Assert.assertNotEquals(points[3], points[5], 0.00001f);
     }
+
+    @Test
+    public void reusableDecoderClearsPreviousVisitState() {
+        DbPostprocess.Decoder decoder = DbPostprocess.createDecoder(3, 3);
+        Assert.assertEquals(1, decoder.decode(new float[] {
+                0.9f, 0.9f, 0.0f,
+                0.9f, 0.9f, 0.0f,
+                0.0f, 0.0f, 0.0f
+        }, 0.5f, 0.5f, 1.0f, 1.0f, 4, 1.0f, false).size());
+        Assert.assertEquals(0, decoder.decode(new float[9], 0.5f, 0.5f,
+                1.0f, 1.0f, 4, 1.0f, false).size());
+    }
 }

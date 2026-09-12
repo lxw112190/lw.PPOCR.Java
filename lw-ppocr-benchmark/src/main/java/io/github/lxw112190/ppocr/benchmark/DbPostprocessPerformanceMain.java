@@ -15,17 +15,16 @@ public final class DbPostprocessPerformanceMain {
 
     public static void main(String[] args) {
         float[] fixture = fixture();
+        DbPostprocess.Decoder decoder = DbPostprocess.createDecoder(WIDTH, HEIGHT);
         int warmup = 5;
         for (int i = 0; i < warmup; i++) {
-            DbPostprocess.decode(fixture, WIDTH, HEIGHT, 0.3f, 0.6f,
-                    1.0f, 1.0f, 1000, 1.6f, false);
+            decoder.decode(fixture, 0.3f, 0.6f, 1.0f, 1.0f, 1000, 1.6f, false);
         }
         long[] samples = new long[ITERATIONS];
         List<DetectionBox> boxes = null;
         for (int i = 0; i < ITERATIONS; i++) {
             long start = System.nanoTime();
-            boxes = DbPostprocess.decode(fixture, WIDTH, HEIGHT, 0.3f, 0.6f,
-                    1.0f, 1.0f, 1000, 1.6f, false);
+            boxes = decoder.decode(fixture, 0.3f, 0.6f, 1.0f, 1.0f, 1000, 1.6f, false);
             samples[i] = System.nanoTime() - start;
         }
         java.util.Arrays.sort(samples);

@@ -21,6 +21,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
     private final int inputWidth;
     private final int mapHeight;
     private final int mapWidth;
+    private final DbPostprocess.Decoder postprocessor;
     private boolean closed;
 
     /** Uses C-compatible defaults: bitmap 0.3, box 0.6, unclip 1.6, no dilation. */
@@ -34,8 +35,8 @@ public final class PaddleOcrDetector implements AutoCloseable {
         DetPreprocessResult preprocessed = DetPreprocess.resizeNormalize(source, inputWidth, inputHeight);
         float[] probabilities = new float[mapHeight * mapWidth];
         session.run(preprocessed.getChw(), probabilities);
-        return DbPostprocess.decode(probabilities, mapWidth, mapHeight, bitmapThreshold,
-                boxThreshold, preprocessed.getWidthRatio(), preprocessed.getHeightRatio(),
+        return postprocessor.decode(probabilities, bitmapThreshold, boxThreshold,
+                preprocessed.getWidthRatio(), preprocessed.getHeightRatio(),
                 maxCandidates, unclipRatio, useDilation);
     }
 
@@ -76,6 +77,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
         this.inputWidth = inputDimensions[3];
         this.mapHeight = mapHeight;
         this.mapWidth = mapWidth;
+        this.postprocessor = DbPostprocess.createDecoder(mapWidth, mapHeight);
     }
 
     public static PaddleOcrDetector load(Path path) {

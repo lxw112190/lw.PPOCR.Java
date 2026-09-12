@@ -11,6 +11,11 @@ import java.util.List;
 public final class DbPostprocess {
     private DbPostprocess() { }
 
+    /** Creates a reusable, single-threaded decoder for one probability-map shape. */
+    public static Decoder createDecoder(int width, int height) {
+        return new Decoder(width, height);
+    }
+
     /**
      * Extracts 8-connected foreground components, fits their minimum rotated
      * rectangles, and restores quadrilaterals to source-image coordinates.
@@ -39,18 +44,26 @@ public final class DbPostprocess {
                                             boolean useDilation) {
         validate(probabilities, width, height, bitmapThreshold, boxThreshold,
                 widthRatio, heightRatio, maxCandidates, unclipRatio);
-        boolean[] bitmap = new boolean[probabilities.length];
+        return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
+                widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
+                new Scratch(width, height));
+    }
+
+    private static List<DetectionBox> decodeInternal(float[] probabilities, int width, int height,
+                                                     float bitmapThreshold, float boxThreshold,
+                                                     float widthRatio, float heightRatio,
+                                                     int maxCandidates, float unclipRatio,
+                                                     boolean useDilation, Scratch scratch) {
+        boolean[] bitmap = scratch.bitmap;
         for (int i = 0; i < probabilities.length; i++) bitmap[i] = probabilities[i] > bitmapThreshold;
         if (useDilation) dilate2x2(bitmap, width, height);
-        boolean[] visited = new boolean[probabilities.length];
-        int[] queue = new int[probabilities.length];
-        if (probabilities.length > Integer.MAX_VALUE / 2) {
-            throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB component geometry is too large");
-        }
-        long[] componentPoints = new long[probabilities.length];
-        long[] hull = new long[probabilities.length * 2];
-        double[] corners = new double[8];
-        double[] sortedCorners = new double[8];
+        boolean[] visited = scratch.visited;
+        Arrays.fill(visited, false);
+        int[] queue = scratch.queue;
+        long[] componentPoints = scratch.componentPoints;
+        long[] hull = scratch.hull;
+        double[] corners = scratch.corners;
+        double[] sortedCorners = scratch.sortedCorners;
         List<DetectionBox> boxes = new ArrayList<DetectionBox>();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -254,6 +267,57 @@ public final class DbPostprocess {
     private static double clamp(double value, double maximum) {
         if (value < 0.0) return 0.0;
         return value > maximum ? maximum : value;
+    }
+
+    /** Reusable decoder; callers must not invoke it concurrently. */
+    public static final class Decoder {
+        private final int width;
+        private final int height;
+        private final Scratch scratch;
+
+        private Decoder(int width, int height) {
+            this.width = width;
+            this.height = height;
+            this.scratch = new Scratch(width, height);
+        }
+
+        public List<DetectionBox> decode(float[] probabilities, float bitmapThreshold,
+                                         float boxThreshold, float widthRatio,
+                                         float heightRatio, int maxCandidates,
+                                         float unclipRatio, boolean useDilation) {
+            validate(probabilities, width, height, bitmapThreshold, boxThreshold,
+                    widthRatio, heightRatio, maxCandidates, unclipRatio);
+            return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
+                    widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation, scratch);
+        }
+    }
+
+    private static final class Scratch {
+        private final boolean[] bitmap;
+        private final boolean[] visited;
+        private final int[] queue;
+        private final long[] componentPoints;
+        private final long[] hull;
+        private final double[] corners;
+        private final double[] sortedCorners;
+
+        private Scratch(int width, int height) {
+            if (width <= 0 || height <= 0) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DB map dimensions are invalid");
+            }
+            long pixelCount = (long) width * height;
+            if (pixelCount > Integer.MAX_VALUE || pixelCount > Integer.MAX_VALUE / 2) {
+                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB component geometry is too large");
+            }
+            int count = (int) pixelCount;
+            this.bitmap = new boolean[count];
+            this.visited = new boolean[count];
+            this.queue = new int[count];
+            this.componentPoints = new long[count];
+            this.hull = new long[count * 2];
+            this.corners = new double[8];
+            this.sortedCorners = new double[8];
+        }
     }
 
     private static void orderClockwise(double[] points, double[] sorted) {
