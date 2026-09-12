@@ -3,24 +3,43 @@ package io.github.lxw112190.ppocr.model;
 import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import org.junit.Assert;
+import org.junit.Test;
 
-/** Small dependency-free smoke test; run with assertions enabled. */
+/** Loader contract tests backed by a tiny in-memory LWM fixture. */
 public final class LwmLoaderSelfTest {
-    private LwmLoaderSelfTest() { }
-
-    public static void main(String[] args) {
-        byte[] bytes = minimalModel();
-        LwmModel model = LwmLoader.load(new ByteArrayInputStream(bytes));
-        assert model.getHeader().getFormatMinor() == 1;
-        assert model.getTensors().size() == 1;
-        assert model.getGraphInputs().get(0) == 0;
-        assert model.getGraphOutputs().get(0) == 0;
-        model.close();
-        expect(OcrErrorCode.CHECKSUM_MISMATCH, corrupt(bytes));
-        System.out.println("LwmLoaderSelfTest: OK");
+    @Test
+    public void loadsMinimalModel() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(minimalModel()));
+        Assert.assertEquals(1, model.getHeader().getFormatMinor());
+        Assert.assertEquals(1, model.getTensors().size());
+        Assert.assertEquals(Integer.valueOf(0), model.getGraphInputs().get(0));
+        Assert.assertEquals(Integer.valueOf(0), model.getGraphOutputs().get(0));
     }
 
-    private static byte[] minimalModel() {
+    @Test
+    public void rejectsChecksumMismatch() {
+        try {
+            LwmLoader.load(new ByteArrayInputStream(corrupt(minimalModel())));
+            Assert.fail("expected checksum mismatch");
+        } catch (OcrException e) {
+            Assert.assertEquals(OcrErrorCode.CHECKSUM_MISMATCH, e.getCode());
+        }
+    }
+
+    @Test
+    public void rejectsClosedModel() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(minimalModel()));
+        model.close();
+        try {
+            model.getHeader();
+            Assert.fail("expected closed model failure");
+        } catch (OcrException e) {
+            Assert.assertEquals(OcrErrorCode.INVALID_ARGUMENT, e.getCode());
+        }
+    }
+
+    static byte[] minimalModel() {
         final int inputOffset = 160;
         final int outputOffset = 168;
         final int tensorOffset = 176;
@@ -47,15 +66,6 @@ public final class LwmLoaderSelfTest {
         byte[] copy = source.clone();
         copy[copy.length - 1] ^= 1;
         return copy;
-    }
-
-    private static void expect(OcrErrorCode code, byte[] bytes) {
-        try {
-            LwmLoader.load(new ByteArrayInputStream(bytes));
-            throw new AssertionError("expected " + code);
-        } catch (OcrException e) {
-            assert e.getCode() == code : e.getCode();
-        }
     }
 
     private static long fnv1a(byte[] bytes) {

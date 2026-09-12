@@ -36,11 +36,16 @@ mvn test
 ```text
 lw-ppocr-core/    LWM model layer and scalar-safe foundation
 lw-ppocr-vector/  Reserved optional Vector API backend
+lw-ppocr-benchmark/  Dependency-free loader benchmark harness
 ```
+
+GitHub Actions is the build authority for this repository. It compiles and
+tests on JDK 25 across Linux, Windows, and macOS, and runs the benchmark as a
+separate Linux job. Performance output is a development signal only; v0.x does
+not use it as a release gate.
 
 ## Scope boundaries
 
 The current code does not claim full OCR inference yet. REC graph execution,
 preprocessing, CTC decoding, CLS, DET, DB postprocess, crop, and the public OCR
 facade will be added only after the model contract and loader are stable.
-
