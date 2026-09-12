@@ -67,6 +67,14 @@ jobs:
             | tee benchmark-results/rec-stride-two-conv.json
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.DetStrideTwoConvPerformanceMain vector stem \
+            | tee benchmark-results/det-stem-stride-two-conv.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.DetStrideTwoConvPerformanceMain vector downsample \
+            | tee benchmark-results/det-downsample-stride-two-conv.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.StrideOneConvPerformanceMain vector \
             | tee benchmark-results/det-stride-one-conv.json
           java --add-modules jdk.incubator.vector \
@@ -112,6 +120,14 @@ jobs:
           echo '### REC stride-two Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/rec-stride-two-conv.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### DET stem stride-two Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/det-stem-stride-two-conv.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### DET downsample stride-two Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/det-downsample-stride-two-conv.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### DET stride-one Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
