@@ -15,6 +15,8 @@ import java.util.List;
 
 /** Fixed-shape DET facade: preprocessing, LWM execution, and DB postprocess. */
 public final class PaddleOcrDetector implements AutoCloseable {
+    private static final int DEFAULT_DYNAMIC_INPUT_SIZE = 320;
+
     private final LwmModel model;
     private final InferenceSession session;
     private final int inputHeight;
@@ -49,8 +51,8 @@ public final class PaddleOcrDetector implements AutoCloseable {
         TensorInfo input = model.getTensors().get(inputIndex);
         int[] inputDimensions = input.getDimensions();
         if (input.getDataType() != DataType.F32 || inputDimensions.length != 4 || inputDimensions[0] != 1 ||
-                inputDimensions[1] != 3 || inputDimensions[2] < 32 || inputDimensions[3] < 32 ||
-                inputDimensions[2] % 32 != 0 || inputDimensions[3] % 32 != 0) {
+                inputDimensions[1] != 3 || !validDetectorDimension(inputDimensions[2]) ||
+                !validDetectorDimension(inputDimensions[3])) {
             throw invalid("DET input must be FP32 [1,3,H,W] with 32-pixel dimensions");
         }
         TensorInfo output = model.getTensors().get(outputIndex);
@@ -59,23 +61,42 @@ public final class PaddleOcrDetector implements AutoCloseable {
             throw invalid("DET output must be an FP32 probability map");
         }
         for (int axis = 0; axis < outputDimensions.length - 2; axis++) {
-            if (outputDimensions[axis] != 1) throw invalid("DET probability map has unsupported leading dimensions");
+            if (outputDimensions[axis] != -1 && outputDimensions[axis] != 1) {
+                throw invalid("DET probability map has unsupported leading dimensions");
+            }
         }
-        int mapHeight = outputDimensions[outputDimensions.length - 2];
-        int mapWidth = outputDimensions[outputDimensions.length - 1];
-        if (mapHeight <= 0 || mapWidth <= 0 || (long) mapHeight * mapWidth > Integer.MAX_VALUE) {
-            throw invalid("DET probability map dimensions are invalid");
-        }
+        int resolvedInputHeight = inputDimensions[2] == -1 ? DEFAULT_DYNAMIC_INPUT_SIZE : inputDimensions[2];
+        int resolvedInputWidth = inputDimensions[3] == -1 ? DEFAULT_DYNAMIC_INPUT_SIZE : inputDimensions[3];
         this.model = model;
         try {
             this.session = new InferenceSession(model,
-                    Collections.singletonList(new TensorShape(inputDimensions)));
+                    Collections.singletonList(new TensorShape(1, 3, resolvedInputHeight, resolvedInputWidth)));
         } catch (RuntimeException e) {
             model.close();
             throw e;
         }
-        this.inputHeight = inputDimensions[2];
-        this.inputWidth = inputDimensions[3];
+        TensorShape resolvedOutput = this.session.execution().shapes().get(outputIndex);
+        if (resolvedOutput.getRank() < 2) {
+            this.session.close();
+            model.close();
+            throw invalid("DET probability map rank is invalid");
+        }
+        for (int axis = 0; axis < resolvedOutput.getRank() - 2; axis++) {
+            if (resolvedOutput.get(axis) != 1) {
+                this.session.close();
+                model.close();
+                throw invalid("DET probability map has unsupported leading dimensions");
+            }
+        }
+        int mapHeight = resolvedOutput.get(resolvedOutput.getRank() - 2);
+        int mapWidth = resolvedOutput.get(resolvedOutput.getRank() - 1);
+        if (mapHeight <= 0 || mapWidth <= 0 || (long) mapHeight * mapWidth > Integer.MAX_VALUE) {
+            this.session.close();
+            model.close();
+            throw invalid("DET probability map dimensions are invalid");
+        }
+        this.inputHeight = resolvedInputHeight;
+        this.inputWidth = resolvedInputWidth;
         this.mapHeight = mapHeight;
         this.mapWidth = mapWidth;
         this.preprocess = new DetPreprocess.Workspace(inputWidth, inputHeight);
@@ -104,6 +125,10 @@ public final class PaddleOcrDetector implements AutoCloseable {
 
     private static OcrException invalid(String message) {
         return new OcrException(OcrErrorCode.INVALID_MODEL, message);
+    }
+
+    private static boolean validDetectorDimension(int dimension) {
+        return dimension == -1 || (dimension >= 32 && dimension % 32 == 0);
     }
 
     private void ensureOpen() {
