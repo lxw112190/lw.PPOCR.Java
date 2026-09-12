@@ -75,6 +75,9 @@ public final class PaddleOcr implements AutoCloseable {
                 options.getDetectionUnclipRatio(), options.isDetectionDilation(),
                 options.getMaxDetectionCandidates());
         List<OcrLineResult> lines = new ArrayList<OcrLineResult>(boxes.size());
+        List<BgrImage> crops = new ArrayList<BgrImage>(boxes.size());
+        List<ClsClassificationResult> classifications = new ArrayList<ClsClassificationResult>(boxes.size());
+        List<Boolean> rotations = new ArrayList<Boolean>(boxes.size());
         for (DetectionBox box : boxes) {
             BgrImage crop = cropper.crop(source, box);
             ClsClassificationResult classification = null;
@@ -86,7 +89,17 @@ public final class PaddleOcr implements AutoCloseable {
                     rotated = true;
                 }
             }
-            RecRecognitionResult recognition = recognizer.recognize(crop);
+            crops.add(crop);
+            classifications.add(classification);
+            rotations.add(rotated);
+        }
+        List<RecRecognitionResult> recognitions = recognizer.recognizeAll(
+                crops, options.getRecognitionParallelism());
+        for (int i = 0; i < boxes.size(); i++) {
+            RecRecognitionResult recognition = recognitions.get(i);
+            ClsClassificationResult classification = classifications.get(i);
+            boolean rotated = rotations.get(i);
+            DetectionBox box = boxes.get(i);
             lines.add(new OcrLineResult(box, recognition.getText(), recognition.getScore(),
                     classification, rotated));
         }

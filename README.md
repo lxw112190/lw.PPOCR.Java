@@ -29,6 +29,10 @@ decoding, orientation correction, reading-order sorting, and the public
 immutable `PaddleOcrOptions`; concurrent callers can use `OcrWorkerPool` with
 independent sessions.
 
+REC can optionally evaluate different dynamic-width groups concurrently while
+preserving input and reading order. The default parallelism is one; applications
+opt in through `PaddleOcrOptions.setRecognitionParallelism`.
+
 The runtime intentionally does not parse ONNX. Model conversion remains an
 offline responsibility of `lw.PPOCR.C` and its converter.
 

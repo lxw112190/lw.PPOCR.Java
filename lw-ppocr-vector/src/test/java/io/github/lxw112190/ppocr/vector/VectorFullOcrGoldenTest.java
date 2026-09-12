@@ -7,6 +7,7 @@ import io.github.lxw112190.ppocr.ppocr.PaddleOcr;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrClassifier;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrDetector;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrDictionary;
+import io.github.lxw112190.ppocr.ppocr.PaddleOcrOptions;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrRecognizer;
 import org.junit.Test;
 
@@ -26,7 +27,8 @@ public final class VectorFullOcrGoldenTest {
              PaddleOcrClassifier classifier = new PaddleOcrClassifier(classifierModel, backend);
              PaddleOcrDictionary dictionary = FullOcrGoldenFixture.loadDictionary(VectorFullOcrGoldenTest.class);
              PaddleOcrRecognizer recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary, backend);
-             PaddleOcr ocr = new PaddleOcr(detector, classifier, recognizer)) {
+             PaddleOcr ocr = new PaddleOcr(detector, classifier, recognizer,
+                     PaddleOcrOptions.builder().setRecognitionParallelism(4).build())) {
             FullOcrGoldenFixture.assertMatches(ocr.recognize(image));
         }
     }

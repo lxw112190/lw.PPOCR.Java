@@ -122,6 +122,18 @@ try (OcrWorkerPool pool = new OcrWorkerPool(Arrays.asList(
 
 Worker pool 会共享不可变模型内容的语义由各 worker 管理；每个 worker 的执行工作区彼此独立。关闭 pool 会等待正在执行的请求完成。
 
+单张图片包含多行文字时，可以显式开启 REC 宽度组并行：
+
+```java
+PaddleOcrOptions options = PaddleOcrOptions.builder()
+        .setRecognitionParallelism(4)
+        .build();
+```
+
+实现会先按 192/320/480/640/960 目标宽度分组：同一宽度组内顺序执行，不同
+宽度组并行执行，最终仍按原输入及阅读顺序返回。Session 和模型常量不会按文字行
+重复创建。默认值为 1，低核或严格限制线程的环境无需改动。
+
 ## 当前范围
 
 v0.1-preview 面向固定形状 FP32 的 PP-OCRv6 Tiny/Small/Medium 合同，Scalar 是稳定参考路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU 或 Android；Vector API 后端是 JDK 25 可选加速路径，仍会对未优化算子回退 Scalar。性能数字仅用于同机研发比较，不构成发布性能承诺。

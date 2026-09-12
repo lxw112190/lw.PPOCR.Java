@@ -10,8 +10,20 @@ import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
 import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.nio.file.Path;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /** Dynamic-width REC facade: BGR preprocessing, scalar graph execution, and CTC decoding. */
 public final class PaddleOcrRecognizer implements AutoCloseable {
@@ -22,6 +34,8 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     private final boolean dynamicWidth;
     private final KernelBackend backend;
     private final Map<Integer, RecSessionContext> sessions;
+    private ExecutorService parallelExecutor;
+    private int parallelExecutorSize;
     private boolean closed;
 
     /** Takes ownership of the model and dictionary and closes both on close(). */
@@ -62,12 +76,92 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
 
     public RecRecognitionResult recognize(BgrImage source) {
         ensureOpen();
+        if (source == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "REC source image is required");
+        }
         int targetWidth = dynamicWidth ? RecWidthPolicy.chooseTargetWidth(source, maximumWidth) : maximumWidth;
+        return recognize(source, context(targetWidth));
+    }
+
+    /** Recognizes images in input order while evaluating independent width groups concurrently. */
+    public List<RecRecognitionResult> recognizeAll(List<BgrImage> sources, int parallelism) {
+        ensureOpen();
+        if (sources == null || parallelism <= 0 || parallelism > 64) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "REC sources and parallelism are invalid");
+        }
+        if (sources.isEmpty()) return Collections.emptyList();
+        Map<Integer, RecognitionGroup> byWidth = new LinkedHashMap<Integer, RecognitionGroup>();
+        for (int i = 0; i < sources.size(); i++) {
+            BgrImage source = sources.get(i);
+            if (source == null) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "REC source image is required");
+            }
+            int width = dynamicWidth ? RecWidthPolicy.chooseTargetWidth(source, maximumWidth) : maximumWidth;
+            RecognitionGroup group = byWidth.get(width);
+            if (group == null) {
+                group = new RecognitionGroup(context(width));
+                byWidth.put(width, group);
+            }
+            group.indexes.add(i);
+            group.sources.add(source);
+        }
+        final RecRecognitionResult[] results = new RecRecognitionResult[sources.size()];
+        final List<RecognitionGroup> groups = new ArrayList<RecognitionGroup>(byWidth.values());
+        int workers = Math.min(parallelism, groups.size());
+        if (workers == 1) {
+            for (RecognitionGroup group : groups) recognize(group, results);
+            return Arrays.asList(results);
+        }
+
+        ExecutorService executor = executor(workers);
+        List<Future<Void>> futures = new ArrayList<Future<Void>>(workers);
+        for (int worker = 0; worker < workers; worker++) {
+            final int firstGroup = worker;
+            final int stride = workers;
+            futures.add(executor.submit(new Callable<Void>() {
+                @Override
+                public Void call() {
+                    for (int group = firstGroup; group < groups.size(); group += stride) {
+                        recognize(groups.get(group), results);
+                    }
+                    return null;
+                }
+            }));
+        }
+        RuntimeException failure = null;
+        for (Future<Void> future : futures) {
+            try {
+                future.get();
+            } catch (InterruptedException e) {
+                for (Future<Void> pending : futures) pending.cancel(true);
+                Thread.currentThread().interrupt();
+                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
+                        "parallel REC execution was interrupted", e);
+            } catch (ExecutionException e) {
+                Throwable cause = e.getCause();
+                RuntimeException current = cause instanceof RuntimeException
+                        ? (RuntimeException) cause
+                        : new OcrException(OcrErrorCode.RESOURCE_LIMIT,
+                                "parallel REC execution failed", cause);
+                if (failure == null) failure = current;
+                else failure.addSuppressed(current);
+            }
+        }
+        if (failure != null) throw failure;
+        return Arrays.asList(results);
+    }
+
+    private RecSessionContext context(int targetWidth) {
         RecSessionContext context = sessions.get(targetWidth);
         if (context == null) {
             context = new RecSessionContext(model, targetWidth, dictionary.classCount(), backend);
             sessions.put(targetWidth, context);
         }
+        return context;
+    }
+
+    private RecRecognitionResult recognize(BgrImage source, RecSessionContext context) {
         context.preprocess.resizeNormalize(source);
         context.session.run(context.preprocess.getChw(), context.logits);
         CtcDecodeResult decoded = CtcDecoder.decodeGreedy(context.logits, context.timeSteps,
@@ -76,10 +170,26 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
                 decoded.getEmittedCount(), context.preprocess.getResizedWidth());
     }
 
+    private void recognize(RecognitionGroup group, RecRecognitionResult[] results) {
+        for (int i = 0; i < group.sources.size(); i++) {
+            results[group.indexes.get(i)] = recognize(group.sources.get(i), group.context);
+        }
+    }
+
+    private ExecutorService executor(int size) {
+        if (parallelExecutor == null || parallelExecutorSize < size) {
+            if (parallelExecutor != null) parallelExecutor.shutdown();
+            parallelExecutor = Executors.newFixedThreadPool(size, DaemonThreadFactory.INSTANCE);
+            parallelExecutorSize = size;
+        }
+        return parallelExecutor;
+    }
+
     @Override
     public void close() {
         if (!closed) {
             closed = true;
+            if (parallelExecutor != null) parallelExecutor.shutdown();
             for (RecSessionContext context : sessions.values()) context.close();
             sessions.clear();
             dictionary.close();
@@ -121,5 +231,27 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
 
     private void ensureOpen() {
         if (closed) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "REC recognizer is closed");
+    }
+
+    private static final class RecognitionGroup {
+        private final RecSessionContext context;
+        private final List<Integer> indexes = new ArrayList<Integer>();
+        private final List<BgrImage> sources = new ArrayList<BgrImage>();
+
+        private RecognitionGroup(RecSessionContext context) {
+            this.context = context;
+        }
+    }
+
+    private static final class DaemonThreadFactory implements ThreadFactory {
+        private static final DaemonThreadFactory INSTANCE = new DaemonThreadFactory();
+        private static final AtomicInteger IDS = new AtomicInteger();
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            Thread thread = new Thread(runnable, "lw-ppocr-rec-" + IDS.incrementAndGet());
+            thread.setDaemon(true);
+            return thread;
+        }
     }
 }
