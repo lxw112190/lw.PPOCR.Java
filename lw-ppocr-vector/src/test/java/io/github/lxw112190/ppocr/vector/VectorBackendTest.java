@@ -4,6 +4,7 @@ import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.runtime.BinaryPlan;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
+import java.util.Arrays;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -88,6 +89,35 @@ public final class VectorBackendTest {
                 1, 3, 1, 23, 8, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 23);
         vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
                 1, 3, 1, 23, 8, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 23);
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
+    public void matchesScalarGroupedPointwiseConvolutionWithOffsets() {
+        int batch = 2;
+        int channels = 6;
+        int plane = 23;
+        int groups = 2;
+        int outputChannels = 26;
+        int inputOffset = 5;
+        int weightOffset = 7;
+        int biasOffset = 3;
+        int outputOffset = 11;
+        float[] input = values(inputOffset + batch * channels * plane + 4,
+                0.001953125f, -0.375f);
+        float[] weights = values(weightOffset + outputChannels * channels / groups + 4,
+                0.00390625f, -0.25f);
+        float[] bias = values(biasOffset + outputChannels + 4, 0.015625f, -0.125f);
+        float[] expected = new float[outputOffset + batch * outputChannels * plane + 7];
+        float[] actual = new float[expected.length];
+        Arrays.fill(expected, -9.0f);
+        Arrays.fill(actual, -9.0f);
+        scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                expected, outputOffset, batch, channels, 1, plane, outputChannels,
+                1, 1, 1, 1, 1, 1, 0, 0, groups, 1, plane);
+        vector.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                actual, outputOffset, batch, channels, 1, plane, outputChannels,
+                1, 1, 1, 1, 1, 1, 0, 0, groups, 1, plane);
         Assert.assertArrayEquals(expected, actual, 0.000001f);
     }
 

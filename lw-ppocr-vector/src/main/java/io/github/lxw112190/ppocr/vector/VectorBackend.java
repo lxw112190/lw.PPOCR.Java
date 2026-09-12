@@ -544,6 +544,8 @@ public final class VectorBackend implements KernelBackend {
         int bound = SPECIES.loopBound(plane);
         for (int n = 0; n < batch; n++) {
             for (int group = 0; group < groups; group++) {
+                int inputGroupBase = inputOffset +
+                        (n * channels + group * inputsPerGroup) * plane;
                 int oc = 0;
                 for (; oc + 7 < outputsPerGroup; oc += 8) {
                     int channel0 = group * outputsPerGroup + oc;
@@ -571,20 +573,27 @@ public final class VectorBackend implements KernelBackend {
                     float bias5 = bias == null ? 0.0f : bias[biasOffset + channel0 + 5];
                     float bias6 = bias == null ? 0.0f : bias[biasOffset + channel0 + 6];
                     float bias7 = bias == null ? 0.0f : bias[biasOffset + channel0 + 7];
+                    FloatVector biasVector0 = FloatVector.broadcast(SPECIES, bias0);
+                    FloatVector biasVector1 = FloatVector.broadcast(SPECIES, bias1);
+                    FloatVector biasVector2 = FloatVector.broadcast(SPECIES, bias2);
+                    FloatVector biasVector3 = FloatVector.broadcast(SPECIES, bias3);
+                    FloatVector biasVector4 = FloatVector.broadcast(SPECIES, bias4);
+                    FloatVector biasVector5 = FloatVector.broadcast(SPECIES, bias5);
+                    FloatVector biasVector6 = FloatVector.broadcast(SPECIES, bias6);
+                    FloatVector biasVector7 = FloatVector.broadcast(SPECIES, bias7);
                     int i = 0;
                     for (; i < bound; i += SPECIES.length()) {
-                        FloatVector result0 = FloatVector.broadcast(SPECIES, bias0);
-                        FloatVector result1 = FloatVector.broadcast(SPECIES, bias1);
-                        FloatVector result2 = FloatVector.broadcast(SPECIES, bias2);
-                        FloatVector result3 = FloatVector.broadcast(SPECIES, bias3);
-                        FloatVector result4 = FloatVector.broadcast(SPECIES, bias4);
-                        FloatVector result5 = FloatVector.broadcast(SPECIES, bias5);
-                        FloatVector result6 = FloatVector.broadcast(SPECIES, bias6);
-                        FloatVector result7 = FloatVector.broadcast(SPECIES, bias7);
+                        FloatVector result0 = biasVector0;
+                        FloatVector result1 = biasVector1;
+                        FloatVector result2 = biasVector2;
+                        FloatVector result3 = biasVector3;
+                        FloatVector result4 = biasVector4;
+                        FloatVector result5 = biasVector5;
+                        FloatVector result6 = biasVector6;
+                        FloatVector result7 = biasVector7;
+                        int inputIndex = inputGroupBase + i;
                         for (int ic = 0; ic < inputsPerGroup; ic++) {
-                            int inputBase = inputOffset +
-                                    (n * channels + group * inputsPerGroup + ic) * plane;
-                            FloatVector sample = FloatVector.fromArray(SPECIES, input, inputBase + i);
+                            FloatVector sample = FloatVector.fromArray(SPECIES, input, inputIndex);
                             result0 = result0.add(sample.mul(weights[weight0 + ic]));
                             result1 = result1.add(sample.mul(weights[weight1 + ic]));
                             result2 = result2.add(sample.mul(weights[weight2 + ic]));
@@ -593,6 +602,7 @@ public final class VectorBackend implements KernelBackend {
                             result5 = result5.add(sample.mul(weights[weight5 + ic]));
                             result6 = result6.add(sample.mul(weights[weight6 + ic]));
                             result7 = result7.add(sample.mul(weights[weight7 + ic]));
+                            inputIndex += plane;
                         }
                         result0.intoArray(output, output0 + i);
                         result1.intoArray(output, output1 + i);
@@ -612,10 +622,9 @@ public final class VectorBackend implements KernelBackend {
                         float result5 = bias5;
                         float result6 = bias6;
                         float result7 = bias7;
+                        int inputIndex = inputGroupBase + i;
                         for (int ic = 0; ic < inputsPerGroup; ic++) {
-                            int inputBase = inputOffset +
-                                    (n * channels + group * inputsPerGroup + ic) * plane;
-                            float sample = input[inputBase + i];
+                            float sample = input[inputIndex];
                             result0 += sample * weights[weight0 + ic];
                             result1 += sample * weights[weight1 + ic];
                             result2 += sample * weights[weight2 + ic];
@@ -624,6 +633,7 @@ public final class VectorBackend implements KernelBackend {
                             result5 += sample * weights[weight5 + ic];
                             result6 += sample * weights[weight6 + ic];
                             result7 += sample * weights[weight7 + ic];
+                            inputIndex += plane;
                         }
                         output[output0 + i] = result0;
                         output[output1 + i] = result1;
@@ -649,20 +659,24 @@ public final class VectorBackend implements KernelBackend {
                     float bias1 = bias == null ? 0.0f : bias[biasOffset + channel0 + 1];
                     float bias2 = bias == null ? 0.0f : bias[biasOffset + channel0 + 2];
                     float bias3 = bias == null ? 0.0f : bias[biasOffset + channel0 + 3];
+                    FloatVector biasVector0 = FloatVector.broadcast(SPECIES, bias0);
+                    FloatVector biasVector1 = FloatVector.broadcast(SPECIES, bias1);
+                    FloatVector biasVector2 = FloatVector.broadcast(SPECIES, bias2);
+                    FloatVector biasVector3 = FloatVector.broadcast(SPECIES, bias3);
                     int i = 0;
                     for (; i < bound; i += SPECIES.length()) {
-                        FloatVector result0 = FloatVector.broadcast(SPECIES, bias0);
-                        FloatVector result1 = FloatVector.broadcast(SPECIES, bias1);
-                        FloatVector result2 = FloatVector.broadcast(SPECIES, bias2);
-                        FloatVector result3 = FloatVector.broadcast(SPECIES, bias3);
+                        FloatVector result0 = biasVector0;
+                        FloatVector result1 = biasVector1;
+                        FloatVector result2 = biasVector2;
+                        FloatVector result3 = biasVector3;
+                        int inputIndex = inputGroupBase + i;
                         for (int ic = 0; ic < inputsPerGroup; ic++) {
-                            int inputBase = inputOffset +
-                                    (n * channels + group * inputsPerGroup + ic) * plane;
-                            FloatVector sample = FloatVector.fromArray(SPECIES, input, inputBase + i);
+                            FloatVector sample = FloatVector.fromArray(SPECIES, input, inputIndex);
                             result0 = result0.add(sample.mul(weights[weight0 + ic]));
                             result1 = result1.add(sample.mul(weights[weight1 + ic]));
                             result2 = result2.add(sample.mul(weights[weight2 + ic]));
                             result3 = result3.add(sample.mul(weights[weight3 + ic]));
+                            inputIndex += plane;
                         }
                         result0.intoArray(output, output0 + i);
                         result1.intoArray(output, output1 + i);
@@ -674,14 +688,14 @@ public final class VectorBackend implements KernelBackend {
                         float result1 = bias1;
                         float result2 = bias2;
                         float result3 = bias3;
+                        int inputIndex = inputGroupBase + i;
                         for (int ic = 0; ic < inputsPerGroup; ic++) {
-                            int inputBase = inputOffset +
-                                    (n * channels + group * inputsPerGroup + ic) * plane;
-                            float sample = input[inputBase + i];
+                            float sample = input[inputIndex];
                             result0 += sample * weights[weight0 + ic];
                             result1 += sample * weights[weight1 + ic];
                             result2 += sample * weights[weight2 + ic];
                             result3 += sample * weights[weight3 + ic];
+                            inputIndex += plane;
                         }
                         output[output0 + i] = result0;
                         output[output1 + i] = result1;
@@ -694,23 +708,24 @@ public final class VectorBackend implements KernelBackend {
                     int outputBase = outputOffset + (n * outputChannels + channel) * plane;
                     int weightBase = weightOffset + channel * inputsPerGroup;
                     float initial = bias == null ? 0.0f : bias[biasOffset + channel];
+                    FloatVector initialVector = FloatVector.broadcast(SPECIES, initial);
                     int i = 0;
                     for (; i < bound; i += SPECIES.length()) {
-                        FloatVector result = FloatVector.broadcast(SPECIES, initial);
+                        FloatVector result = initialVector;
+                        int inputIndex = inputGroupBase + i;
                         for (int ic = 0; ic < inputsPerGroup; ic++) {
-                            int inputBase = inputOffset +
-                                    (n * channels + group * inputsPerGroup + ic) * plane;
-                            result = result.add(FloatVector.fromArray(SPECIES, input, inputBase + i)
+                            result = result.add(FloatVector.fromArray(SPECIES, input, inputIndex)
                                     .mul(weights[weightBase + ic]));
+                            inputIndex += plane;
                         }
                         result.intoArray(output, outputBase + i);
                     }
                     for (; i < plane; i++) {
                         float result = initial;
+                        int inputIndex = inputGroupBase + i;
                         for (int ic = 0; ic < inputsPerGroup; ic++) {
-                            int inputBase = inputOffset +
-                                    (n * channels + group * inputsPerGroup + ic) * plane;
-                            result += input[inputBase + i] * weights[weightBase + ic];
+                            result += input[inputIndex] * weights[weightBase + ic];
+                            inputIndex += plane;
                         }
                         output[outputBase + i] = result;
                     }
