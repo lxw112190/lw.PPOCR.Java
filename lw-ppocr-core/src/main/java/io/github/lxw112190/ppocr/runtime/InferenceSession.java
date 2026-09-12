@@ -18,6 +18,7 @@ public final class InferenceSession implements AutoCloseable {
     private final PreparedExecution execution;
     private final Workspace workspace;
     private final KernelBackend backend;
+    private final NodeInfo[] nodes;
     private final ByteBuffer[] parameters;
     private final IdentityHashMap<NodeInfo, Integer> nodeIndexes;
     private final IdentityHashMap<NodeInfo, int[]> nodeInputs;
@@ -48,22 +49,23 @@ public final class InferenceSession implements AutoCloseable {
         this.execution = new PreparedExecution(model, inputShapes);
         this.workspace = new Workspace(execution.workspacePlan());
         this.backend = backend;
-        List<NodeInfo> nodes = model.getNodes();
-        this.parameters = new ByteBuffer[nodes.size()];
-        this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.size());
-        this.nodeInputs = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.nodeOutputs = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.transposePermutations = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.transposeInputStrides = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.reduceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.sliceStarts = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.sliceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.sliceSteps = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.concatPlans = new IdentityHashMap<NodeInfo, ConcatPlan>(nodes.size());
-        this.layoutAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
-        this.binaryPlans = new IdentityHashMap<NodeInfo, BinaryPlan>(nodes.size());
-        for (int i = 0; i < nodes.size(); i++) {
-            NodeInfo node = nodes.get(i);
+        List<NodeInfo> modelNodes = model.getNodes();
+        this.nodes = modelNodes.toArray(new NodeInfo[modelNodes.size()]);
+        this.parameters = new ByteBuffer[nodes.length];
+        this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.length);
+        this.nodeInputs = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.nodeOutputs = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.transposePermutations = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.transposeInputStrides = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.reduceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.sliceStarts = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.sliceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.sliceSteps = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.concatPlans = new IdentityHashMap<NodeInfo, ConcatPlan>(nodes.length);
+        this.layoutAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
+        this.binaryPlans = new IdentityHashMap<NodeInfo, BinaryPlan>(nodes.length);
+        for (int i = 0; i < nodes.length; i++) {
+            NodeInfo node = nodes[i];
             this.nodeIndexes.put(node, i);
             this.nodeInputs.put(node, node.getInputs());
             this.nodeOutputs.put(node, node.getOutputs());
@@ -88,9 +90,7 @@ public final class InferenceSession implements AutoCloseable {
         requireLength(output, execution.length(outputIndex), "output");
         float[] storage = workspace.fp32();
         System.arraycopy(input, 0, storage, execution.offset(inputIndex), input.length);
-        for (NodeInfo node : execution.model().getNodes()) {
-            executeNode(node, storage);
-        }
+        for (int i = 0; i < nodes.length; i++) executeNode(nodes[i], storage);
         System.arraycopy(storage, execution.offset(outputIndex), output, 0, output.length);
     }
 

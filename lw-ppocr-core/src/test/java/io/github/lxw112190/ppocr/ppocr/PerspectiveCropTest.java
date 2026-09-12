@@ -1,6 +1,7 @@
 package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.image.BgrImage;
+import java.util.Arrays;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -45,5 +46,30 @@ public final class PerspectiveCropTest {
         Assert.assertEquals(expected.width(), actual.width());
         Assert.assertEquals(expected.height(), actual.height());
         Assert.assertArrayEquals(expected.pixels(), actual.pixels());
+    }
+
+    @Test
+    public void reusableWorkspaceRetainsPixelBuffersBySlot() {
+        byte[] pixels = new byte[6 * 6 * 3];
+        for (int i = 0; i < pixels.length; i++) pixels[i] = (byte) i;
+        BgrImage source = new BgrImage(pixels, 6, 6, 18);
+        PerspectiveCrop.Workspace workspace = new PerspectiveCrop.Workspace();
+        DetectionBox large = new DetectionBox(
+                new float[] {0, 0, 5, 0, 5, 5, 0, 5}, 0.9f);
+        DetectionBox small = new DetectionBox(
+                new float[] {1, 1, 4, 1, 4, 4, 1, 4}, 0.9f);
+
+        BgrImage first = workspace.crop(source, large, 0);
+        byte[] retained = first.pixels();
+        BgrImage reused = workspace.crop(source, small, 0);
+        BgrImage otherSlot = workspace.crop(source, small, 1);
+
+        Assert.assertSame(retained, reused.pixels());
+        Assert.assertNotSame(retained, otherSlot.pixels());
+        Assert.assertEquals(3, reused.width());
+        Assert.assertEquals(3, reused.height());
+        BgrImage expected = PerspectiveCrop.crop(source, small);
+        Assert.assertArrayEquals(expected.pixels(),
+                Arrays.copyOf(reused.pixels(), expected.pixels().length));
     }
 }

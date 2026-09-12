@@ -3,27 +3,46 @@ package io.github.lxw112190.ppocr.ppocr;
 import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
+import java.util.ArrayList;
+import java.util.List;
 
 /** Perspective BGR crop matching the four-point crop contract used by PP-OCR. */
 public final class PerspectiveCrop {
     private PerspectiveCrop() { }
 
     public static BgrImage crop(BgrImage source, DetectionBox box) {
-        return crop(source, box, new float[8], new double[8]);
+        return crop(source, box, new float[8], new double[8], null);
     }
 
-    /** Reusable crop geometry workspace; callers must not invoke it concurrently. */
+    /** Reusable crop geometry and optional pixel buffers; callers must not invoke it concurrently. */
     public static final class Workspace {
         private final float[] values = new float[8];
         private final double[] points = new double[8];
+        private final List<byte[]> pixelBuffers = new ArrayList<byte[]>();
 
         public BgrImage crop(BgrImage source, DetectionBox box) {
-            return PerspectiveCrop.crop(source, box, values, points);
+            return PerspectiveCrop.crop(source, box, values, points, null);
+        }
+
+        /**
+         * Reuses the backing pixel array associated with {@code slot}. The returned view remains
+         * valid until this workspace crops into the same slot again.
+         */
+        public BgrImage crop(BgrImage source, DetectionBox box, int slot) {
+            if (slot < 0) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "crop buffer slot must not be negative");
+            }
+            while (pixelBuffers.size() <= slot) pixelBuffers.add(null);
+            BgrImage result = PerspectiveCrop.crop(source, box, values, points,
+                    pixelBuffers.get(slot));
+            pixelBuffers.set(slot, result.pixels());
+            return result;
         }
     }
 
     private static BgrImage crop(BgrImage source, DetectionBox box,
-                                 float[] values, double[] points) {
+                                 float[] values, double[] points, byte[] reusableOutput) {
         if (source == null || box == null) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image and detection box are required");
         }
@@ -40,7 +59,8 @@ public final class PerspectiveCrop {
         int outputHeight = rotateVertical ? unrotatedWidth : unrotatedHeight;
         long outputBytes = (long) outputWidth * outputHeight * 3L;
         if (outputBytes > Integer.MAX_VALUE) throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "crop is too large");
-        byte[] output = new byte[(int) outputBytes];
+        byte[] output = reusableOutput != null && reusableOutput.length >= outputBytes
+                ? reusableOutput : new byte[(int) outputBytes];
         double dx1 = points[2] - points[4];
         double dx2 = points[6] - points[4];
         double dx3 = points[0] - points[2] + points[4] - points[6];

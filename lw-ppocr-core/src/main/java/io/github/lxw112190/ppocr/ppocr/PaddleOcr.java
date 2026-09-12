@@ -93,8 +93,9 @@ public final class PaddleOcr implements AutoCloseable {
         List<BgrImage> crops = new ArrayList<BgrImage>(boxes.size());
         List<ClsClassificationResult> classifications = new ArrayList<ClsClassificationResult>(boxes.size());
         List<Boolean> rotations = new ArrayList<Boolean>(boxes.size());
-        for (DetectionBox box : boxes) {
-            BgrImage crop = cropper.crop(source, box);
+        for (int i = 0; i < boxes.size(); i++) {
+            DetectionBox box = boxes.get(i);
+            BgrImage crop = cropper.crop(source, box, i);
             ClsClassificationResult classification = null;
             boolean rotated = false;
             if (classifier != null) {

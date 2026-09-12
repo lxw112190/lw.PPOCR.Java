@@ -160,6 +160,10 @@ OCR。性能摘要明确区分 Scalar、Vector 和 Vector REC×4，并报告 DET
 在关闭算子探针时采集计时与内存数据，再额外运行一次已预热 OCR 生成全线程算子
 诊断；`summed_thread_ms_per_ocr` 是并行线程耗时之和，不能与墙钟总耗时直接相加比较。
 
+完整流水线会复用 Session 工作区、预处理数组、DB 几何缓冲和按文字行槽位保存的
+透视裁剪像素缓冲，避免每次调用重复申请大数组。`PaddleOcr` 本身是单调用者对象；
+并发服务应为每个工作线程准备独立实例，或使用 `OcrWorkerPool`。
+
 ## 当前范围
 
 v0.1-preview 当前验证的是动态形状 FP32 PP-OCRv6 Tiny 合同，Scalar 是稳定参考

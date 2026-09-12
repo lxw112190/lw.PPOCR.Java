@@ -358,9 +358,10 @@ public final class FullOcrPerformanceMain {
             List<BgrImage> crops = new ArrayList<BgrImage>(boxes.size());
             List<ClsClassificationResult> classifications = new ArrayList<ClsClassificationResult>(boxes.size());
             List<Boolean> rotations = new ArrayList<Boolean>(boxes.size());
-            for (DetectionBox box : boxes) {
+            for (int line = 0; line < boxes.size(); line++) {
+                DetectionBox box = boxes.get(line);
                 start = System.nanoTime();
-                BgrImage crop = cropper.crop(source, box);
+                BgrImage crop = cropper.crop(source, box, line);
                 sample.cropNanos += System.nanoTime() - start;
 
                 start = System.nanoTime();

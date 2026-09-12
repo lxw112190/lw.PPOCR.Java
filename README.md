@@ -74,6 +74,11 @@ runs one separate warmed diagnostic invocation; parallel operator time is the
 sum across participating threads. Performance output is a development signal
 only; v0.x does not use it as a release gate.
 
+Prepared inference sessions, preprocessing arrays, DB geometry scratch space,
+and per-line perspective-crop pixel buffers are reused across synchronous OCR
+calls. A `PaddleOcr` instance is therefore intended for one caller at a time;
+use separate instances or `OcrWorkerPool` for concurrent requests.
+
 For applications using AWT/ImageIO, `lw-ppocr-imageio` also provides
 `PaddleOcrImageIo` convenience methods for `Path`, `InputStream`, and
 `BufferedImage`. The core module remains independent of AWT and ImageIO.
