@@ -21,6 +21,8 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, Integer> nodeIndexes;
     private final IdentityHashMap<NodeInfo, int[]> nodeInputs;
     private final IdentityHashMap<NodeInfo, int[]> nodeOutputs;
+    private final IdentityHashMap<NodeInfo, int[]> transposePermutations;
+    private final IdentityHashMap<NodeInfo, int[]> transposeInputStrides;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -43,12 +45,15 @@ public final class InferenceSession implements AutoCloseable {
         this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.size());
         this.nodeInputs = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.nodeOutputs = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.transposePermutations = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.transposeInputStrides = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
             NodeInfo node = nodes.get(i);
             this.nodeIndexes.put(node, i);
             this.nodeInputs.put(node, node.getInputs());
             this.nodeOutputs.put(node, node.getOutputs());
             this.parameters[i] = model.parameterData(i);
+            prepareTranspose(node);
         }
     }
 
@@ -453,12 +458,21 @@ public final class InferenceSession implements AutoCloseable {
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = parameterData(node);
-        int rank = params.getShort(2) & 0xffff;
-        if (rank != inputShape.getRank() || rank != outputShape.getRank()) throw unsupported(node, "Transpose rank mismatch");
-        int[] permutation = new int[rank];
-        for (int i = 0; i < rank; i++) permutation[i] = params.getInt(4 + i * 4);
-        int[] inputStrides = strides(inputShape);
+        int[] permutation = transposePermutations.get(node);
+        int[] inputStrides = transposeInputStrides.get(node);
+        int rank;
+        if (permutation == null) {
+            ByteBuffer params = parameterData(node);
+            rank = params.getShort(2) & 0xffff;
+            if (rank != inputShape.getRank() || rank != outputShape.getRank()) {
+                throw unsupported(node, "Transpose rank mismatch");
+            }
+            permutation = new int[rank];
+            for (int i = 0; i < rank; i++) permutation[i] = params.getInt(4 + i * 4);
+            inputStrides = strides(inputShape);
+        } else {
+            rank = permutation.length;
+        }
         float[] input = data(inputs[0], storage);
         for (int linear = 0; linear < execution.length(output); linear++) {
             int remainder = linear;
@@ -470,6 +484,22 @@ public final class InferenceSession implements AutoCloseable {
             }
             storage[offset(output) + linear] = input[offset(inputs[0]) + source];
         }
+    }
+
+    private void prepareTranspose(NodeInfo node) {
+        if (node.getOperator() != OperatorType.TRANSPOSE) return;
+        int[] inputs = nodeInputs.get(node);
+        int[] outputs = nodeOutputs.get(node);
+        if (inputs.length != 1 || outputs.length != 1) return;
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        TensorShape outputShape = execution.shapes().get(outputs[0]);
+        ByteBuffer params = parameterData(node);
+        int rank = params.getShort(2) & 0xffff;
+        if (rank != inputShape.getRank() || rank != outputShape.getRank()) return;
+        int[] permutation = new int[rank];
+        for (int i = 0; i < rank; i++) permutation[i] = params.getInt(4 + i * 4);
+        transposePermutations.put(node, permutation);
+        transposeInputStrides.put(node, strides(inputShape));
     }
 
     private int[] strides(TensorShape shape) {
