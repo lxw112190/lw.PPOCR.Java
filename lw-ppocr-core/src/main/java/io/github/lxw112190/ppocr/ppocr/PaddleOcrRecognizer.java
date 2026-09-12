@@ -13,6 +13,7 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -106,7 +107,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
             int width = dynamicWidth ? RecWidthPolicy.chooseTargetWidth(source, maximumWidth) : maximumWidth;
             RecognitionGroup group = byWidth.get(width);
             if (group == null) {
-                group = new RecognitionGroup(context(width));
+                group = new RecognitionGroup(width, context(width));
                 byWidth.put(width, group);
             }
             group.indexes.add(i);
@@ -121,16 +122,14 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         }
 
         ExecutorService executor = executor(workers);
-        List<Future<Void>> futures = new ArrayList<Future<Void>>(workers);
-        for (int worker = 0; worker < workers; worker++) {
-            final int firstGroup = worker;
-            final int stride = workers;
+        Collections.sort(groups, RecognitionGroup.LARGEST_WORK_FIRST);
+        List<Future<Void>> futures = new ArrayList<Future<Void>>(groups.size());
+        for (RecognitionGroup scheduled : groups) {
+            final RecognitionGroup group = scheduled;
             futures.add(executor.submit(new Callable<Void>() {
                 @Override
                 public Void call() {
-                    for (int group = firstGroup; group < groups.size(); group += stride) {
-                        recognize(groups.get(group), results);
-                    }
+                    recognize(group, results);
                     return null;
                 }
             }));
@@ -240,12 +239,26 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     }
 
     private static final class RecognitionGroup {
+        private static final Comparator<RecognitionGroup> LARGEST_WORK_FIRST =
+                new Comparator<RecognitionGroup>() {
+                    @Override
+                    public int compare(RecognitionGroup left, RecognitionGroup right) {
+                        return Long.compare(right.estimatedWork(), left.estimatedWork());
+                    }
+                };
+
+        private final int targetWidth;
         private final RecSessionContext context;
         private final List<Integer> indexes = new ArrayList<Integer>();
         private final List<BgrImage> sources = new ArrayList<BgrImage>();
 
-        private RecognitionGroup(RecSessionContext context) {
+        private RecognitionGroup(int targetWidth, RecSessionContext context) {
+            this.targetWidth = targetWidth;
             this.context = context;
+        }
+
+        private long estimatedWork() {
+            return (long) targetWidth * sources.size();
         }
     }
 

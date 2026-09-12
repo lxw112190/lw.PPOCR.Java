@@ -32,7 +32,9 @@ independent sessions.
 
 REC can optionally evaluate different dynamic-width groups concurrently while
 preserving input and reading order. The default parallelism is one; applications
-opt in through `PaddleOcrOptions.setRecognitionParallelism`.
+opt in through `PaddleOcrOptions.setRecognitionParallelism`. Parallel execution
+queues the largest estimated width-group workloads first so idle workers can
+immediately take the next group without creating duplicate sessions.
 
 The optional JDK 25 Vector API backend accelerates all Conv configurations used
 by the Tiny models, the DET 2x upsampling ConvTranspose path, MatMul, reductions,
