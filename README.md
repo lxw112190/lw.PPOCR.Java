@@ -62,6 +62,9 @@ For applications using AWT/ImageIO, `lw-ppocr-imageio` also provides
 `PaddleOcrImageIo` convenience methods for `Path`, `InputStream`, and
 `BufferedImage`. The core module remains independent of AWT and ImageIO.
 
+See [docs/installation.md](docs/installation.md) for Maven dependencies,
+model layout, BGR/ImageIO usage, lifecycle, and concurrency guidance.
+
 ## Scope boundaries
 
 The current code targets the fixed-shape FP32 PP-OCRv6 Tiny/Small/Medium
