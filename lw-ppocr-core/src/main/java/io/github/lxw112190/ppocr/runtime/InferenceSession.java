@@ -23,6 +23,10 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, int[]> nodeOutputs;
     private final IdentityHashMap<NodeInfo, int[]> transposePermutations;
     private final IdentityHashMap<NodeInfo, int[]> transposeInputStrides;
+    private final IdentityHashMap<NodeInfo, int[]> reduceAxes;
+    private final IdentityHashMap<NodeInfo, int[]> sliceStarts;
+    private final IdentityHashMap<NodeInfo, int[]> sliceAxes;
+    private final IdentityHashMap<NodeInfo, int[]> sliceSteps;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -47,6 +51,10 @@ public final class InferenceSession implements AutoCloseable {
         this.nodeOutputs = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.transposePermutations = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.transposeInputStrides = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.reduceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.sliceStarts = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.sliceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.sliceSteps = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
             NodeInfo node = nodes.get(i);
             this.nodeIndexes.put(node, i);
@@ -54,6 +62,8 @@ public final class InferenceSession implements AutoCloseable {
             this.nodeOutputs.put(node, node.getOutputs());
             this.parameters[i] = model.parameterData(i);
             prepareTranspose(node);
+            prepareReduceMean(node);
+            prepareSlice(node);
         }
     }
 
@@ -318,9 +328,12 @@ public final class InferenceSession implements AutoCloseable {
         int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1) throw unsupported(node, "ReduceMean requires one input");
         ByteBuffer params = parameterData(node);
-        int count = params.getShort(2) & 0xffff;
-        int[] axes = new int[count];
-        for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
+        int[] axes = reduceAxes.get(node);
+        if (axes == null) {
+            int count = params.getShort(2) & 0xffff;
+            axes = new int[count];
+            for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
+        }
         backend.reduceMean(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
                 execution.shapes().get(inputs[0]).dimensionsUnsafe(), axes, params.getInt(4) != 0);
     }
@@ -439,15 +452,20 @@ public final class InferenceSession implements AutoCloseable {
     private void executeSlice(NodeInfo node, float[] storage, int output) {
         int[] inputs = nodeInputs.get(node);
         if (inputs.length != 1) throw unsupported(node, "Slice requires one input");
-        ByteBuffer params = parameterData(node);
-        int count = params.getShort(2) & 0xffff;
-        int[] starts = new int[count];
-        int[] axes = new int[count];
-        int[] steps = new int[count];
-        for (int i = 0; i < count; i++) {
-            starts[i] = params.getInt(4 + i * 4);
-            axes[i] = params.getInt(68 + i * 4);
-            steps[i] = params.getInt(100 + i * 4);
+        int[] starts = sliceStarts.get(node);
+        int[] axes = sliceAxes.get(node);
+        int[] steps = sliceSteps.get(node);
+        if (starts == null) {
+            ByteBuffer params = parameterData(node);
+            int count = params.getShort(2) & 0xffff;
+            starts = new int[count];
+            axes = new int[count];
+            steps = new int[count];
+            for (int i = 0; i < count; i++) {
+                starts[i] = params.getInt(4 + i * 4);
+                axes[i] = params.getInt(68 + i * 4);
+                steps[i] = params.getInt(100 + i * 4);
+            }
         }
         backend.slice(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
                 execution.shapes().get(inputs[0]).dimensionsUnsafe(), starts, axes, steps);
@@ -500,6 +518,35 @@ public final class InferenceSession implements AutoCloseable {
         for (int i = 0; i < rank; i++) permutation[i] = params.getInt(4 + i * 4);
         transposePermutations.put(node, permutation);
         transposeInputStrides.put(node, strides(inputShape));
+    }
+
+    private void prepareReduceMean(NodeInfo node) {
+        if (node.getOperator() != OperatorType.REDUCE_MEAN) return;
+        ByteBuffer params = parameterData(node);
+        int count = params.getShort(2) & 0xffff;
+        if (12L + count * 4L > params.limit()) return;
+        int[] axes = new int[count];
+        for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
+        reduceAxes.put(node, axes);
+    }
+
+    private void prepareSlice(NodeInfo node) {
+        if (node.getOperator() != OperatorType.SLICE) return;
+        ByteBuffer params = parameterData(node);
+        int count = params.getShort(2) & 0xffff;
+        if (4L + count * 4L > params.limit() || 68L + count * 4L > params.limit() ||
+                100L + count * 4L > params.limit()) return;
+        int[] starts = new int[count];
+        int[] axes = new int[count];
+        int[] steps = new int[count];
+        for (int i = 0; i < count; i++) {
+            starts[i] = params.getInt(4 + i * 4);
+            axes[i] = params.getInt(68 + i * 4);
+            steps[i] = params.getInt(100 + i * 4);
+        }
+        sliceStarts.put(node, starts);
+        sliceAxes.put(node, axes);
+        sliceSteps.put(node, steps);
     }
 
     private int[] strides(TensorShape shape) {
