@@ -9,6 +9,7 @@ import io.github.lxw112190.ppocr.model.OperatorType;
 import io.github.lxw112190.ppocr.model.NodeInfo;
 import java.nio.ByteBuffer;
 import java.util.Collections;
+import java.util.IdentityHashMap;
 import java.util.List;
 
 /** Prepared, reusable scalar execution session for the initial operator subset. */
@@ -16,6 +17,8 @@ public final class InferenceSession implements AutoCloseable {
     private final PreparedExecution execution;
     private final Workspace workspace;
     private final KernelBackend backend;
+    private final ByteBuffer[] parameters;
+    private final IdentityHashMap<NodeInfo, Integer> nodeIndexes;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -33,6 +36,14 @@ public final class InferenceSession implements AutoCloseable {
         this.execution = new PreparedExecution(model, inputShapes);
         this.workspace = new Workspace(execution.workspacePlan());
         this.backend = backend;
+        List<NodeInfo> nodes = model.getNodes();
+        this.parameters = new ByteBuffer[nodes.size()];
+        this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.size());
+        for (int i = 0; i < nodes.size(); i++) {
+            NodeInfo node = nodes.get(i);
+            this.nodeIndexes.put(node, i);
+            this.parameters[i] = model.parameterData(i);
+        }
     }
 
     public void run(float[] input, float[] output) {
@@ -109,7 +120,7 @@ public final class InferenceSession implements AutoCloseable {
                 break;
             case HARD_SIGMOID:
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
-                ByteBuffer hardSigmoid = execution.model().parameterData(indexOf(node));
+                ByteBuffer hardSigmoid = parameterData(node);
                 backend.hardSigmoid(left, leftOffset, storage, offset(output), execution.length(output),
                         hardSigmoid.getFloat(4), hardSigmoid.getFloat(8));
                 break;
@@ -190,7 +201,7 @@ public final class InferenceSession implements AutoCloseable {
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape weightShape = execution.shapes().get(inputs[1]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int groups = params.getInt(4);
         int kernelHeight = params.getInt(8);
         int kernelWidth = params.getInt(12);
@@ -219,7 +230,7 @@ public final class InferenceSession implements AutoCloseable {
     private void executeSoftmax(NodeInfo node, float[] storage, int output) {
         int[] inputs = node.getInputs();
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int axis = params.getInt(4);
         TensorShape shape = execution.shapes().get(inputs[0]);
         if (axis < 0) axis += shape.getRank();
@@ -237,7 +248,7 @@ public final class InferenceSession implements AutoCloseable {
         if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "pool requires rank-4 input and output");
         }
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
         backend.pool(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
@@ -252,7 +263,7 @@ public final class InferenceSession implements AutoCloseable {
         if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "Resize requires rank-4 input and output");
         }
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
         backend.resizeNearest(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
@@ -269,7 +280,7 @@ public final class InferenceSession implements AutoCloseable {
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape weightShape = execution.shapes().get(inputs[1]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int groups = params.getInt(4);
         int kernelHeight = params.getInt(8);
         int kernelWidth = params.getInt(12);
@@ -295,7 +306,7 @@ public final class InferenceSession implements AutoCloseable {
     private void executeReduceMean(NodeInfo node, float[] storage, int output) {
         int[] inputs = node.getInputs();
         if (inputs.length != 1) throw unsupported(node, "ReduceMean requires one input");
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int count = params.getShort(2) & 0xffff;
         int[] axes = new int[count];
         for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
@@ -317,7 +328,7 @@ public final class InferenceSession implements AutoCloseable {
                 throw unsupported(node, "BatchNormalization parameter shape mismatch");
             }
         }
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         float epsilon = params.getFloat(4);
         if (!Float.isFinite(epsilon) || epsilon <= 0.0f) {
             throw unsupported(node, "BatchNormalization epsilon is invalid");
@@ -335,7 +346,7 @@ public final class InferenceSession implements AutoCloseable {
         }
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int count = params.getShort(2) & 0xffff;
         int[] axes = new int[count];
         for (int i = 0; i < count; i++) axes[i] = params.getInt(4 + i * 4);
@@ -393,7 +404,7 @@ public final class InferenceSession implements AutoCloseable {
     private void executeConcat(NodeInfo node, float[] storage, int output) {
         int[] inputs = node.getInputs();
         if (inputs.length == 0) throw unsupported(node, "Concat requires inputs");
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int axis = params.getInt(4);
         TensorShape shape = execution.shapes().get(inputs[0]);
         if (axis < 0) axis += shape.getRank();
@@ -417,7 +428,7 @@ public final class InferenceSession implements AutoCloseable {
     private void executeSlice(NodeInfo node, float[] storage, int output) {
         int[] inputs = node.getInputs();
         if (inputs.length != 1) throw unsupported(node, "Slice requires one input");
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int count = params.getShort(2) & 0xffff;
         int[] starts = new int[count];
         int[] axes = new int[count];
@@ -436,7 +447,7 @@ public final class InferenceSession implements AutoCloseable {
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        ByteBuffer params = parameterData(node);
         int rank = params.getShort(2) & 0xffff;
         if (rank != inputShape.getRank() || rank != outputShape.getRank()) throw unsupported(node, "Transpose rank mismatch");
         int[] permutation = new int[rank];
@@ -466,9 +477,13 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     private int indexOf(NodeInfo target) {
-        List<NodeInfo> nodes = execution.model().getNodes();
-        for (int i = 0; i < nodes.size(); i++) if (nodes.get(i) == target) return i;
-        throw new IllegalStateException("prepared node is not owned by model");
+        Integer index = nodeIndexes.get(target);
+        if (index == null) throw new IllegalStateException("prepared node is not owned by model");
+        return index;
+    }
+
+    private ByteBuffer parameterData(NodeInfo node) {
+        return parameters[indexOf(node)];
     }
 
     private float[] data(int tensorIndex, float[] storage) {
