@@ -259,6 +259,107 @@ public final class ScalarBackend implements KernelBackend {
         }
     }
 
+    @Override
+    public void pool(float[] input, int inputOffset, float[] output, int outputOffset,
+                     int batch, int channels, int height, int width, int kernelHeight,
+                     int kernelWidth, int strideHeight, int strideWidth, int padTop,
+                     int padLeft, int outputHeight, int outputWidth, boolean maximum,
+                     boolean countIncludePad) {
+        for (int n = 0; n < batch; n++) {
+            for (int channel = 0; channel < channels; channel++) {
+                for (int oh = 0; oh < outputHeight; oh++) {
+                    for (int ow = 0; ow < outputWidth; ow++) {
+                        float value = maximum ? -Float.MAX_VALUE : 0.0f;
+                        int count = 0;
+                        for (int kh = 0; kh < kernelHeight; kh++) {
+                            int ih = oh * strideHeight - padTop + kh;
+                            for (int kw = 0; kw < kernelWidth; kw++) {
+                                int iw = ow * strideWidth - padLeft + kw;
+                                if (ih < 0 || ih >= height || iw < 0 || iw >= width) {
+                                    if (!maximum && countIncludePad) count++;
+                                    continue;
+                                }
+                                float sample = input[inputOffset + ((n * channels + channel) * height + ih) * width + iw];
+                                if (maximum) value = Math.max(value, sample);
+                                else value += sample;
+                                count++;
+                            }
+                        }
+                        if (!maximum) value /= count == 0 ? 1 : count;
+                        output[outputOffset + ((n * channels + channel) * outputHeight + oh) * outputWidth + ow] = value;
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public void resizeNearest(float[] input, int inputOffset, float[] output, int outputOffset,
+                              int batch, int channels, int inputHeight, int inputWidth,
+                              int outputHeight, int outputWidth, float scaleHeight, float scaleWidth) {
+        for (int n = 0; n < batch; n++) {
+            for (int channel = 0; channel < channels; channel++) {
+                for (int oh = 0; oh < outputHeight; oh++) {
+                    int ih = Math.min(inputHeight - 1, Math.max(0, (int) Math.floor(oh / scaleHeight)));
+                    for (int ow = 0; ow < outputWidth; ow++) {
+                        int iw = Math.min(inputWidth - 1, Math.max(0, (int) Math.floor(ow / scaleWidth)));
+                        output[outputOffset + ((n * channels + channel) * outputHeight + oh) * outputWidth + ow] =
+                                input[inputOffset + ((n * channels + channel) * inputHeight + ih) * inputWidth + iw];
+                    }
+                }
+            }
+        }
+    }
+
+    @Override
+    public void convTranspose(float[] input, int inputOffset, float[] weights, int weightOffset,
+                              float[] bias, int biasOffset, float[] output, int outputOffset,
+                              int batch, int inputChannels, int inputHeight, int inputWidth,
+                              int outputChannels, int kernelHeight, int kernelWidth,
+                              int strideHeight, int strideWidth, int dilationHeight,
+                              int dilationWidth, int padTop, int padLeft, int groups,
+                              int outputHeight, int outputWidth) {
+        int inputChannelsPerGroup = inputChannels / groups;
+        int outputChannelsPerGroup = outputChannels / groups;
+        int outputElements = batch * outputChannels * outputHeight * outputWidth;
+        for (int i = 0; i < outputElements; i++) output[outputOffset + i] = 0.0f;
+        if (bias != null) {
+            for (int n = 0; n < batch; n++) {
+                for (int channel = 0; channel < outputChannels; channel++) {
+                    for (int i = 0; i < outputHeight * outputWidth; i++) {
+                        output[outputOffset + (n * outputChannels + channel) * outputHeight * outputWidth + i] = bias[biasOffset + channel];
+                    }
+                }
+            }
+        }
+        for (int n = 0; n < batch; n++) {
+            for (int group = 0; group < groups; group++) {
+                for (int ic = 0; ic < inputChannelsPerGroup; ic++) {
+                    int inputChannel = group * inputChannelsPerGroup + ic;
+                    for (int ih = 0; ih < inputHeight; ih++) {
+                        for (int iw = 0; iw < inputWidth; iw++) {
+                            float sample = input[inputOffset + ((n * inputChannels + inputChannel) * inputHeight + ih) * inputWidth + iw];
+                            for (int oc = 0; oc < outputChannelsPerGroup; oc++) {
+                                int outputChannel = group * outputChannelsPerGroup + oc;
+                                for (int kh = 0; kh < kernelHeight; kh++) {
+                                    int oh = ih * strideHeight - padTop + kh * dilationHeight;
+                                    if (oh < 0 || oh >= outputHeight) continue;
+                                    for (int kw = 0; kw < kernelWidth; kw++) {
+                                        int ow = iw * strideWidth - padLeft + kw * dilationWidth;
+                                        if (ow < 0 || ow >= outputWidth) continue;
+                                        int weightIndex = weightOffset + (((inputChannel * outputChannelsPerGroup + oc) * kernelHeight + kh) * kernelWidth + kw);
+                                        int outputIndex = outputOffset + ((n * outputChannels + outputChannel) * outputHeight + oh) * outputWidth + ow;
+                                        output[outputIndex] += sample * weights[weightIndex];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private static void binary(float[] left, int leftOffset, float[] right, int rightOffset,
                                float[] output, int outputOffset, int length, int operation) {
         for (int i = 0; i < length; i++) {

@@ -49,4 +49,22 @@ public interface KernelBackend {
 
     void softmax(float[] input, int inputOffset, float[] output, int outputOffset,
                  int outer, int axisLength, int inner);
+
+    void pool(float[] input, int inputOffset, float[] output, int outputOffset,
+              int batch, int channels, int height, int width, int kernelHeight,
+              int kernelWidth, int strideHeight, int strideWidth, int padTop,
+              int padLeft, int outputHeight, int outputWidth, boolean maximum,
+              boolean countIncludePad);
+
+    void resizeNearest(float[] input, int inputOffset, float[] output, int outputOffset,
+                       int batch, int channels, int inputHeight, int inputWidth,
+                       int outputHeight, int outputWidth, float scaleHeight, float scaleWidth);
+
+    void convTranspose(float[] input, int inputOffset, float[] weights, int weightOffset,
+                       float[] bias, int biasOffset, float[] output, int outputOffset,
+                       int batch, int inputChannels, int inputHeight, int inputWidth,
+                       int outputChannels, int kernelHeight, int kernelWidth,
+                       int strideHeight, int strideWidth, int dilationHeight,
+                       int dilationWidth, int padTop, int padLeft, int groups,
+                       int outputHeight, int outputWidth);
 }

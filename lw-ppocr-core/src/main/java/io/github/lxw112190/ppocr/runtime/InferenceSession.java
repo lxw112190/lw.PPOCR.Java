@@ -123,6 +123,16 @@ public final class InferenceSession implements AutoCloseable {
             case CONV:
                 executeConv(node, storage, output);
                 break;
+            case CONV_TRANSPOSE:
+                executeConvTranspose(node, storage, output);
+                break;
+            case AVERAGE_POOL:
+            case MAX_POOL:
+                executePool(node, storage, output);
+                break;
+            case RESIZE:
+                executeResize(node, storage, output);
+                break;
             case TRANSPOSE:
                 executeTranspose(node, storage, output);
                 break;
@@ -200,6 +210,66 @@ public final class InferenceSession implements AutoCloseable {
         for (int i = axis + 1; i < shape.getRank(); i++) inner *= shape.get(i);
         backend.softmax(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
                 outer, shape.get(axis), inner);
+    }
+
+    private void executePool(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
+            throw unsupported(node, "pool requires rank-4 input and output");
+        }
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        TensorShape outputShape = execution.shapes().get(output);
+        backend.pool(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
+                inputShape.get(0), inputShape.get(1), inputShape.get(2), inputShape.get(3),
+                params.getInt(8), params.getInt(12), params.getInt(16), params.getInt(20),
+                params.getInt(24), params.getInt(28), outputShape.get(2), outputShape.get(3),
+                node.getOperator() == OperatorType.MAX_POOL, params.getInt(44) != 0);
+    }
+
+    private void executeResize(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
+            throw unsupported(node, "Resize requires rank-4 input and output");
+        }
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        TensorShape outputShape = execution.shapes().get(output);
+        backend.resizeNearest(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
+                inputShape.get(0), inputShape.get(1), inputShape.get(2), inputShape.get(3),
+                outputShape.get(2), outputShape.get(3), params.getFloat(12), params.getFloat(16));
+    }
+
+    private void executeConvTranspose(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length < 2 || inputs.length > 3 || execution.shapes().get(inputs[0]).getRank() != 4 ||
+                execution.shapes().get(inputs[1]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
+            throw unsupported(node, "ConvTranspose requires rank-4 input, weights, and output");
+        }
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        TensorShape weightShape = execution.shapes().get(inputs[1]);
+        TensorShape outputShape = execution.shapes().get(output);
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int groups = params.getInt(4);
+        int kernelHeight = params.getInt(8);
+        int kernelWidth = params.getInt(12);
+        int strideHeight = params.getInt(16);
+        int strideWidth = params.getInt(20);
+        int dilationHeight = params.getInt(24);
+        int dilationWidth = params.getInt(28);
+        int padTop = params.getInt(32);
+        int padLeft = params.getInt(36);
+        if (groups <= 0 || inputShape.get(1) % groups != 0 || weightShape.get(0) != inputShape.get(1) ||
+                weightShape.get(2) != kernelHeight || weightShape.get(3) != kernelWidth ||
+                outputShape.get(0) != inputShape.get(0) || outputShape.get(1) != weightShape.get(1) * groups) {
+            throw unsupported(node, "ConvTranspose shape or parameter mismatch");
+        }
+        float[] bias = inputs.length == 3 ? data(inputs[2], storage) : null;
+        backend.convTranspose(data(inputs[0], storage), offset(inputs[0]), data(inputs[1], storage), offset(inputs[1]),
+                bias, inputs.length == 3 ? offset(inputs[2]) : 0, storage, offset(output), inputShape.get(0),
+                inputShape.get(1), inputShape.get(2), inputShape.get(3), outputShape.get(1), kernelHeight,
+                kernelWidth, strideHeight, strideWidth, dilationHeight, dilationWidth, padTop, padLeft, groups,
+                outputShape.get(2), outputShape.get(3));
     }
 
     private void executeReduceMean(NodeInfo node, float[] storage, int output) {

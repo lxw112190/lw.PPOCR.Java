@@ -48,4 +48,25 @@ public final class ScalarBackendTest {
                 new int[] {2, 3}, new int[] {1}, new int[] {1}, new int[] {1});
         Assert.assertArrayEquals(new float[] {2, 3, 5, 6}, sliced, 0.0f);
     }
+
+    @Test
+    public void computesPoolResizeAndConvTranspose() {
+        float[] pooled = new float[1];
+        backend.pool(new float[] {1, 2, 3, 4}, 0, pooled, 0,
+                1, 1, 2, 2, 2, 2, 1, 1, 0, 0, 1, 1, true, false);
+        Assert.assertArrayEquals(new float[] {4}, pooled, 0.0f);
+
+        float[] resized = new float[16];
+        backend.resizeNearest(new float[] {1, 2, 3, 4}, 0, resized, 0,
+                1, 1, 2, 2, 4, 4, 2, 2);
+        Assert.assertArrayEquals(new float[] {
+                1, 1, 2, 2, 1, 1, 2, 2, 3, 3, 4, 4, 3, 3, 4, 4
+        }, resized, 0.0f);
+
+        float[] transposed = new float[4];
+        backend.convTranspose(new float[] {1}, 0, new float[] {2, 3, 4, 5}, 0,
+                new float[] {1}, 0, transposed, 0,
+                1, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 0, 0, 1, 2, 2);
+        Assert.assertArrayEquals(new float[] {3, 4, 5, 6}, transposed, 0.0f);
+    }
 }
