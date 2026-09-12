@@ -16,5 +16,10 @@
             <artifactId>lw-ppocr-core</artifactId>
             <version>${project.version}</version>
         </dependency>
+        <dependency>
+            <groupId>io.github.lxw112190</groupId>
+            <artifactId>lw-ppocr-imageio</artifactId>
+            <version>${project.version}</version>
+        </dependency>
     </dependencies>
 </project>
