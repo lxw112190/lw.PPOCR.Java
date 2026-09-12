@@ -1,14 +1,11 @@
 package io.github.lxw112190.ppocr.ppocr;
 
+import io.github.lxw112190.ppocr.golden.GoldenTestSupport;
 import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -19,12 +16,14 @@ public final class RealClsModelGoldenTest {
 
     @Test
     public void matchesPinnedCClassifier() throws Exception {
-        String manifest = readText(ROOT + "manifest.json");
+        String manifest = GoldenTestSupport.readText(RealClsModelGoldenTest.class, ROOT + "manifest.json");
         Assert.assertTrue(manifest.contains("\"source_commit\": \"9b31f1b\""));
         Assert.assertTrue(manifest.contains(MODEL_SHA256));
-        Assert.assertEquals(MODEL_SHA256, sha256(readBytes(ROOT + "cls.lwm")));
+        Assert.assertEquals(MODEL_SHA256, GoldenTestSupport.sha256(
+                GoldenTestSupport.readBytes(RealClsModelGoldenTest.class, ROOT + "cls.lwm")));
         BgrImage source = readPpmAsBgr(ROOT + "sample-crop.ppm");
-        try (LwmModel model = LwmLoader.load(resource(ROOT + "cls.lwm"));
+        try (LwmModel model = LwmLoader.load(GoldenTestSupport.resource(
+                     RealClsModelGoldenTest.class, ROOT + "cls.lwm"));
              PaddleOcrClassifier classifier = new PaddleOcrClassifier(model)) {
             ClsClassificationResult result = classifier.classify(source);
             Assert.assertEquals(0, result.getLabel());
@@ -35,7 +34,7 @@ public final class RealClsModelGoldenTest {
     }
 
     private static BgrImage readPpmAsBgr(String name) throws IOException {
-        byte[] bytes = readBytes(name);
+        byte[] bytes = GoldenTestSupport.readBytes(RealClsModelGoldenTest.class, name);
         Cursor cursor = new Cursor(bytes);
         Assert.assertEquals("P6", cursor.token());
         int width = Integer.parseInt(cursor.token());
@@ -75,29 +74,4 @@ public final class RealClsModelGoldenTest {
         }
     }
 
-    private static InputStream resource(String name) {
-        InputStream input = RealClsModelGoldenTest.class.getResourceAsStream(name);
-        if (input == null) throw new AssertionError("missing Golden resource: " + name);
-        return input;
-    }
-
-    private static byte[] readBytes(String name) throws IOException {
-        try (InputStream input = resource(name); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
-            byte[] buffer = new byte[8192];
-            int count;
-            while ((count = input.read(buffer)) >= 0) if (count != 0) output.write(buffer, 0, count);
-            return output.toByteArray();
-        }
-    }
-
-    private static String readText(String name) throws IOException {
-        return new String(readBytes(name), StandardCharsets.UTF_8);
-    }
-
-    private static String sha256(byte[] bytes) throws NoSuchAlgorithmException {
-        byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
-        StringBuilder result = new StringBuilder(digest.length * 2);
-        for (byte value : digest) result.append(String.format("%02x", value & 0xff));
-        return result.toString();
-    }
 }
