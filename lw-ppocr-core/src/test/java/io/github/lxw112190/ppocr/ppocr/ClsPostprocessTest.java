@@ -22,7 +22,7 @@ public final class ClsPostprocessTest {
         ClsClassificationResult result = ClsPostprocess.decode(new float[] {0.5f, 0.5f}, 20);
         Assert.assertEquals(0, result.getLabel());
         Assert.assertEquals(0, result.getOrientationDegrees());
-        Assert.assertFalse(result.requiresRotation(-1.0f));
+        Assert.assertFalse(result.requiresRotation(1.0f));
         try {
             ClsPostprocess.decode(new float[] {Float.NaN, 1.0f}, 20);
             Assert.fail("expected invalid CLS output");

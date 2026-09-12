@@ -29,6 +29,16 @@ public final class OcrResultTest {
         }
     }
 
+    @Test
+    public void rejectsInvalidDetectionGeometry() {
+        try {
+            new DetectionBox(new float[] {0, 0, Float.NaN, 0, 1, 1, 0, 1}, 0.9f);
+            Assert.fail("expected invalid detection geometry");
+        } catch (RuntimeException expected) {
+            // expected
+        }
+    }
+
     private static DetectionBox box(float x, float y) {
         return new DetectionBox(new float[] {x, y, x + 5, y, x + 5, y + 5, x, y + 5}, 0.9f);
     }
