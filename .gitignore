@@ -1,0 +1,10 @@
+target/
+*.class
+*.jar
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+hs_err_pid*
+
