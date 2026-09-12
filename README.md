@@ -67,8 +67,10 @@ tests on JDK 25 across Linux, Windows, and macOS. The Linux performance job
 reports loading, DB postprocess, preprocessing, model workload, and complete
 OCR results for Scalar, Vector, and Vector with four REC width workers. Full OCR
 JSON separates stage timing, GC activity, model memory, retained heap, and
-transient heap. Performance output is a development signal only; v0.x does not
-use it as a release gate.
+transient heap. Schema 3 measures wall time without the operator profiler and
+runs one separate warmed diagnostic invocation; parallel operator time is the
+sum across participating threads. Performance output is a development signal
+only; v0.x does not use it as a release gate.
 
 For applications using AWT/ImageIO, `lw-ppocr-imageio` also provides
 `PaddleOcrImageIo` convenience methods for `Path`, `InputStream`, and

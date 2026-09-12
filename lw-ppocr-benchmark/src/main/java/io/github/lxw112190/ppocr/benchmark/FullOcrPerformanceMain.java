@@ -80,20 +80,16 @@ public final class FullOcrPerformanceMain {
             long[] recognition = new long[iterations];
             long[] sorting = new long[iterations];
             int lineCount = -1;
-            InferenceProfiler.Profile operatorProfile;
-            try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
-                for (int i = 0; i < iterations; i++) {
-                    StageSample sample = pipeline.recognize(image);
-                    total[i] = sample.totalNanos;
-                    detection[i] = sample.detectionNanos;
-                    crop[i] = sample.cropNanos;
-                    classification[i] = sample.classificationNanos;
-                    rotation[i] = sample.rotationNanos;
-                    recognition[i] = sample.recognitionNanos;
-                    sorting[i] = sample.sortingNanos;
-                    lineCount = sample.lines;
-                }
-                operatorProfile = profiler.snapshot();
+            for (int i = 0; i < iterations; i++) {
+                StageSample sample = pipeline.recognize(image);
+                total[i] = sample.totalNanos;
+                detection[i] = sample.detectionNanos;
+                crop[i] = sample.cropNanos;
+                classification[i] = sample.classificationNanos;
+                rotation[i] = sample.rotationNanos;
+                recognition[i] = sample.recognitionNanos;
+                sorting[i] = sample.sortingNanos;
+                lineCount = sample.lines;
             }
             long peakHeap = Math.max(heapPeakUsed(), usedHeap(memory));
             long gcCountDelta = nonNegativeDelta(gcCount(), gcCountBefore);
@@ -105,14 +101,30 @@ public final class FullOcrPerformanceMain {
             long retainedHeap = Math.max(0L, heapAfterGc - heapBefore);
             long transientHeap = Math.max(0L, peakHeap - heapAfterGc);
             long heapMax = maximumHeap(memory);
+
+            // Keep node-level atomic accounting out of the measured samples. A separate,
+            // already-warmed invocation supplies diagnostics without biasing wall time or GC.
+            StageSample profiledSample;
+            InferenceProfiler.Profile operatorProfile;
+            try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
+                profiledSample = pipeline.recognize(image);
+                operatorProfile = profiler.snapshot();
+            }
+            if (profiledSample.lines != lineCount) {
+                throw new IllegalStateException("profile invocation changed OCR line count: measured="
+                        + lineCount + ", profiled=" + profiledSample.lines);
+            }
+
             Arrays.sort(total);
             String benchmark = detectorLimit == DEFAULT_DETECTOR_LIMIT
                     ? "full-ocr-default" : "full-ocr-det" + detectorLimit;
             String profileScope = "all-threads";
             System.out.printf(Locale.ROOT,
-                    "{\"schema\":2,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                    "{\"schema\":3,\"benchmark\":\"%s\",\"backend\":\"%s\","
                             + "\"recognition_parallelism\":%d,"
-                            + "\"operator_profile_scope\":\"%s\",\"image_width\":%d,"
+                            + "\"operator_profile_scope\":\"%s\","
+                            + "\"operator_profile_iterations\":1,\"operator_profile_ms\":%.3f,"
+                            + "\"image_width\":%d,"
                             + "\"image_height\":%d,\"detector_limit_side\":%d,"
                             + "\"lines\":%d,\"warmup\":%d,\"iterations\":%d,"
                             + "\"model_load_ms\":%.3f,\"cold_ms\":%.3f,"
@@ -130,6 +142,7 @@ public final class FullOcrPerformanceMain {
                             + "\"heap_peak_method\":\"mxbean-pool-sum\",\"gc_count_delta\":%d,"
                             + "\"gc_time_ms_delta\":%d,\"operators\":%s}%n",
                     benchmark, backendName, recognitionParallelism, profileScope,
+                    milliseconds(profiledSample.totalNanos),
                     image.width(), image.height(), detectorLimit, lineCount,
                     warmup, iterations, milliseconds(modelLoadNanos), milliseconds(cold.totalNanos),
                     milliseconds(mean(total)), milliseconds(percentile(total, 0.50)),
@@ -140,7 +153,7 @@ public final class FullOcrPerformanceMain {
                     heapBefore, heapAfterLoad, heapAfterLoad, modelHeap, heapAfter, heapAfter,
                     heapAfterGc, retainedHeap,
                     peakHeap, peakDelta, transientHeap, gcCountDelta, gcTimeDelta,
-                    operatorJson(operatorProfile, iterations));
+                    operatorJson(operatorProfile));
         }
     }
 
@@ -296,7 +309,7 @@ public final class FullOcrPerformanceMain {
         return nanos / 1_000_000.0;
     }
 
-    private static String operatorJson(InferenceProfiler.Profile profile, int iterations) {
+    private static String operatorJson(InferenceProfiler.Profile profile) {
         StringBuilder json = new StringBuilder("{");
         boolean first = true;
         for (OperatorType operator : OperatorType.values()) {
@@ -306,9 +319,9 @@ public final class FullOcrPerformanceMain {
             first = false;
             json.append('\"').append(operator.name().toLowerCase(Locale.ROOT)).append("\":{")
                     .append("\"calls\":").append(calls)
-                    .append(",\"mean_per_ocr_ms\":")
+                    .append(",\"summed_thread_ms_per_ocr\":")
                     .append(String.format(Locale.ROOT, "%.3f",
-                            milliseconds((double) profile.getElapsedNanos(operator) / iterations)))
+                            milliseconds(profile.getElapsedNanos(operator))))
                     .append('}');
         }
         return json.append('}').toString();

@@ -155,7 +155,9 @@ PaddleOcrOptions options = PaddleOcrOptions.builder()
 `lw-ppocr-core/src/test/resources/golden/ocr/sample.jpg`，CI 使用它验证 16 行完整
 OCR。性能摘要明确区分 Scalar、Vector 和 Vector REC×4，并报告 DET/CLS/REC
 阶段耗时、模型常驻堆、GC 后存活堆、峰值堆和 GC 次数。不同 GitHub Runner
-之间波动较大，应只比较同一环境、同一参数和相同提交附近的结果。
+之间波动较大，应只比较同一环境、同一参数和相同提交附近的结果。schema 3
+在关闭算子探针时采集计时与内存数据，再额外运行一次已预热 OCR 生成全线程算子
+诊断；`summed_thread_ms_per_ocr` 是并行线程耗时之和，不能与墙钟总耗时直接相加比较。
 
 ## 当前范围
 
