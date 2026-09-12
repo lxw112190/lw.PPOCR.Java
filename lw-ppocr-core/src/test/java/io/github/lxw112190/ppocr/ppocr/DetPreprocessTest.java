@@ -45,4 +45,20 @@ public final class DetPreprocessTest {
         Assert.assertEquals(16.0f, result.getWidthRatio(), 0.00001f);
         Assert.assertEquals(24.0f, result.getHeightRatio(), 0.00001f);
     }
+
+    @Test
+    public void reusableWorkspaceMatchesOneShotPreprocessAndRefreshesPixels() {
+        BgrImage source = new BgrImage(new byte[4 * 4 * 3], 4, 4, 12);
+        DetPreprocessResult oneShot = DetPreprocess.resizeNormalize(source, 32, 32);
+        DetPreprocess.Workspace workspace = new DetPreprocess.Workspace(32, 32);
+        workspace.resizeNormalize(source);
+        Assert.assertArrayEquals(oneShot.getChw(), workspace.getChw(), 0.0f);
+        Assert.assertEquals(oneShot.getWidthRatio(), workspace.getWidthRatio(), 0.0f);
+        Assert.assertEquals(oneShot.getHeightRatio(), workspace.getHeightRatio(), 0.0f);
+
+        byte[] bright = new byte[4 * 4 * 3];
+        java.util.Arrays.fill(bright, (byte) 255);
+        workspace.resizeNormalize(new BgrImage(bright, 4, 4, 12));
+        Assert.assertEquals((1.0f - 0.485f) / 0.229f, workspace.getChw()[0], 0.00001f);
+    }
 }

@@ -73,6 +73,73 @@ public final class DetPreprocess {
                 (float) ((double) height / source.height()));
     }
 
+    /** Reusable fixed-size DET preprocessing buffer; callers must not invoke it concurrently. */
+    public static final class Workspace {
+        private final int width;
+        private final int height;
+        private final float[] output;
+        private float widthRatio;
+        private float heightRatio;
+
+        public Workspace(int width, int height) {
+            if (width <= 0 || height <= 0) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "DET dimensions are required");
+            }
+            long elements = 3L * width * height;
+            if (elements > Integer.MAX_VALUE) {
+                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DET tensor is too large");
+            }
+            this.width = width;
+            this.height = height;
+            this.output = new float[(int) elements];
+        }
+
+        public void resizeNormalize(BgrImage source) {
+            if (source == null) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "source image is required");
+            }
+            widthRatio = (float) ((double) width / source.width());
+            heightRatio = (float) ((double) height / source.height());
+            long plane = (long) width * height;
+            byte[] pixels = source.pixels();
+            for (int outputY = 0; outputY < height; outputY++) {
+                double sourceY = ((double) outputY + 0.5) * source.height() / height - 0.5;
+                int sourceY0Raw = (int) Math.floor(sourceY);
+                int sourceY1Raw = sourceY0Raw + 1;
+                int sourceY0 = clamp(sourceY0Raw, source.height());
+                int sourceY1 = clamp(sourceY1Raw, source.height());
+                double weightY = sourceY - sourceY0Raw;
+                for (int outputX = 0; outputX < width; outputX++) {
+                    double sourceX = ((double) outputX + 0.5) * source.width() / width - 0.5;
+                    int sourceX0Raw = (int) Math.floor(sourceX);
+                    int sourceX1Raw = sourceX0Raw + 1;
+                    int sourceX0 = clamp(sourceX0Raw, source.width());
+                    int sourceX1 = clamp(sourceX1Raw, source.width());
+                    double weightX = sourceX - sourceX0Raw;
+                    for (int channel = 0; channel < 3; channel++) {
+                        double topLeft = pixels[sourceY0 * source.stride() + sourceX0 * 3 + channel] & 0xff;
+                        double topRight = pixels[sourceY0 * source.stride() + sourceX1 * 3 + channel] & 0xff;
+                        double bottomLeft = pixels[sourceY1 * source.stride() + sourceX0 * 3 + channel] & 0xff;
+                        double bottomRight = pixels[sourceY1 * source.stride() + sourceX1 * 3 + channel] & 0xff;
+                        double top = topLeft + (topRight - topLeft) * weightX;
+                        double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
+                        double value = (top + (bottom - top) * weightY) / 255.0;
+                        int index = (int) (channel * plane + (long) outputY * width + outputX);
+                        output[index] = (float) ((value - MEAN[channel]) * INVERSE_STD[channel]);
+                    }
+                }
+            }
+        }
+
+        public float[] getChw() { return output; }
+        public int getResizedWidth() { return width; }
+        public int getResizedHeight() { return height; }
+        public float getWidthRatio() { return widthRatio; }
+        public float getHeightRatio() { return heightRatio; }
+    }
+
     private static long roundedMultipleOf32(double value) {
         return (long) Math.floor(value / 32.0 + 0.5) * 32L;
     }

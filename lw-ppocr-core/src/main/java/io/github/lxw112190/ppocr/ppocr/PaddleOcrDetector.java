@@ -21,6 +21,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
     private final int inputWidth;
     private final int mapHeight;
     private final int mapWidth;
+    private final DetPreprocess.Workspace preprocess;
     private final DbPostprocess.Decoder postprocessor;
     private final float[] probabilities;
     private boolean closed;
@@ -33,10 +34,10 @@ public final class PaddleOcrDetector implements AutoCloseable {
     public List<DetectionBox> detect(BgrImage source, float bitmapThreshold, float boxThreshold,
                                      float unclipRatio, boolean useDilation, int maxCandidates) {
         ensureOpen();
-        DetPreprocessResult preprocessed = DetPreprocess.resizeNormalize(source, inputWidth, inputHeight);
-        session.run(preprocessed.getChw(), probabilities);
+        preprocess.resizeNormalize(source);
+        session.run(preprocess.getChw(), probabilities);
         return postprocessor.decodeToSource(probabilities, bitmapThreshold, boxThreshold,
-                preprocessed.getWidthRatio(), preprocessed.getHeightRatio(),
+                preprocess.getWidthRatio(), preprocess.getHeightRatio(),
                 maxCandidates, unclipRatio, useDilation, source.width(), source.height());
     }
 
@@ -77,6 +78,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
         this.inputWidth = inputDimensions[3];
         this.mapHeight = mapHeight;
         this.mapWidth = mapWidth;
+        this.preprocess = new DetPreprocess.Workspace(inputWidth, inputHeight);
         this.postprocessor = DbPostprocess.createDecoder(mapWidth, mapHeight);
         this.probabilities = new float[mapHeight * mapWidth];
     }
