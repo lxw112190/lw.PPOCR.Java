@@ -57,17 +57,17 @@ jobs:
           java -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.ModelCompatibilityMain \
             | tee benchmark-results/model-compatibility.json
-          java -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
+          java -Xms64m -Xmx512m -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 \
             | tee benchmark-results/full-ocr-det320.json
-          java -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
+          java -Xms64m -Xmx512m -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 960 \
             | tee benchmark-results/full-ocr-default.json
-          java --add-modules jdk.incubator.vector \
+          java -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector \
             | tee benchmark-results/full-ocr-vector-det320.json
-          java --add-modules jdk.incubator.vector \
+          java -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector 4 \
             | tee benchmark-results/full-ocr-vector-parallel-det320.json
@@ -89,15 +89,15 @@ jobs:
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/model-compatibility.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo '### Full OCR performance and JVM heap (DET 320, C parity)' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Full OCR performance and JVM heap (Scalar baseline, DET 320)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-det320.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo '### Full OCR performance and JVM heap (default)' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Full OCR performance and JVM heap (Scalar baseline, DET 960)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-default.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          echo '### Full OCR performance and JVM heap (Vector API, DET 320)' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Full OCR performance and JVM heap (Vector API, DET 320, REC x1)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-vector-det320.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"

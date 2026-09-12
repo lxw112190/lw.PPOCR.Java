@@ -25,6 +25,8 @@ import java.io.InputStream;
 import java.lang.management.GarbageCollectorMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
+import java.lang.management.MemoryPoolMXBean;
+import java.lang.management.MemoryType;
 import java.lang.management.MemoryUsage;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -57,18 +59,17 @@ public final class FullOcrPerformanceMain {
 
         BgrImage image = loadImage();
         MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
-        long heapBefore = usedHeap(memory);
+        long heapBefore = stabilizedHeap(memory);
         long loadStart = System.nanoTime();
         try (ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend, recognitionParallelism)) {
             long modelLoadNanos = System.nanoTime() - loadStart;
-            long heapAfterLoad = usedHeap(memory);
+            long heapAfterLoad = stabilizedHeap(memory);
             StageSample cold = pipeline.recognize(image);
-            long peakHeap = Math.max(heapAfterLoad, usedHeap(memory));
             for (int i = 1; i < warmup; i++) {
                 pipeline.recognize(image);
-                peakHeap = Math.max(peakHeap, usedHeap(memory));
             }
 
+            resetHeapPeaks();
             long gcCountBefore = gcCount();
             long gcTimeBefore = gcTimeMillis();
             long[] total = new long[iterations];
@@ -80,7 +81,7 @@ public final class FullOcrPerformanceMain {
             long[] sorting = new long[iterations];
             int lineCount = -1;
             InferenceProfiler.Profile operatorProfile;
-            try (InferenceProfiler profiler = InferenceProfiler.start()) {
+            try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
                 for (int i = 0; i < iterations; i++) {
                     StageSample sample = pipeline.recognize(image);
                     total[i] = sample.totalNanos;
@@ -91,20 +92,26 @@ public final class FullOcrPerformanceMain {
                     recognition[i] = sample.recognitionNanos;
                     sorting[i] = sample.sortingNanos;
                     lineCount = sample.lines;
-                    peakHeap = Math.max(peakHeap, usedHeap(memory));
                 }
                 operatorProfile = profiler.snapshot();
             }
+            long peakHeap = Math.max(heapPeakUsed(), usedHeap(memory));
             long gcCountDelta = nonNegativeDelta(gcCount(), gcCountBefore);
             long gcTimeDelta = nonNegativeDelta(gcTimeMillis(), gcTimeBefore);
             long heapAfter = usedHeap(memory);
+            long heapAfterGc = stabilizedHeap(memory);
             long peakDelta = Math.max(0L, peakHeap - heapBefore);
+            long modelHeap = Math.max(0L, heapAfterLoad - heapBefore);
+            long retainedHeap = Math.max(0L, heapAfterGc - heapBefore);
+            long transientHeap = Math.max(0L, peakHeap - heapAfterGc);
+            long heapMax = maximumHeap(memory);
             Arrays.sort(total);
             String benchmark = detectorLimit == DEFAULT_DETECTOR_LIMIT
                     ? "full-ocr-default" : "full-ocr-det" + detectorLimit;
-            String profileScope = recognitionParallelism == 1 ? "all" : "calling-thread-only";
+            String profileScope = "all-threads";
             System.out.printf(Locale.ROOT,
-                    "{\"benchmark\":\"%s\",\"backend\":\"%s\",\"recognition_parallelism\":%d,"
+                    "{\"schema\":2,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                            + "\"recognition_parallelism\":%d,"
                             + "\"operator_profile_scope\":\"%s\",\"image_width\":%d,"
                             + "\"image_height\":%d,\"detector_limit_side\":%d,"
                             + "\"lines\":%d,\"warmup\":%d,\"iterations\":%d,"
@@ -113,9 +120,14 @@ public final class FullOcrPerformanceMain {
                             + "\"detection_mean_ms\":%.3f,\"crop_mean_ms\":%.3f,"
                             + "\"classification_mean_ms\":%.3f,\"rotation_mean_ms\":%.3f,"
                             + "\"recognition_mean_ms\":%.3f,\"sorting_mean_ms\":%.3f,"
+                            + "\"available_processors\":%d,\"heap_max_bytes\":%d,"
                             + "\"heap_before_bytes\":%d,\"heap_after_load_bytes\":%d,"
-                            + "\"heap_after_bytes\":%d,\"peak_heap_bytes\":%d,"
-                            + "\"peak_heap_delta_bytes\":%d,\"gc_count_delta\":%d,"
+                            + "\"heap_after_load_gc_bytes\":%d,\"model_heap_bytes\":%d,"
+                            + "\"heap_after_bytes\":%d,\"heap_before_gc_bytes\":%d,"
+                            + "\"heap_after_gc_bytes\":%d,\"retained_heap_delta_bytes\":%d,"
+                            + "\"peak_heap_bytes\":%d,\"peak_heap_delta_bytes\":%d,"
+                            + "\"transient_heap_bytes\":%d,"
+                            + "\"heap_peak_method\":\"mxbean-pool-sum\",\"gc_count_delta\":%d,"
                             + "\"gc_time_ms_delta\":%d,\"operators\":%s}%n",
                     benchmark, backendName, recognitionParallelism, profileScope,
                     image.width(), image.height(), detectorLimit, lineCount,
@@ -124,8 +136,10 @@ public final class FullOcrPerformanceMain {
                     milliseconds(percentile(total, 0.95)), milliseconds(mean(detection)),
                     milliseconds(mean(crop)), milliseconds(mean(classification)),
                     milliseconds(mean(rotation)), milliseconds(mean(recognition)),
-                    milliseconds(mean(sorting)), heapBefore, heapAfterLoad, heapAfter,
-                    peakHeap, peakDelta, gcCountDelta, gcTimeDelta,
+                    milliseconds(mean(sorting)), Runtime.getRuntime().availableProcessors(), heapMax,
+                    heapBefore, heapAfterLoad, heapAfterLoad, modelHeap, heapAfter, heapAfter,
+                    heapAfterGc, retainedHeap,
+                    peakHeap, peakDelta, transientHeap, gcCountDelta, gcTimeDelta,
                     operatorJson(operatorProfile, iterations));
         }
     }
@@ -199,6 +213,42 @@ public final class FullOcrPerformanceMain {
     private static long usedHeap(MemoryMXBean memory) {
         MemoryUsage usage = memory.getHeapMemoryUsage();
         return usage == null ? 0L : usage.getUsed();
+    }
+
+    private static long maximumHeap(MemoryMXBean memory) {
+        MemoryUsage usage = memory.getHeapMemoryUsage();
+        return usage == null ? 0L : Math.max(0L, usage.getMax());
+    }
+
+    private static long stabilizedHeap(MemoryMXBean memory) {
+        long minimum = usedHeap(memory);
+        for (int attempt = 0; attempt < 3; attempt++) {
+            System.gc();
+            try {
+                Thread.sleep(25L);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+            minimum = Math.min(minimum, usedHeap(memory));
+        }
+        return minimum;
+    }
+
+    private static void resetHeapPeaks() {
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            if (pool.getType() == MemoryType.HEAP) pool.resetPeakUsage();
+        }
+    }
+
+    private static long heapPeakUsed() {
+        long total = 0L;
+        for (MemoryPoolMXBean pool : ManagementFactory.getMemoryPoolMXBeans()) {
+            if (pool.getType() != MemoryType.HEAP) continue;
+            MemoryUsage usage = pool.getPeakUsage();
+            if (usage != null) total += Math.max(0L, usage.getUsed());
+        }
+        return total;
     }
 
     private static long gcCount() {
