@@ -34,4 +34,16 @@ public final class PerspectiveCropTest {
         Assert.assertEquals(14, crop.pixels()[0] & 0xff);
         Assert.assertEquals(10, crop.pixels()[12] & 0xff);
     }
+
+    @Test
+    public void reusableWorkspaceMatchesPublicCrop() {
+        BgrImage source = new BgrImage(new byte[4 * 12], 4, 4, 12);
+        DetectionBox box = new DetectionBox(new float[] {0, 0, 3, 0, 3, 3, 0, 3}, 0.9f);
+        BgrImage expected = PerspectiveCrop.crop(source, box);
+        PerspectiveCrop.Workspace workspace = new PerspectiveCrop.Workspace();
+        BgrImage actual = workspace.crop(source, box);
+        Assert.assertEquals(expected.width(), actual.width());
+        Assert.assertEquals(expected.height(), actual.height());
+        Assert.assertArrayEquals(expected.pixels(), actual.pixels());
+    }
 }

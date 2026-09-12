@@ -13,6 +13,7 @@ public final class PaddleOcr implements AutoCloseable {
     private final PaddleOcrDetector detector;
     private final PaddleOcrClassifier classifier;
     private final PaddleOcrRecognizer recognizer;
+    private final PerspectiveCrop.Workspace cropper;
     private final PaddleOcrOptions options;
     private boolean closed;
 
@@ -39,6 +40,7 @@ public final class PaddleOcr implements AutoCloseable {
         this.detector = detector;
         this.classifier = classifier;
         this.recognizer = recognizer;
+        this.cropper = new PerspectiveCrop.Workspace();
         this.options = options;
     }
 
@@ -74,7 +76,7 @@ public final class PaddleOcr implements AutoCloseable {
                 options.getMaxDetectionCandidates());
         List<OcrLineResult> lines = new ArrayList<OcrLineResult>(boxes.size());
         for (DetectionBox box : boxes) {
-            BgrImage crop = PerspectiveCrop.crop(source, box);
+            BgrImage crop = cropper.crop(source, box);
             ClsClassificationResult classification = null;
             boolean rotated = false;
             if (classifier != null) {

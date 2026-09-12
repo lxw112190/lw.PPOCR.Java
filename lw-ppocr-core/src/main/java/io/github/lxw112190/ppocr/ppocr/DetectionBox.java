@@ -25,6 +25,14 @@ public final class DetectionBox {
     public float[] getPoints() { return points.clone(); }
     public float getScore() { return score; }
 
+    void copyPointsTo(float[] destination) {
+        if (destination == null || destination.length != points.length) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "detection point destination is invalid");
+        }
+        System.arraycopy(points, 0, destination, 0, points.length);
+    }
+
     @Override
     public String toString() {
         return "DetectionBox{" + Arrays.toString(points) + ", score=" + score + "}";

@@ -9,12 +9,26 @@ public final class PerspectiveCrop {
     private PerspectiveCrop() { }
 
     public static BgrImage crop(BgrImage source, DetectionBox box) {
+        return crop(source, box, new float[8], new double[8]);
+    }
+
+    /** Reusable crop geometry workspace; callers must not invoke it concurrently. */
+    public static final class Workspace {
+        private final float[] values = new float[8];
+        private final double[] points = new double[8];
+
+        public BgrImage crop(BgrImage source, DetectionBox box) {
+            return PerspectiveCrop.crop(source, box, values, points);
+        }
+    }
+
+    private static BgrImage crop(BgrImage source, DetectionBox box,
+                                 float[] values, double[] points) {
         if (source == null || box == null) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image and detection box are required");
         }
-        float[] values = box.getPoints();
+        box.copyPointsTo(values);
         if (values.length != 8) throw invalid("detection box must have four points");
-        double[] points = new double[8];
         for (int i = 0; i < values.length; i++) {
             if (!Float.isFinite(values[i])) throw invalid("detection box contains non-finite coordinates");
             points[i] = values[i];
