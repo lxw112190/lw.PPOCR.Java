@@ -8,7 +8,7 @@ A lightweight pure-Java PP-OCR inference runtime.
 - No OpenCV native library
 - No JNI
 - Shared LWM v0.1 model format with `lw.PPOCR.C`
-- Scalar correctness path first; Vector API remains optional
+- Scalar correctness path plus an optional JDK 25 Vector API backend
 
 ## Current milestone
 
@@ -34,11 +34,10 @@ offline responsibility of `lw.PPOCR.C` and its converter.
 
 ## Build
 
-The design baseline is JDK 25. The bootstrap sources currently target Java 8
-standard APIs so the loader can be compiled in older development environments;
-the project does not use Java 8 compatibility as a promise for the final
-runtime. The `lw-ppocr-vector` module is deliberately separate and has no role
-in scalar correctness.
+The design baseline is JDK 25. Core sources target Java 8 bytecode and standard
+APIs, while `lw-ppocr-vector` targets JDK 25 and requires the incubating Vector
+API at compile time and launch time. The optional module is deliberately
+separate and has no role in Scalar correctness.
 
 ```text
 mvn test
@@ -49,7 +48,7 @@ mvn test
 ```text
 lw-ppocr-core/    LWM model layer and scalar-safe foundation
 lw-ppocr-imageio/ Optional standard-Java BufferedImage/ImageIO adapter
-lw-ppocr-vector/  Reserved optional Vector API backend
+lw-ppocr-vector/  Optional JDK 25 Vector API backend
 lw-ppocr-benchmark/  Dependency-free loader benchmark harness
 ```
 
@@ -69,5 +68,6 @@ model layout, BGR/ImageIO usage, lifecycle, and concurrency guidance.
 
 The current code targets the fixed-shape FP32 PP-OCRv6 Tiny/Small/Medium
 contract. It does not claim arbitrary ONNX topology compatibility, dynamic
-model discovery, or a release-ready Vector API backend. Image decoding is
-available separately through the optional `lw-ppocr-imageio` module.
+model discovery, GPU, or Android. The Vector API backend is optional and still
+uses Scalar fallbacks for unsupported kernels. Image decoding is available
+separately through the optional `lw-ppocr-imageio` module.

@@ -3,6 +3,8 @@ package io.github.lxw112190.ppocr.benchmark;
 import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.image.BgrTransforms;
 import io.github.lxw112190.ppocr.imageio.ImageIoLoader;
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OperatorType;
@@ -47,13 +49,15 @@ public final class FullOcrPerformanceMain {
         int iterations = args.length > 1 ? positive(args[1], "iterations") : DEFAULT_ITERATIONS;
         int detectorLimit = args.length > 2
                 ? positive(args[2], "detector limit") : DEFAULT_DETECTOR_LIMIT;
+        String backendName = args.length > 3 ? args[3] : "scalar";
         if (detectorLimit < 32) throw new IllegalArgumentException("detector limit must be at least 32");
+        KernelBackend backend = createBackend(backendName);
 
         BgrImage image = loadImage();
         MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
         long heapBefore = usedHeap(memory);
         long loadStart = System.nanoTime();
-        try (ProfiledPipeline pipeline = loadPipeline(detectorLimit)) {
+        try (ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend)) {
             long modelLoadNanos = System.nanoTime() - loadStart;
             long heapAfterLoad = usedHeap(memory);
             StageSample cold = pipeline.recognize(image);
@@ -97,7 +101,7 @@ public final class FullOcrPerformanceMain {
             String benchmark = detectorLimit == DEFAULT_DETECTOR_LIMIT
                     ? "full-ocr-default" : "full-ocr-det" + detectorLimit;
             System.out.printf(Locale.ROOT,
-                    "{\"benchmark\":\"%s\",\"image_width\":%d,"
+                    "{\"benchmark\":\"%s\",\"backend\":\"%s\",\"image_width\":%d,"
                             + "\"image_height\":%d,\"detector_limit_side\":%d,"
                             + "\"lines\":%d,\"warmup\":%d,\"iterations\":%d,"
                             + "\"model_load_ms\":%.3f,\"cold_ms\":%.3f,"
@@ -109,7 +113,7 @@ public final class FullOcrPerformanceMain {
                             + "\"heap_after_bytes\":%d,\"peak_heap_bytes\":%d,"
                             + "\"peak_heap_delta_bytes\":%d,\"gc_count_delta\":%d,"
                             + "\"gc_time_ms_delta\":%d,\"operators\":%s}%n",
-                    benchmark, image.width(), image.height(), detectorLimit, lineCount,
+                    benchmark, backendName, image.width(), image.height(), detectorLimit, lineCount,
                     warmup, iterations, milliseconds(modelLoadNanos), milliseconds(cold.totalNanos),
                     milliseconds(mean(total)), milliseconds(percentile(total, 0.50)),
                     milliseconds(percentile(total, 0.95)), milliseconds(mean(detection)),
@@ -121,7 +125,18 @@ public final class FullOcrPerformanceMain {
         }
     }
 
-    private static ProfiledPipeline loadPipeline(int detectorLimit) throws IOException {
+    private static KernelBackend createBackend(String name) {
+        if ("scalar".equals(name)) return new ScalarBackend();
+        if (!"vector".equals(name)) throw new IllegalArgumentException("backend must be scalar or vector");
+        try {
+            return (KernelBackend) Class.forName("io.github.lxw112190.ppocr.vector.VectorBackend")
+                    .getDeclaredConstructor().newInstance();
+        } catch (ReflectiveOperationException e) {
+            throw new IllegalStateException("Vector backend is unavailable", e);
+        }
+    }
+
+    private static ProfiledPipeline loadPipeline(int detectorLimit, KernelBackend backend) throws IOException {
         LwmModel detectorModel = loadModel(DET_MODEL);
         PaddleOcrDetector detector = null;
         LwmModel classifierModel = null;
@@ -130,12 +145,12 @@ public final class FullOcrPerformanceMain {
         PaddleOcrDictionary dictionary = null;
         PaddleOcrRecognizer recognizer = null;
         try {
-            detector = new PaddleOcrDetector(detectorModel, detectorLimit);
+            detector = new PaddleOcrDetector(detectorModel, detectorLimit, backend);
             classifierModel = loadModel(CLS_MODEL);
-            classifier = new PaddleOcrClassifier(classifierModel);
+            classifier = new PaddleOcrClassifier(classifierModel, backend);
             recognizerModel = loadModel(REC_MODEL);
             dictionary = loadDictionary();
-            recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary);
+            recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary, backend);
             return new ProfiledPipeline(detector, classifier, recognizer);
         } catch (RuntimeException e) {
             if (recognizer != null) recognizer.close();

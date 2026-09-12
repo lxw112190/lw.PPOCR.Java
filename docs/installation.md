@@ -31,7 +31,33 @@ GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windo
 </dependency>
 ```
 
-`lw-ppocr-vector` 是实验性可选后端，当前不影响 Scalar 正确性路径。
+`lw-ppocr-vector` 是 JDK 25 可选加速后端，支持部分逐元素、MatMul 和 1x1
+卷积，并对其余算子回退到 Scalar。编译和运行都需要加入
+`--add-modules jdk.incubator.vector`；不使用该模块时，Scalar 正确性路径不受影响。
+
+```xml
+<dependency>
+    <groupId>io.github.lxw112190</groupId>
+    <artifactId>lw-ppocr-vector</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+</dependency>
+```
+
+Vector 后端按实例注入 DET、CLS 和 REC，三者可共享同一个无状态实例：
+
+```java
+KernelBackend backend = new VectorBackend();
+PaddleOcrDetector detector = new PaddleOcrDetector(detModel, 320, backend);
+PaddleOcrClassifier classifier = new PaddleOcrClassifier(clsModel, backend);
+PaddleOcrRecognizer recognizer = new PaddleOcrRecognizer(recModel, dictionary, backend);
+PaddleOcr ocr = new PaddleOcr(detector, classifier, recognizer);
+```
+
+启动应用时加入：
+
+```text
+java --add-modules jdk.incubator.vector ...
+```
 
 ## 模型准备
 
@@ -98,4 +124,4 @@ Worker pool 会共享不可变模型内容的语义由各 worker 管理；每个
 
 ## 当前范围
 
-v0.1-preview 面向固定形状 FP32 的 PP-OCRv6 Tiny/Small/Medium 合同，Scalar 是稳定参考路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU、Android 或正式 Vector API 后端；性能数字仅用于同机研发比较，不构成发布性能承诺。
+v0.1-preview 面向固定形状 FP32 的 PP-OCRv6 Tiny/Small/Medium 合同，Scalar 是稳定参考路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU 或 Android；Vector API 后端是 JDK 25 可选加速路径，仍会对未优化算子回退 Scalar。性能数字仅用于同机研发比较，不构成发布性能承诺。

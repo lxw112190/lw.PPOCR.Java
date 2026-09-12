@@ -41,7 +41,7 @@ jobs:
           java-version: '25'
           cache: maven
       - name: Build benchmark
-        run: mvn --batch-mode --no-transfer-progress -pl lw-ppocr-benchmark -am package -DskipTests
+        run: mvn --batch-mode --no-transfer-progress package -DskipTests
       - name: Run benchmark
         run: |
           mkdir -p benchmark-results
@@ -60,6 +60,10 @@ jobs:
           java -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 960 \
             | tee benchmark-results/full-ocr-default.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector \
+            | tee benchmark-results/full-ocr-vector-det320.json
       - name: Publish benchmark summary
         run: |
           echo '### LWM loader performance' >> "$GITHUB_STEP_SUMMARY"
@@ -81,6 +85,10 @@ jobs:
           echo '### Full OCR performance and JVM heap (default)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-default.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Full OCR performance and JVM heap (Vector API, DET 320)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/full-ocr-vector-det320.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark result
         uses: actions/upload-artifact@v4
