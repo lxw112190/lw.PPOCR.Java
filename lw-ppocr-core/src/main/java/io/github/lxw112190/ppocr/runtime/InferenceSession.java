@@ -58,6 +58,16 @@ public final class InferenceSession implements AutoCloseable {
     public void close() { closed = true; }
 
     private void executeNode(NodeInfo node, float[] storage) {
+        try {
+            executeNodeUnchecked(node, storage);
+        } catch (OcrException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw unsupported(node, "invalid operator parameters or tensor layout", e);
+        }
+    }
+
+    private void executeNodeUnchecked(NodeInfo node, float[] storage) {
         int[] inputs = node.getInputs();
         int[] outputs = node.getOutputs();
         if (inputs.length == 0) {
@@ -477,6 +487,11 @@ public final class InferenceSession implements AutoCloseable {
 
     private OcrException unsupported(NodeInfo node, String detail) {
         return new OcrException(OcrErrorCode.UNSUPPORTED_OPERATOR, node.getOperator() + ": " + detail);
+    }
+
+    private OcrException unsupported(NodeInfo node, String detail, Throwable cause) {
+        return new OcrException(OcrErrorCode.UNSUPPORTED_OPERATOR,
+                node.getOperator() + ": " + detail, cause);
     }
 
     private void ensureOpen() {
