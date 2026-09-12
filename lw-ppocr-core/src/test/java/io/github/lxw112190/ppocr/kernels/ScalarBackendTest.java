@@ -9,8 +9,16 @@ public final class ScalarBackendTest {
     @Test
     public void computesOneByOneConvolution() {
         float[] output = new float[4];
-        backend.conv(new float[] {1, 2, 3, 4}, 0, new float[] {2}, 0, new float[] {1}, 0,
-                output, 0, 1, 1, 2, 2, 1, 1, 1, 1, 1, 1, 0, 0, 1, 2, 2);
+        backend.conv(new float[] {1, 2, 3, 4}, 0,
+                new float[] {2}, 0,
+                new float[] {1}, 0,
+                output, 0,
+                1, 1, 2, 2, 1,
+                1, 1,
+                1, 1,
+                1, 1,
+                0, 0,
+                1, 2, 2);
         Assert.assertArrayEquals(new float[] {3, 5, 7, 9}, output, 0.0f);
     }
 
