@@ -58,6 +58,10 @@ tests on JDK 25 across Linux, Windows, and macOS, and runs separate Linux
 benchmarks for LWM loading and DB postprocessing. Performance output is a
 development signal only; v0.x does not use it as a release gate.
 
+For applications using AWT/ImageIO, `lw-ppocr-imageio` also provides
+`PaddleOcrImageIo` convenience methods for `Path`, `InputStream`, and
+`BufferedImage`. The core module remains independent of AWT and ImageIO.
+
 ## Scope boundaries
 
 The current code targets the fixed-shape FP32 PP-OCRv6 Tiny/Small/Medium

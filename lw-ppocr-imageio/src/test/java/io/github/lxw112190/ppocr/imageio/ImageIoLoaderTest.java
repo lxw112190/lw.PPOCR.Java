@@ -20,4 +20,9 @@ public class ImageIoLoaderTest {
 
         Assert.assertArrayEquals(new byte[] {(byte) 0xEF, (byte) 0xCD, (byte) 0xAB}, result.pixels());
     }
+
+    @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)
+    public void rejectsMissingPipelineBeforeDecoding() {
+        PaddleOcrImageIo.recognize(null, new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB));
+    }
 }
