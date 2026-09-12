@@ -18,6 +18,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     private final PaddleOcrDictionary dictionary;
     private final InferenceSession session;
     private final int timeSteps;
+    private final float[] logits;
     private boolean closed;
 
     /** Takes ownership of the model and dictionary and closes both on close(). */
@@ -29,10 +30,16 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         TensorInfo input = model.getTensors().get(inputIndex);
         TensorShape inputShape = new TensorShape(input.getDimensions());
         int resolvedTimeSteps = outputTimeSteps(model, dictionary);
+        int classCount = dictionary.classCount();
+        long outputLength = (long) resolvedTimeSteps * classCount;
+        if (outputLength > Integer.MAX_VALUE) {
+            throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "REC output is too large");
+        }
         this.model = model;
         this.dictionary = dictionary;
         try {
             this.session = new InferenceSession(model, Collections.singletonList(inputShape));
+            this.logits = new float[(int) outputLength];
         } catch (RuntimeException e) {
             dictionary.close();
             model.close();
@@ -59,7 +66,6 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         TensorInfo input = model.getTensors().get(model.getGraphInputs().get(0));
         int targetWidth = input.getDimensions()[3];
         RecPreprocessResult preprocessed = RecPreprocess.resizeNormalize(source, targetWidth);
-        float[] logits = new float[timeSteps * dictionary.classCount()];
         session.run(preprocessed.getChw(), logits);
         CtcDecodeResult decoded = CtcDecoder.decodeGreedy(logits, timeSteps,
                 dictionary.classCount(), dictionary);
