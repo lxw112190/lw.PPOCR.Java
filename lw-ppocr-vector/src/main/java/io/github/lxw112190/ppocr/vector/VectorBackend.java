@@ -9,12 +9,15 @@ import java.util.Arrays;
 import jdk.incubator.vector.FloatVector;
 import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorShuffle;
 import jdk.incubator.vector.VectorSpecies;
 
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
 public final class VectorBackend implements KernelBackend {
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
+    private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.makeZip(SPECIES, 0);
+    private static final VectorShuffle<Float> ZIP_HIGH = VectorShuffle.makeZip(SPECIES, 1);
     private final ScalarBackend scalar = new ScalarBackend();
 
     @Override
@@ -885,16 +888,17 @@ public final class VectorBackend implements KernelBackend {
         for (int n = 0; n < batch; n++) {
             for (int oc = 0; oc < outputChannels; oc++) {
                 float initial = bias == null ? 0.0f : bias[biasOffset + oc];
+                FloatVector initialVector = FloatVector.broadcast(SPECIES, initial);
                 int outputBase = outputOffset + (n * outputChannels + oc) * outputPlane;
                 for (int ih = 0; ih < inputHeight; ih++) {
                     int outputRow0 = outputBase + ih * 2 * outputWidth;
                     int outputRow1 = outputRow0 + outputWidth;
                     int iw = 0;
                     for (; iw < bound; iw += SPECIES.length()) {
-                        FloatVector sum00 = FloatVector.broadcast(SPECIES, initial);
-                        FloatVector sum01 = FloatVector.broadcast(SPECIES, initial);
-                        FloatVector sum10 = FloatVector.broadcast(SPECIES, initial);
-                        FloatVector sum11 = FloatVector.broadcast(SPECIES, initial);
+                        FloatVector sum00 = initialVector;
+                        FloatVector sum01 = initialVector;
+                        FloatVector sum10 = initialVector;
+                        FloatVector sum11 = initialVector;
                         for (int ic = 0; ic < inputChannels; ic++) {
                             int inputBase = inputOffset +
                                     (n * inputChannels + ic) * inputPlane + ih * inputWidth + iw;
@@ -906,10 +910,14 @@ public final class VectorBackend implements KernelBackend {
                             sum11 = sum11.add(sample.mul(weights[kernel + 3]));
                         }
                         int outputColumn = iw * 2;
-                        sum00.intoArray(output, outputRow0 + outputColumn, STRIDE_TWO_INDEXES, 0);
-                        sum01.intoArray(output, outputRow0 + outputColumn + 1, STRIDE_TWO_INDEXES, 0);
-                        sum10.intoArray(output, outputRow1 + outputColumn, STRIDE_TWO_INDEXES, 0);
-                        sum11.intoArray(output, outputRow1 + outputColumn + 1, STRIDE_TWO_INDEXES, 0);
+                        sum00.rearrange(ZIP_LOW, sum01)
+                                .intoArray(output, outputRow0 + outputColumn);
+                        sum00.rearrange(ZIP_HIGH, sum01)
+                                .intoArray(output, outputRow0 + outputColumn + SPECIES.length());
+                        sum10.rearrange(ZIP_LOW, sum11)
+                                .intoArray(output, outputRow1 + outputColumn);
+                        sum10.rearrange(ZIP_HIGH, sum11)
+                                .intoArray(output, outputRow1 + outputColumn + SPECIES.length());
                     }
                     for (; iw < inputWidth; iw++) {
                         float sum00 = initial;
