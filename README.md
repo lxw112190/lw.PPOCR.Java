@@ -72,9 +72,11 @@ reports loading, DB postprocess, preprocessing, model workload, and complete
 OCR results for Scalar, Vector, and Vector with four CLS and REC workers. Full OCR
 JSON separates stage timing, GC activity, model memory, retained heap, and
 transient heap. Schema 3 measures wall time without the operator profiler and
-runs one separate warmed diagnostic invocation; parallel operator time is the
-sum across participating threads. Performance output is a development signal
-only; v0.x does not use it as a release gate.
+runs one separate warmed diagnostic invocation. Aggregate `operators` remain
+available, while `stage_operators` separates DET, CLS, and REC; parallel operator
+time is the sum across participating threads. `stage_hot_nodes` reports the
+slowest resolved graph nodes and their tensor shapes for targeted tuning.
+Performance output is a development signal only; v0.x does not use it as a release gate.
 
 Prepared inference sessions, preprocessing arrays, DB geometry scratch space,
 and per-line perspective-crop pixel buffers are reused across synchronous OCR

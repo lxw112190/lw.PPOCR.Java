@@ -107,12 +107,7 @@ public final class FullOcrPerformanceMain {
 
             // Keep node-level atomic accounting out of the measured samples. A separate,
             // already-warmed invocation supplies diagnostics without biasing wall time or GC.
-            StageSample profiledSample;
-            InferenceProfiler.Profile operatorProfile;
-            try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
-                profiledSample = pipeline.recognize(image);
-                operatorProfile = profiler.snapshot();
-            }
+            StageSample profiledSample = pipeline.profile(image);
             if (profiledSample.lines != lineCount) {
                 throw new IllegalStateException("profile invocation changed OCR line count: measured="
                         + lineCount + ", profiled=" + profiledSample.lines);
@@ -144,7 +139,8 @@ public final class FullOcrPerformanceMain {
                             + "\"peak_heap_bytes\":%d,\"peak_heap_delta_bytes\":%d,"
                             + "\"transient_heap_bytes\":%d,"
                             + "\"heap_peak_method\":\"mxbean-pool-sum\",\"gc_count_delta\":%d,"
-                            + "\"gc_time_ms_delta\":%d,\"operators\":%s}%n",
+                            + "\"gc_time_ms_delta\":%d,\"operators\":%s,"
+                            + "\"stage_operators\":%s,\"stage_hot_nodes\":%s}%n",
                     benchmark, backendName, classificationParallelism,
                     recognitionParallelism, profileScope,
                     milliseconds(profiledSample.totalNanos),
@@ -158,7 +154,10 @@ public final class FullOcrPerformanceMain {
                     heapBefore, heapAfterLoad, heapAfterLoad, modelHeap, heapAfter, heapAfter,
                     heapAfterGc, retainedHeap,
                     peakHeap, peakDelta, transientHeap, gcCountDelta, gcTimeDelta,
-                    operatorJson(operatorProfile));
+                    operatorJson(profiledSample.detectionProfile,
+                            profiledSample.classificationProfile,
+                            profiledSample.recognitionProfile),
+                    stageOperatorJson(profiledSample), hotNodeStageJson(profiledSample));
         }
     }
 
@@ -316,11 +315,17 @@ public final class FullOcrPerformanceMain {
         return nanos / 1_000_000.0;
     }
 
-    private static String operatorJson(InferenceProfiler.Profile profile) {
+    private static String operatorJson(InferenceProfiler.Profile... profiles) {
         StringBuilder json = new StringBuilder("{");
         boolean first = true;
         for (OperatorType operator : OperatorType.values()) {
-            long calls = profile.getInvocations(operator);
+            long calls = 0L;
+            long elapsedNanos = 0L;
+            for (InferenceProfiler.Profile profile : profiles) {
+                if (profile == null) continue;
+                calls += profile.getInvocations(operator);
+                elapsedNanos += profile.getElapsedNanos(operator);
+            }
             if (calls == 0L) continue;
             if (!first) json.append(',');
             first = false;
@@ -328,10 +333,52 @@ public final class FullOcrPerformanceMain {
                     .append("\"calls\":").append(calls)
                     .append(",\"summed_thread_ms_per_ocr\":")
                     .append(String.format(Locale.ROOT, "%.3f",
-                            milliseconds(profile.getElapsedNanos(operator))))
+                            milliseconds(elapsedNanos)))
                     .append('}');
         }
         return json.append('}').toString();
+    }
+
+    private static String stageOperatorJson(StageSample sample) {
+        return "{\"detection\":" + operatorJson(sample.detectionProfile)
+                + ",\"classification\":" + operatorJson(sample.classificationProfile)
+                + ",\"recognition\":" + operatorJson(sample.recognitionProfile) + '}';
+    }
+
+    private static String hotNodeStageJson(StageSample sample) {
+        return "{\"detection\":" + hotNodeJson(sample.detectionProfile, 8)
+                + ",\"classification\":" + hotNodeJson(sample.classificationProfile, 8)
+                + ",\"recognition\":" + hotNodeJson(sample.recognitionProfile, 12) + '}';
+    }
+
+    private static String hotNodeJson(InferenceProfiler.Profile profile, int limit) {
+        StringBuilder json = new StringBuilder("[");
+        List<InferenceProfiler.NodeProfile> nodes = profile.getNodes();
+        int count = Math.min(limit, nodes.size());
+        for (int i = 0; i < count; i++) {
+            if (i != 0) json.append(',');
+            InferenceProfiler.NodeProfile node = nodes.get(i);
+            json.append("{\"node\":").append(node.getNodeIndex())
+                    .append(",\"operator\":\"")
+                    .append(node.getOperator().name().toLowerCase(Locale.ROOT))
+                    .append("\",\"calls\":").append(node.getInvocations())
+                    .append(",\"summed_thread_ms_per_ocr\":")
+                    .append(String.format(Locale.ROOT, "%.3f",
+                            milliseconds(node.getElapsedNanos())))
+                    .append(",\"shape\":\"").append(jsonEscape(node.getDescription()))
+                    .append("\"}");
+        }
+        return json.append(']').toString();
+    }
+
+    private static String jsonEscape(String value) {
+        StringBuilder escaped = new StringBuilder(value.length());
+        for (int i = 0; i < value.length(); i++) {
+            char character = value.charAt(i);
+            if (character == '\\' || character == '\"') escaped.append('\\');
+            escaped.append(character);
+        }
+        return escaped.toString();
     }
 
     /** Benchmark-only copy of the public pipeline orchestration with stage boundaries. */
@@ -355,13 +402,26 @@ public final class FullOcrPerformanceMain {
         }
 
         private StageSample recognize(BgrImage source) {
+            return recognize(source, false);
+        }
+
+        private StageSample profile(BgrImage source) {
+            return recognize(source, true);
+        }
+
+        private StageSample recognize(BgrImage source, boolean profileOperators) {
             StageSample sample = new StageSample();
             long totalStart = System.nanoTime();
             long start = System.nanoTime();
-            List<DetectionBox> boxes = detector.detect(source,
-                    options.getDetectionBitmapThreshold(), options.getDetectionBoxThreshold(),
-                    options.getDetectionUnclipRatio(), options.isDetectionDilation(),
-                    options.getMaxDetectionCandidates());
+            List<DetectionBox> boxes;
+            if (profileOperators) {
+                try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
+                    boxes = detect(source);
+                    sample.detectionProfile = profiler.snapshot();
+                }
+            } else {
+                boxes = detect(source);
+            }
             sample.detectionNanos = System.nanoTime() - start;
 
             List<OcrLineResult> lines = new ArrayList<OcrLineResult>(boxes.size());
@@ -375,8 +435,15 @@ public final class FullOcrPerformanceMain {
                 crops.add(crop);
             }
             start = System.nanoTime();
-            List<ClsClassificationResult> classifications = classifier.classifyAll(
-                    crops, classificationParallelism);
+            List<ClsClassificationResult> classifications;
+            if (profileOperators) {
+                try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
+                    classifications = classifier.classifyAll(crops, classificationParallelism);
+                    sample.classificationProfile = profiler.snapshot();
+                }
+            } else {
+                classifications = classifier.classifyAll(crops, classificationParallelism);
+            }
             sample.classificationNanos = System.nanoTime() - start;
             for (int line = 0; line < boxes.size(); line++) {
                 BgrImage crop = crops.get(line);
@@ -392,8 +459,15 @@ public final class FullOcrPerformanceMain {
                 rotations.add(rotated);
             }
             start = System.nanoTime();
-            List<RecRecognitionResult> recognitions = recognizer.recognizeAll(
-                    crops, recognitionParallelism);
+            List<RecRecognitionResult> recognitions;
+            if (profileOperators) {
+                try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
+                    recognitions = recognizer.recognizeAll(crops, recognitionParallelism);
+                    sample.recognitionProfile = profiler.snapshot();
+                }
+            } else {
+                recognitions = recognizer.recognizeAll(crops, recognitionParallelism);
+            }
             sample.recognitionNanos = System.nanoTime() - start;
             for (int i = 0; i < boxes.size(); i++) {
                 RecRecognitionResult recognition = recognitions.get(i);
@@ -409,6 +483,13 @@ public final class FullOcrPerformanceMain {
             sample.lines = result.getLines().size();
             sample.totalNanos = System.nanoTime() - totalStart;
             return sample;
+        }
+
+        private List<DetectionBox> detect(BgrImage source) {
+            return detector.detect(source,
+                    options.getDetectionBitmapThreshold(), options.getDetectionBoxThreshold(),
+                    options.getDetectionUnclipRatio(), options.isDetectionDilation(),
+                    options.getMaxDetectionCandidates());
         }
 
         @Override
@@ -428,5 +509,8 @@ public final class FullOcrPerformanceMain {
         private long recognitionNanos;
         private long sortingNanos;
         private int lines;
+        private InferenceProfiler.Profile detectionProfile;
+        private InferenceProfiler.Profile classificationProfile;
+        private InferenceProfiler.Profile recognitionProfile;
     }
 }

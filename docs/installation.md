@@ -162,7 +162,9 @@ OCR。性能摘要明确区分 Scalar、Vector 和 Vector CLS×4/REC×4，并报
 阶段耗时、模型常驻堆、GC 后存活堆、峰值堆和 GC 次数。不同 GitHub Runner
 之间波动较大，应只比较同一环境、同一参数和相同提交附近的结果。schema 3
 在关闭算子探针时采集计时与内存数据，再额外运行一次已预热 OCR 生成全线程算子
-诊断；`summed_thread_ms_per_ocr` 是并行线程耗时之和，不能与墙钟总耗时直接相加比较。
+诊断。`operators` 保留整条流水线汇总，`stage_operators` 分别报告 DET、CLS、REC；
+`stage_hot_nodes` 进一步列出最慢节点及其已解析张量形状。`summed_thread_ms_per_ocr`
+是并行线程耗时之和，不能与墙钟总耗时直接相加比较。
 
 完整流水线会复用 Session 工作区、预处理数组、DB 几何缓冲和按文字行槽位保存的
 透视裁剪像素缓冲，避免每次调用重复申请大数组。`PaddleOcr` 本身是单调用者对象；

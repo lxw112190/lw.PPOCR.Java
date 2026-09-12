@@ -32,6 +32,7 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, ConcatPlan> concatPlans;
     private final IdentityHashMap<NodeInfo, int[]> layoutAxes;
     private final IdentityHashMap<NodeInfo, BinaryPlan> binaryPlans;
+    private final InferenceProfiler.NodeDescriptor[] profileDescriptors;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -64,6 +65,7 @@ public final class InferenceSession implements AutoCloseable {
         this.concatPlans = new IdentityHashMap<NodeInfo, ConcatPlan>(nodes.length);
         this.layoutAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
         this.binaryPlans = new IdentityHashMap<NodeInfo, BinaryPlan>(nodes.length);
+        this.profileDescriptors = new InferenceProfiler.NodeDescriptor[nodes.length];
         for (int i = 0; i < nodes.length; i++) {
             NodeInfo node = nodes[i];
             this.nodeIndexes.put(node, i);
@@ -90,7 +92,7 @@ public final class InferenceSession implements AutoCloseable {
         requireLength(output, execution.length(outputIndex), "output");
         float[] storage = workspace.fp32();
         System.arraycopy(input, 0, storage, execution.offset(inputIndex), input.length);
-        for (int i = 0; i < nodes.length; i++) executeNode(nodes[i], storage);
+        for (int i = 0; i < nodes.length; i++) executeNode(i, nodes[i], storage);
         System.arraycopy(storage, execution.offset(outputIndex), output, 0, output.length);
     }
 
@@ -99,7 +101,7 @@ public final class InferenceSession implements AutoCloseable {
     @Override
     public void close() { closed = true; }
 
-    private void executeNode(NodeInfo node, float[] storage) {
+    private void executeNode(int nodeIndex, NodeInfo node, float[] storage) {
         InferenceProfiler profiler = InferenceProfiler.current();
         if (profiler == null) {
             executeNodeGuarded(node, storage);
@@ -109,8 +111,42 @@ public final class InferenceSession implements AutoCloseable {
         try {
             executeNodeGuarded(node, storage);
         } finally {
-            profiler.record(node.getOperator(), System.nanoTime() - start);
+            long elapsedNanos = System.nanoTime() - start;
+            profiler.record(profileDescriptor(nodeIndex, node), elapsedNanos);
         }
+    }
+
+    private InferenceProfiler.NodeDescriptor profileDescriptor(int nodeIndex, NodeInfo node) {
+        InferenceProfiler.NodeDescriptor descriptor = profileDescriptors[nodeIndex];
+        if (descriptor != null) return descriptor;
+        int[] inputs = nodeInputs.get(node);
+        int[] outputs = nodeOutputs.get(node);
+        StringBuilder description = new StringBuilder("inputs=");
+        appendShapes(description, inputs);
+        description.append(",outputs=");
+        appendShapes(description, outputs);
+        if (node.getOperator() == OperatorType.CONV) {
+            ByteBuffer params = parameterData(node);
+            description.append(",groups=").append(params.getInt(4))
+                    .append(",kernel=").append(params.getInt(8)).append('x')
+                    .append(params.getInt(12)).append(",stride=")
+                    .append(params.getInt(16)).append('x').append(params.getInt(20))
+                    .append(",dilation=").append(params.getInt(24)).append('x')
+                    .append(params.getInt(28));
+        }
+        descriptor = new InferenceProfiler.NodeDescriptor(execution.model(), nodeIndex,
+                node.getOperator(), description.toString());
+        profileDescriptors[nodeIndex] = descriptor;
+        return descriptor;
+    }
+
+    private void appendShapes(StringBuilder result, int[] tensorIndexes) {
+        result.append('[');
+        for (int i = 0; i < tensorIndexes.length; i++) {
+            if (i != 0) result.append(',');
+            result.append(execution.shapes().get(tensorIndexes[i]));
+        }
+        result.append(']');
     }
 
     private void executeNodeGuarded(NodeInfo node, float[] storage) {
