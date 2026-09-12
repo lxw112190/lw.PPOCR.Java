@@ -29,13 +29,16 @@ public final class VectorBackendTest {
         Assert.assertArrayEquals(expected, actual, 0.0f);
 
         float[] matrixLeft = new float[12];
-        float[] matrixRight = new float[78];
+        int matrixColumns = 137;
+        float[] matrixRight = new float[6 * matrixColumns];
         for (int i = 0; i < matrixLeft.length; i++) matrixLeft[i] = i * 0.2f - 1.0f;
         for (int i = 0; i < matrixRight.length; i++) matrixRight[i] = i * 0.03f - 0.5f;
-        float[] matrixExpected = new float[26];
-        float[] matrixActual = new float[26];
-        scalar.matMul(matrixLeft, 0, matrixRight, 0, matrixExpected, 0, 2, 6, 13);
-        vector.matMul(matrixLeft, 0, matrixRight, 0, matrixActual, 0, 2, 6, 13);
+        float[] matrixExpected = new float[2 * matrixColumns];
+        float[] matrixActual = new float[2 * matrixColumns];
+        scalar.matMul(matrixLeft, 0, matrixRight, 0, matrixExpected, 0,
+                2, 6, matrixColumns);
+        vector.matMul(matrixLeft, 0, matrixRight, 0, matrixActual, 0,
+                2, 6, matrixColumns);
         Assert.assertArrayEquals(matrixExpected, matrixActual, 0.000001f);
     }
 
