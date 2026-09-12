@@ -27,6 +27,7 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, int[]> sliceStarts;
     private final IdentityHashMap<NodeInfo, int[]> sliceAxes;
     private final IdentityHashMap<NodeInfo, int[]> sliceSteps;
+    private final IdentityHashMap<NodeInfo, ConcatPlan> concatPlans;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -55,6 +56,7 @@ public final class InferenceSession implements AutoCloseable {
         this.sliceStarts = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.sliceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.sliceSteps = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
+        this.concatPlans = new IdentityHashMap<NodeInfo, ConcatPlan>(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
             NodeInfo node = nodes.get(i);
             this.nodeIndexes.put(node, i);
@@ -64,6 +66,7 @@ public final class InferenceSession implements AutoCloseable {
             prepareTranspose(node);
             prepareReduceMean(node);
             prepareSlice(node);
+            prepareConcat(node);
         }
     }
 
@@ -428,9 +431,16 @@ public final class InferenceSession implements AutoCloseable {
     private void executeConcat(NodeInfo node, float[] storage, int output) {
         int[] inputs = nodeInputs.get(node);
         if (inputs.length == 0) throw unsupported(node, "Concat requires inputs");
+        ConcatPlan plan = concatPlans.get(node);
+        TensorShape shape = execution.shapes().get(inputs[0]);
+        if (plan != null) {
+            for (int i = 0; i < inputs.length; i++) plan.values[i] = data(inputs[i], storage);
+            backend.concat(plan.values, plan.offsets, storage, offset(output),
+                    shape.dimensionsUnsafe(), plan.axis, plan.axisSizes);
+            return;
+        }
         ByteBuffer params = parameterData(node);
         int axis = params.getInt(4);
-        TensorShape shape = execution.shapes().get(inputs[0]);
         if (axis < 0) axis += shape.getRank();
         if (axis < 0 || axis >= shape.getRank()) throw unsupported(node, "Concat axis is invalid");
         float[][] values = new float[inputs.length][];
@@ -547,6 +557,52 @@ public final class InferenceSession implements AutoCloseable {
         sliceStarts.put(node, starts);
         sliceAxes.put(node, axes);
         sliceSteps.put(node, steps);
+    }
+
+    private void prepareConcat(NodeInfo node) {
+        if (node.getOperator() != OperatorType.CONCAT) return;
+        int[] inputs = nodeInputs.get(node);
+        if (inputs.length == 0) return;
+        ByteBuffer params = parameterData(node);
+        int axis = params.getInt(4);
+        TensorShape shape = execution.shapes().get(inputs[0]);
+        if (axis < 0) axis += shape.getRank();
+        if (axis < 0 || axis >= shape.getRank()) return;
+        int[] outputs = nodeOutputs.get(node);
+        if (outputs.length != 1) return;
+        TensorShape outputShape = execution.shapes().get(outputs[0]);
+        if (outputShape.getRank() != shape.getRank()) return;
+        ConcatPlan plan = new ConcatPlan(inputs.length, axis);
+        long axisTotal = 0;
+        for (int i = 0; i < inputs.length; i++) {
+            TensorShape inputShape = execution.shapes().get(inputs[i]);
+            if (inputShape.getRank() != shape.getRank()) return;
+            for (int dimension = 0; dimension < shape.getRank(); dimension++) {
+                if (dimension != axis && inputShape.get(dimension) != shape.get(dimension)) return;
+            }
+            plan.offsets[i] = offset(inputs[i]);
+            plan.axisSizes[i] = inputShape.get(axis);
+            axisTotal += inputShape.get(axis);
+        }
+        if (axisTotal != outputShape.get(axis)) return;
+        for (int dimension = 0; dimension < shape.getRank(); dimension++) {
+            if (dimension != axis && outputShape.get(dimension) != shape.get(dimension)) return;
+        }
+        concatPlans.put(node, plan);
+    }
+
+    private static final class ConcatPlan {
+        private final int axis;
+        private final float[][] values;
+        private final int[] offsets;
+        private final int[] axisSizes;
+
+        private ConcatPlan(int inputCount, int axis) {
+            this.axis = axis;
+            this.values = new float[inputCount][];
+            this.offsets = new int[inputCount];
+            this.axisSizes = new int[inputCount];
+        }
     }
 
     private int[] strides(TensorShape shape) {
