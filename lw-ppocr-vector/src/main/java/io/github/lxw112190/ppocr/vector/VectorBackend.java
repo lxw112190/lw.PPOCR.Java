@@ -69,16 +69,128 @@ public final class VectorBackend implements KernelBackend {
     @Override
     public void binary(BinaryOp operation, float[] left, int leftOffset, float[] right,
                        int rightOffset, float[] output, int outputOffset, BinaryPlan plan) {
+        if (operation == BinaryOp.POW) {
+            scalar.binary(operation, left, leftOffset, right, rightOffset, output, outputOffset, plan);
+            return;
+        }
         if (plan.getVariant() == BinaryVariant.SAME_SHAPE) {
-            switch (operation) {
-                case ADD: add(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); return;
-                case MUL: mul(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); return;
-                case DIV: div(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); return;
-                case SUB: sub(left, leftOffset, right, rightOffset, output, outputOffset, plan.getOutputLength()); return;
-                default: break;
+            binaryContiguous(operation, left, leftOffset, 1, right, rightOffset, 1,
+                    output, outputOffset, plan.getOutputLength());
+            return;
+        }
+        if (plan.getVariant() == BinaryVariant.RIGHT_SCALAR) {
+            binaryContiguous(operation, left, leftOffset, 1, right, rightOffset, 0,
+                    output, outputOffset, plan.getOutputLength());
+            return;
+        }
+        if (plan.getVariant() == BinaryVariant.LEFT_SCALAR) {
+            binaryContiguous(operation, left, leftOffset, 0, right, rightOffset, 1,
+                    output, outputOffset, plan.getOutputLength());
+            return;
+        }
+        binaryBroadcast(operation, left, leftOffset, right, rightOffset, output, outputOffset, plan);
+    }
+
+    private static void binaryBroadcast(BinaryOp operation, float[] left, int leftOffset,
+                                        float[] right, int rightOffset, float[] output,
+                                        int outputOffset, BinaryPlan plan) {
+        int lastAxis = plan.getRank() - 1;
+        int inner = plan.getOutputDimension(lastAxis);
+        int rows = plan.getOutputLength() / inner;
+        int leftInnerStride = plan.getLeftStride(lastAxis);
+        int rightInnerStride = plan.getRightStride(lastAxis);
+        for (int row = 0; row < rows; row++) {
+            int remainder = row;
+            int leftIndex = 0;
+            int rightIndex = 0;
+            for (int axis = lastAxis - 1; axis >= 0; axis--) {
+                int coordinate = remainder % plan.getOutputDimension(axis);
+                remainder /= plan.getOutputDimension(axis);
+                leftIndex += coordinate * plan.getLeftStride(axis);
+                rightIndex += coordinate * plan.getRightStride(axis);
+            }
+            binaryContiguous(operation, left, leftOffset + leftIndex, leftInnerStride,
+                    right, rightOffset + rightIndex, rightInnerStride,
+                    output, outputOffset + row * inner, inner);
+        }
+    }
+
+    private static void binaryContiguous(BinaryOp operation, float[] left, int leftOffset,
+                                         int leftStride, float[] right, int rightOffset,
+                                         int rightStride, float[] output, int outputOffset,
+                                         int length) {
+        int bound = SPECIES.loopBound(length);
+        int i = 0;
+        if (leftStride == 0 && rightStride == 0) {
+            Arrays.fill(output, outputOffset, outputOffset + length,
+                    apply(operation, left[leftOffset], right[rightOffset]));
+            return;
+        } else if (leftStride == 0) {
+            float scalarValue = left[leftOffset];
+            for (; i < bound; i += SPECIES.length()) {
+                applyLeftScalar(operation, scalarValue,
+                        FloatVector.fromArray(SPECIES, right, rightOffset + i))
+                        .intoArray(output, outputOffset + i);
+            }
+        } else if (rightStride == 0) {
+            float scalarValue = right[rightOffset];
+            for (; i < bound; i += SPECIES.length()) {
+                applyRightScalar(operation,
+                        FloatVector.fromArray(SPECIES, left, leftOffset + i), scalarValue)
+                        .intoArray(output, outputOffset + i);
+            }
+        } else {
+            for (; i < bound; i += SPECIES.length()) {
+                apply(operation, FloatVector.fromArray(SPECIES, left, leftOffset + i),
+                        FloatVector.fromArray(SPECIES, right, rightOffset + i))
+                        .intoArray(output, outputOffset + i);
             }
         }
-        scalar.binary(operation, left, leftOffset, right, rightOffset, output, outputOffset, plan);
+        for (; i < length; i++) {
+            float a = left[leftOffset + i * leftStride];
+            float b = right[rightOffset + i * rightStride];
+            output[outputOffset + i] = apply(operation, a, b);
+        }
+    }
+
+    private static FloatVector applyRightScalar(BinaryOp operation, FloatVector left, float right) {
+        switch (operation) {
+            case ADD: return left.add(right);
+            case MUL: return left.mul(right);
+            case DIV: return left.div(right);
+            case SUB: return left.sub(right);
+            default: throw new AssertionError("unsupported vector binary operation: " + operation);
+        }
+    }
+
+    private static FloatVector applyLeftScalar(BinaryOp operation, float left, FloatVector right) {
+        switch (operation) {
+            case ADD: return right.add(left);
+            case MUL: return right.mul(left);
+            case DIV: return FloatVector.broadcast(SPECIES, left).div(right);
+            case SUB: return right.neg().add(left);
+            default: throw new AssertionError("unsupported vector binary operation: " + operation);
+        }
+    }
+
+    private static FloatVector apply(BinaryOp operation, FloatVector left, FloatVector right) {
+        switch (operation) {
+            case ADD: return left.add(right);
+            case MUL: return left.mul(right);
+            case DIV: return left.div(right);
+            case SUB: return left.sub(right);
+            default: throw new AssertionError("unsupported vector binary operation: " + operation);
+        }
+    }
+
+    private static float apply(BinaryOp operation, float left, float right) {
+        switch (operation) {
+            case ADD: return left + right;
+            case MUL: return left * right;
+            case DIV: return left / right;
+            case SUB: return left - right;
+            default: throw new AssertionError("unsupported vector binary operation: " + operation);
+        }
     }
 
     @Override

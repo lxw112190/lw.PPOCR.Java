@@ -1,6 +1,9 @@
 package io.github.lxw112190.ppocr.vector;
 
+import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
+import io.github.lxw112190.ppocr.runtime.BinaryPlan;
+import io.github.lxw112190.ppocr.runtime.TensorShape;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -51,5 +54,39 @@ public final class VectorBackendTest {
         vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
                 1, 3, 1, 23, 8, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 23);
         Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
+    public void matchesScalarBroadcastVariants() {
+        assertBroadcast(BinaryOp.ADD, new int[] {2, 3, 5}, new int[] {1}, new int[] {2, 3, 5});
+        assertBroadcast(BinaryOp.SUB, new int[] {1}, new int[] {2, 3, 5}, new int[] {2, 3, 5});
+        assertBroadcast(BinaryOp.MUL, new int[] {2, 3, 5}, new int[] {1, 3, 1}, new int[] {2, 3, 5});
+        assertBroadcast(BinaryOp.DIV, new int[] {2, 1, 5}, new int[] {1, 3, 1}, new int[] {2, 3, 5});
+        assertBroadcast(BinaryOp.SUB, new int[] {2, 3, 1}, new int[] {1, 1, 5}, new int[] {2, 3, 5});
+    }
+
+    private void assertBroadcast(BinaryOp operation, int[] leftShape, int[] rightShape,
+                                 int[] outputShape) {
+        float[] left = values(length(leftShape), 0.17f, 0.5f);
+        float[] right = values(length(rightShape), 0.11f, 1.25f);
+        float[] expected = new float[length(outputShape)];
+        float[] actual = new float[expected.length];
+        BinaryPlan plan = new BinaryPlan(new TensorShape(leftShape), new TensorShape(rightShape),
+                new TensorShape(outputShape));
+        scalar.binary(operation, left, 0, right, 0, expected, 0, plan);
+        vector.binary(operation, left, 0, right, 0, actual, 0, plan);
+        Assert.assertArrayEquals(operation.name(), expected, actual, 0.000001f);
+    }
+
+    private static int length(int[] shape) {
+        int result = 1;
+        for (int dimension : shape) result *= dimension;
+        return result;
+    }
+
+    private static float[] values(int length, float step, float base) {
+        float[] result = new float[length];
+        for (int i = 0; i < length; i++) result[i] = base + i * step;
+        return result;
     }
 }
