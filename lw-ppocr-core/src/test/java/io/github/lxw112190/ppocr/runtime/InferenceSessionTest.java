@@ -38,6 +38,21 @@ public final class InferenceSessionTest {
         }
     }
 
+    @Test
+    public void profilesOperatorsOnlyInsideExplicitScope() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
+        InferenceSession session = new InferenceSession(model);
+        InferenceProfiler.Profile profile;
+        try (InferenceProfiler profiler = InferenceProfiler.start()) {
+            session.run(new float[] {1, 2, 3, 4}, new float[4]);
+            profile = profiler.snapshot();
+        }
+        Assert.assertEquals(1L, profile.getInvocations(io.github.lxw112190.ppocr.model.OperatorType.ADD));
+        Assert.assertTrue(profile.getElapsedNanos(io.github.lxw112190.ppocr.model.OperatorType.ADD) >= 0L);
+        Assert.assertEquals(profile.getElapsedNanos(io.github.lxw112190.ppocr.model.OperatorType.ADD),
+                profile.getTotalElapsedNanos());
+    }
+
     private static byte[] addModel() {
         final int inputOffset = 160;
         final int outputOffset = 168;

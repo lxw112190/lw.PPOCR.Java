@@ -100,6 +100,20 @@ public final class InferenceSession implements AutoCloseable {
     public void close() { closed = true; }
 
     private void executeNode(NodeInfo node, float[] storage) {
+        InferenceProfiler profiler = InferenceProfiler.current();
+        if (profiler == null) {
+            executeNodeGuarded(node, storage);
+            return;
+        }
+        long start = System.nanoTime();
+        try {
+            executeNodeGuarded(node, storage);
+        } finally {
+            profiler.record(node.getOperator(), System.nanoTime() - start);
+        }
+    }
+
+    private void executeNodeGuarded(NodeInfo node, float[] storage) {
         try {
             executeNodeUnchecked(node, storage);
         } catch (OcrException e) {
