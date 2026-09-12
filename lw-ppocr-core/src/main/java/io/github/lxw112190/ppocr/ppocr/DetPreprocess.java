@@ -24,8 +24,16 @@ public final class DetPreprocess {
         if (resizedWidth > Integer.MAX_VALUE || resizedHeight > Integer.MAX_VALUE) {
             throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DET image dimensions are too large");
         }
-        int width = (int) resizedWidth;
-        int height = (int) resizedHeight;
+        return resizeNormalize(source, (int) resizedWidth, (int) resizedHeight);
+    }
+
+    public static DetPreprocessResult resizeNormalize(BgrImage source, int resizedWidth,
+                                                       int resizedHeight) {
+        if (source == null || resizedWidth <= 0 || resizedHeight <= 0) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image and DET dimensions are required");
+        }
+        int width = resizedWidth;
+        int height = resizedHeight;
         long plane = (long) width * height;
         long elements = plane * 3L;
         if (elements > Integer.MAX_VALUE) {

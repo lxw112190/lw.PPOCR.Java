@@ -35,4 +35,14 @@ public final class DetPreprocessTest {
         Assert.assertEquals(0.64f, result.getWidthRatio(), 0.00001f);
         Assert.assertEquals(0.64f, result.getHeightRatio(), 0.00001f);
     }
+
+    @Test
+    public void supportsExplicitStaticModelDimensions() {
+        BgrImage source = new BgrImage(new byte[4 * 4 * 3], 4, 4, 12);
+        DetPreprocessResult result = DetPreprocess.resizeNormalize(source, 64, 96);
+        Assert.assertEquals(64, result.getResizedWidth());
+        Assert.assertEquals(96, result.getResizedHeight());
+        Assert.assertEquals(16.0f, result.getWidthRatio(), 0.00001f);
+        Assert.assertEquals(24.0f, result.getHeightRatio(), 0.00001f);
+    }
 }
