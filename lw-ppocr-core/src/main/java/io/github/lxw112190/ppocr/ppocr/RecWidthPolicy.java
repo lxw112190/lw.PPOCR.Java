@@ -14,11 +14,10 @@ public final class RecWidthPolicy {
         if (source == null || maximumWidth <= 0) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image and REC width limit are required");
         }
-        if (maximumWidth <= BUCKETS[1]) return maximumWidth;
         long scaledWidth = ((long) RecPreprocess.INPUT_HEIGHT * source.width() + source.height() - 1L)
                 / source.height();
         for (int bucket : BUCKETS) {
-            if (bucket >= maximumWidth) break;
+            if (bucket > maximumWidth) break;
             if (scaledWidth <= bucket) return bucket;
         }
         return maximumWidth;

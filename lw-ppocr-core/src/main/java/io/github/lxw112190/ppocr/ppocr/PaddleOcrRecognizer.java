@@ -7,19 +7,18 @@ import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
-import io.github.lxw112190.ppocr.runtime.InferenceSession;
-import io.github.lxw112190.ppocr.runtime.TensorShape;
+import java.util.HashMap;
+import java.util.Map;
 import java.nio.file.Path;
-import java.util.Collections;
 
-/** Fixed-width REC facade: BGR preprocessing, scalar graph execution, and CTC decoding. */
+/** Dynamic-width REC facade: BGR preprocessing, scalar graph execution, and CTC decoding. */
 public final class PaddleOcrRecognizer implements AutoCloseable {
+    private static final int DEFAULT_MAXIMUM_WIDTH = 960;
     private final LwmModel model;
     private final PaddleOcrDictionary dictionary;
-    private final InferenceSession session;
-    private final int timeSteps;
-    private final float[] logits;
-    private final RecPreprocess.Workspace preprocess;
+    private final int maximumWidth;
+    private final boolean dynamicWidth;
+    private final Map<Integer, RecSessionContext> sessions;
     private boolean closed;
 
     /** Takes ownership of the model and dictionary and closes both on close(). */
@@ -29,25 +28,12 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         }
         int inputIndex = validateModel(model, dictionary);
         TensorInfo input = model.getTensors().get(inputIndex);
-        TensorShape inputShape = new TensorShape(input.getDimensions());
-        int resolvedTimeSteps = outputTimeSteps(model, dictionary);
-        int classCount = dictionary.classCount();
-        long outputLength = (long) resolvedTimeSteps * classCount;
-        if (outputLength > Integer.MAX_VALUE) {
-            throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "REC output is too large");
-        }
         this.model = model;
         this.dictionary = dictionary;
-        try {
-            this.session = new InferenceSession(model, Collections.singletonList(inputShape));
-            this.logits = new float[(int) outputLength];
-            this.preprocess = new RecPreprocess.Workspace(input.getDimensions()[3]);
-        } catch (RuntimeException e) {
-            dictionary.close();
-            model.close();
-            throw e;
-        }
-        this.timeSteps = resolvedTimeSteps;
+        int declaredWidth = input.getDimensions()[3];
+        this.dynamicWidth = declaredWidth == -1;
+        this.maximumWidth = dynamicWidth ? DEFAULT_MAXIMUM_WIDTH : declaredWidth;
+        this.sessions = new HashMap<Integer, RecSessionContext>();
     }
 
     public static PaddleOcrRecognizer load(Path modelPath, Path dictionaryPath) {
@@ -65,19 +51,26 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
 
     public RecRecognitionResult recognize(BgrImage source) {
         ensureOpen();
-        preprocess.resizeNormalize(source);
-        session.run(preprocess.getChw(), logits);
-        CtcDecodeResult decoded = CtcDecoder.decodeGreedy(logits, timeSteps,
+        int targetWidth = dynamicWidth ? RecWidthPolicy.chooseTargetWidth(source, maximumWidth) : maximumWidth;
+        RecSessionContext context = sessions.get(targetWidth);
+        if (context == null) {
+            context = new RecSessionContext(model, targetWidth, dictionary.classCount());
+            sessions.put(targetWidth, context);
+        }
+        context.preprocess.resizeNormalize(source);
+        context.session.run(context.preprocess.getChw(), context.logits);
+        CtcDecodeResult decoded = CtcDecoder.decodeGreedy(context.logits, context.timeSteps,
                 dictionary.classCount(), dictionary);
         return new RecRecognitionResult(decoded.getText(), decoded.getScore(),
-                decoded.getEmittedCount(), preprocess.getResizedWidth());
+                decoded.getEmittedCount(), context.preprocess.getResizedWidth());
     }
 
     @Override
     public void close() {
         if (!closed) {
             closed = true;
-            session.close();
+            for (RecSessionContext context : sessions.values()) context.close();
+            sessions.clear();
             dictionary.close();
             model.close();
         }
@@ -90,7 +83,8 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         TensorInfo input = model.getTensors().get(model.getGraphInputs().get(0));
         int[] dimensions = input.getDimensions();
         if (input.getDataType() != DataType.F32 || dimensions.length != 4 || dimensions[0] != 1 ||
-                dimensions[1] != 3 || dimensions[2] != RecPreprocess.INPUT_HEIGHT || dimensions[3] <= 0) {
+                dimensions[1] != 3 || dimensions[2] != RecPreprocess.INPUT_HEIGHT ||
+                (dimensions[3] != -1 && dimensions[3] <= 0)) {
             throw invalid("REC input must be FP32 [1,3,48,W]");
         }
         TensorInfo output = model.getTensors().get(model.getGraphOutputs().get(0));
@@ -102,19 +96,11 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         int classAxis = outputDimensions.length - 1;
         if (outputDimensions[classAxis] != dictionary.classCount() ||
                 (outputDimensions.length == 3 && outputDimensions[0] != 1) ||
-                outputDimensions[outputDimensions.length - 2] <= 0) {
+                (outputDimensions[outputDimensions.length - 2] != -1 &&
+                        outputDimensions[outputDimensions.length - 2] <= 0)) {
             throw invalid("REC output class count does not match dictionary");
         }
         return model.getGraphInputs().get(0);
-    }
-
-    private static int outputTimeSteps(LwmModel model, PaddleOcrDictionary dictionary) {
-        int[] dimensions = model.getTensors().get(model.getGraphOutputs().get(0)).getDimensions();
-        int timeSteps = dimensions[dimensions.length - 2];
-        if (timeSteps <= 0 || dimensions[dimensions.length - 1] != dictionary.classCount()) {
-            throw invalid("REC output dimensions are invalid");
-        }
-        return timeSteps;
     }
 
     private static OcrException invalid(String message) {
