@@ -29,6 +29,7 @@ public final class TensorShape {
     public int getRank() { return dimensions.length; }
     public int get(int axis) { return dimensions[axis]; }
     public int[] getDimensions() { return dimensions.clone(); }
+    int[] dimensionsUnsafe() { return dimensions; }
     public long getElementCount() { return elementCount; }
 
     public boolean equalsDimensions(int[] other) {

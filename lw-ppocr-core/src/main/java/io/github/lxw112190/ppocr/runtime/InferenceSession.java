@@ -317,7 +317,7 @@ public final class InferenceSession implements AutoCloseable {
         int[] axes = new int[count];
         for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
         backend.reduceMean(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
-                execution.shapes().get(inputs[0]).getDimensions(), axes, params.getInt(4) != 0);
+                execution.shapes().get(inputs[0]).dimensionsUnsafe(), axes, params.getInt(4) != 0);
     }
 
     private void executeBatchNormalization(NodeInfo node, float[] storage, int output) {
@@ -342,7 +342,7 @@ public final class InferenceSession implements AutoCloseable {
         backend.batchNormalization(data(inputs[0], storage), offset(inputs[0]),
                 data(inputs[1], storage), offset(inputs[1]), data(inputs[2], storage), offset(inputs[2]),
                 data(inputs[3], storage), offset(inputs[3]), data(inputs[4], storage), offset(inputs[4]),
-                epsilon, storage, offset(output), inputShape.getDimensions());
+                epsilon, storage, offset(output), inputShape.dimensionsUnsafe());
     }
 
     private void executeSqueezeOrUnsqueeze(NodeInfo node, float[] storage, int output) {
@@ -428,7 +428,7 @@ public final class InferenceSession implements AutoCloseable {
             offsets[i] = offset(inputs[i]);
             axisSizes[i] = inputShape.get(axis);
         }
-        backend.concat(values, offsets, storage, offset(output), shape.getDimensions(), axis, axisSizes);
+        backend.concat(values, offsets, storage, offset(output), shape.dimensionsUnsafe(), axis, axisSizes);
     }
 
     private void executeSlice(NodeInfo node, float[] storage, int output) {
@@ -445,7 +445,7 @@ public final class InferenceSession implements AutoCloseable {
             steps[i] = params.getInt(100 + i * 4);
         }
         backend.slice(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
-                execution.shapes().get(inputs[0]).getDimensions(), starts, axes, steps);
+                execution.shapes().get(inputs[0]).dimensionsUnsafe(), starts, axes, steps);
     }
 
     private void executeTranspose(NodeInfo node, float[] storage, int output) {
