@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/lxw112190/lw.PPOCR.C",
+  "source_commit": "9b31f1b",
+  "model": "det.lwm",
+  "model_sha256": "ba9164d371ac7003f90710c3106a344aeb906df2b0f1e7617fcf4608fa8cd66c",
+  "input_pattern": "((index * 23) % 269 - 134) / 134.0",
+  "cases": [
+    {"name": "32x32", "height": 32, "width": 32, "output_file": "shape-32x32.c-output.f32"},
+    {"name": "32x64", "height": 32, "width": 64, "output_file": "shape-32x64.c-output.f32"}
+  ]
+}
