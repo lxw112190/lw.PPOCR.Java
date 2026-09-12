@@ -10,6 +10,7 @@ import io.github.lxw112190.ppocr.model.TensorInfo;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.Collections;
 
 /** Fixed-shape CLS facade: BGR preprocessing, scalar graph execution, and decision postprocess. */
@@ -59,7 +60,7 @@ public final class PaddleOcrClassifier implements AutoCloseable {
             throw invalid("CLS model must have one input and one output");
         }
         TensorInfo input = model.getTensors().get(model.getGraphInputs().get(0));
-        if (input.getDataType() != DataType.F32 || !input.equalsDimensions(INPUT_DIMENSIONS)) {
+        if (input.getDataType() != DataType.F32 || !Arrays.equals(input.getDimensions(), INPUT_DIMENSIONS)) {
             throw invalid("CLS input must be FP32 [1,3,80,160]");
         }
         TensorInfo output = model.getTensors().get(model.getGraphOutputs().get(0));
