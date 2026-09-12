@@ -52,6 +52,18 @@ public interface KernelBackend {
               int dilationHeight, int dilationWidth, int padTop, int padLeft,
               int groups, int outputHeight, int outputWidth);
 
+    default void conv(float[] input, int inputOffset, float[] weights, int weightOffset,
+                      float[] bias, int biasOffset, float[] output, int outputOffset,
+                      int batch, int channels, int height, int width, int outputChannels,
+                      int kernelHeight, int kernelWidth, int strideHeight, int strideWidth,
+                      int dilationHeight, int dilationWidth, int padTop, int padLeft,
+                      int padBottom, int padRight, int groups, int outputHeight, int outputWidth) {
+        conv(input, inputOffset, weights, weightOffset, bias, biasOffset, output, outputOffset,
+                batch, channels, height, width, outputChannels, kernelHeight, kernelWidth,
+                strideHeight, strideWidth, dilationHeight, dilationWidth, padTop, padLeft,
+                groups, outputHeight, outputWidth);
+    }
+
     void batchNormalization(float[] input, int inputOffset, float[] scale, int scaleOffset,
                             float[] bias, int biasOffset, float[] mean, int meanOffset,
                             float[] variance, int varianceOffset, float epsilon,
@@ -65,6 +77,16 @@ public interface KernelBackend {
               int kernelWidth, int strideHeight, int strideWidth, int padTop,
               int padLeft, int outputHeight, int outputWidth, boolean maximum,
               boolean countIncludePad);
+
+    default void pool(float[] input, int inputOffset, float[] output, int outputOffset,
+                      int batch, int channels, int height, int width, int kernelHeight,
+                      int kernelWidth, int strideHeight, int strideWidth, int padTop,
+                      int padLeft, int padBottom, int padRight, int outputHeight,
+                      int outputWidth, boolean maximum, boolean countIncludePad) {
+        pool(input, inputOffset, output, outputOffset, batch, channels, height, width,
+                kernelHeight, kernelWidth, strideHeight, strideWidth, padTop, padLeft,
+                outputHeight, outputWidth, maximum, countIncludePad);
+    }
 
     void resizeNearest(float[] input, int inputOffset, float[] output, int outputOffset,
                        int batch, int channels, int inputHeight, int inputWidth,

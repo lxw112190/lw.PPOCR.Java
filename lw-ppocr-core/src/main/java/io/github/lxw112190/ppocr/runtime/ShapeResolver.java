@@ -181,6 +181,8 @@ public final class ShapeResolver {
         int dilationWidth = positive(p.getInt(28), "dilation width", nodeIndex);
         int padTop = nonNegative(p.getInt(32), "top padding", nodeIndex);
         int padLeft = nonNegative(p.getInt(36), "left padding", nodeIndex);
+        int padBottom = nonNegative(p.getInt(40), "bottom padding", nodeIndex);
+        int padRight = nonNegative(p.getInt(44), "right padding", nodeIndex);
         int height = input.get(2);
         int width = input.get(3);
         int channels;
@@ -189,15 +191,15 @@ public final class ShapeResolver {
                 throw invalid("CONV_TRANSPOSE input channels do not match at node " + nodeIndex);
             }
             channels = Math.multiplyExact(weights.get(1), groups);
-            height = transposedOut(height, strideHeight, padTop, dilationHeight, kernelHeight, nodeIndex);
-            width = transposedOut(width, strideWidth, padLeft, dilationWidth, kernelWidth, nodeIndex);
+            height = transposedOut(height, strideHeight, padTop, padBottom, dilationHeight, kernelHeight, nodeIndex);
+            width = transposedOut(width, strideWidth, padLeft, padRight, dilationWidth, kernelWidth, nodeIndex);
         } else {
             if (weights.get(1) * groups != input.get(1)) {
                 throw invalid("CONV input channels do not match at node " + nodeIndex);
             }
             channels = weights.get(0);
-            height = convOut(height, strideHeight, padTop, dilationHeight, kernelHeight, nodeIndex);
-            width = convOut(width, strideWidth, padLeft, dilationWidth, kernelWidth, nodeIndex);
+            height = convOut(height, strideHeight, padTop, padBottom, dilationHeight, kernelHeight, nodeIndex);
+            width = convOut(width, strideWidth, padLeft, padRight, dilationWidth, kernelWidth, nodeIndex);
         }
         return new TensorShape(input.get(0), channels, height, width);
     }
@@ -274,9 +276,12 @@ public final class ShapeResolver {
         int strideWidth = positive(p.getInt(20), "stride width", nodeIndex);
         int padTop = nonNegative(p.getInt(24), "top padding", nodeIndex);
         int padLeft = nonNegative(p.getInt(28), "left padding", nodeIndex);
+        int padBottom = nonNegative(p.getInt(32), "bottom padding", nodeIndex);
+        int padRight = nonNegative(p.getInt(36), "right padding", nodeIndex);
+        int ceilMode = p.getInt(40);
         return new TensorShape(input.get(0), input.get(1),
-                convOut(input.get(2), strideHeight, padTop, 1, kernelHeight, nodeIndex),
-                convOut(input.get(3), strideWidth, padLeft, 1, kernelWidth, nodeIndex));
+                convOut(input.get(2), strideHeight, padTop, padBottom, 1, kernelHeight, ceilMode, nodeIndex),
+                convOut(input.get(3), strideWidth, padLeft, padRight, 1, kernelWidth, ceilMode, nodeIndex));
     }
 
     private static TensorShape resizeShape(TensorShape input, ByteBuffer p, int nodeIndex) {
@@ -372,13 +377,29 @@ public final class ShapeResolver {
         return new TensorShape(output);
     }
 
-    private static int convOut(int input, int stride, int pad, int dilation, int kernel, int nodeIndex) {
-        long numerator = (long) input + 2L * pad - (long) dilation * (kernel - 1) - 1L;
-        return positiveDimension((int) (numerator / stride + 1L), nodeIndex);
+    private static int convOut(int input, int stride, int padBefore, int padAfter,
+                               int dilation, int kernel, int nodeIndex) {
+        return convOut(input, stride, padBefore, padAfter, dilation, kernel, 0, nodeIndex);
     }
 
-    private static int transposedOut(int input, int stride, int pad, int dilation, int kernel, int nodeIndex) {
-        long result = (long) (input - 1) * stride - 2L * pad + (long) dilation * (kernel - 1) + 1L;
+    private static int convOut(int input, int stride, int padBefore, int padAfter,
+                               int dilation, int kernel, int ceilMode, int nodeIndex) {
+        long effective = (long) dilation * (kernel - 1) + 1L;
+        long numerator = (long) input + padBefore + padAfter - effective;
+        if (stride <= 0 || padBefore < 0 || padAfter < 0 || numerator < 0) {
+            throw invalid("invalid spatial output parameters at node " + nodeIndex);
+        }
+        long result = (numerator + (ceilMode != 0 ? stride - 1L : 0L)) / stride + 1L;
+        if (ceilMode != 0 && (result - 1L) * stride >= (long) input + padBefore) result--;
+        if (result > Integer.MAX_VALUE) throw invalid("spatial output is too large at node " + nodeIndex);
+        return positiveDimension((int) result, nodeIndex);
+    }
+
+    private static int transposedOut(int input, int stride, int padBefore, int padAfter,
+                                     int dilation, int kernel, int nodeIndex) {
+        long result = (long) (input - 1) * stride - padBefore - padAfter
+                + (long) dilation * (kernel - 1) + 1L;
+        if (result > Integer.MAX_VALUE) throw invalid("spatial output is too large at node " + nodeIndex);
         return positiveDimension((int) result, nodeIndex);
     }
 

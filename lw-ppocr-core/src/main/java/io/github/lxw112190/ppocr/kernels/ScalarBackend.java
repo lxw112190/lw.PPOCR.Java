@@ -238,6 +238,19 @@ public final class ScalarBackend implements KernelBackend {
                      int kernelHeight, int kernelWidth, int strideHeight, int strideWidth,
                      int dilationHeight, int dilationWidth, int padTop, int padLeft,
                      int groups, int outputHeight, int outputWidth) {
+        conv(input, inputOffset, weights, weightOffset, bias, biasOffset, output, outputOffset,
+                batch, channels, height, width, outputChannels, kernelHeight, kernelWidth,
+                strideHeight, strideWidth, dilationHeight, dilationWidth, padTop, padLeft,
+                padTop, padLeft, groups, outputHeight, outputWidth);
+    }
+
+    @Override
+    public void conv(float[] input, int inputOffset, float[] weights, int weightOffset,
+                     float[] bias, int biasOffset, float[] output, int outputOffset,
+                     int batch, int channels, int height, int width, int outputChannels,
+                     int kernelHeight, int kernelWidth, int strideHeight, int strideWidth,
+                     int dilationHeight, int dilationWidth, int padTop, int padLeft,
+                     int padBottom, int padRight, int groups, int outputHeight, int outputWidth) {
         int inputChannelsPerGroup = channels / groups;
         int outputChannelsPerGroup = outputChannels / groups;
         for (int n = 0; n < batch; n++) {
@@ -320,6 +333,17 @@ public final class ScalarBackend implements KernelBackend {
                      int kernelWidth, int strideHeight, int strideWidth, int padTop,
                      int padLeft, int outputHeight, int outputWidth, boolean maximum,
                      boolean countIncludePad) {
+        pool(input, inputOffset, output, outputOffset, batch, channels, height, width,
+                kernelHeight, kernelWidth, strideHeight, strideWidth, padTop, padLeft,
+                padTop, padLeft, outputHeight, outputWidth, maximum, countIncludePad);
+    }
+
+    @Override
+    public void pool(float[] input, int inputOffset, float[] output, int outputOffset,
+                     int batch, int channels, int height, int width, int kernelHeight,
+                     int kernelWidth, int strideHeight, int strideWidth, int padTop,
+                     int padLeft, int padBottom, int padRight, int outputHeight,
+                     int outputWidth, boolean maximum, boolean countIncludePad) {
         for (int n = 0; n < batch; n++) {
             for (int channel = 0; channel < channels; channel++) {
                 for (int oh = 0; oh < outputHeight; oh++) {

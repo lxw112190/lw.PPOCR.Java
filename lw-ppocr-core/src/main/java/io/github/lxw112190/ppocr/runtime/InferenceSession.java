@@ -280,6 +280,8 @@ public final class InferenceSession implements AutoCloseable {
         int dilationWidth = params.getInt(28);
         int padTop = params.getInt(32);
         int padLeft = params.getInt(36);
+        int padBottom = params.getInt(40);
+        int padRight = params.getInt(44);
         if (groups <= 0 || inputShape.get(1) % groups != 0 || weightShape.get(0) % groups != 0 ||
                 weightShape.get(1) != inputShape.get(1) / groups || weightShape.get(2) != kernelHeight ||
                 weightShape.get(3) != kernelWidth || outputShape.get(0) != inputShape.get(0) ||
@@ -292,7 +294,7 @@ public final class InferenceSession implements AutoCloseable {
                 inputs.length == 3 ? offset(inputs[2]) : 0, storage, offset(output),
                 inputShape.get(0), inputShape.get(1), inputShape.get(2), inputShape.get(3),
                 weightShape.get(0), kernelHeight, kernelWidth, strideHeight, strideWidth,
-                dilationHeight, dilationWidth, padTop, padLeft, groups,
+                dilationHeight, dilationWidth, padTop, padLeft, padBottom, padRight, groups,
                 outputShape.get(2), outputShape.get(3));
     }
 
@@ -323,7 +325,8 @@ public final class InferenceSession implements AutoCloseable {
         backend.pool(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
                 inputShape.get(0), inputShape.get(1), inputShape.get(2), inputShape.get(3),
                 params.getInt(8), params.getInt(12), params.getInt(16), params.getInt(20),
-                params.getInt(24), params.getInt(28), outputShape.get(2), outputShape.get(3),
+                params.getInt(24), params.getInt(28), params.getInt(32), params.getInt(36),
+                outputShape.get(2), outputShape.get(3),
                 node.getOperator() == OperatorType.MAX_POOL, params.getInt(44) != 0);
     }
 
