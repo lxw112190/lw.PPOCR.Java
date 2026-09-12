@@ -13,10 +13,10 @@ A lightweight pure-Java PP-OCR inference runtime.
 ## Current milestone
 
 The first milestones implement the Maven multi-module foundation, a defensive
-LWM v0.1 loader, concrete shape validation, and a lifetime-based workspace
-planner. The loader validates the complete untrusted model byte stream before
-publishing an immutable `LwmModel`; the planner prepares reusable storage for
-the future graph executor.
+LWM v0.1 loader, concrete shape validation, a lifetime-based workspace planner,
+and the first scalar graph execution paths. The loader validates the complete
+untrusted model byte stream before publishing an immutable `LwmModel`; the
+planner prepares reusable storage for the graph executor.
 
 The runtime intentionally does not parse ONNX. Model conversion remains an
 offline responsibility of `lw.PPOCR.C` and its converter.

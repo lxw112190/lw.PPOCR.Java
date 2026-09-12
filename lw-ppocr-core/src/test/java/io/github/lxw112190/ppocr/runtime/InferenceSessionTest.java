@@ -1,0 +1,63 @@
+package io.github.lxw112190.ppocr.runtime;
+
+import io.github.lxw112190.ppocr.model.LwmLoader;
+import io.github.lxw112190.ppocr.model.LwmModel;
+import java.io.ByteArrayInputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import org.junit.Assert;
+import org.junit.Test;
+
+public final class InferenceSessionTest {
+    @Test
+    public void executesScalarAddWithConstant() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
+        InferenceSession session = new InferenceSession(model);
+        float[] output = new float[4];
+        session.run(new float[] {1, 2, 3, 4}, output);
+        Assert.assertArrayEquals(new float[] {2, 4, 6, 8}, output, 0.0f);
+    }
+
+    private static byte[] addModel() {
+        final int inputOffset = 160;
+        final int outputOffset = 168;
+        final int tensorOffset = 176;
+        final int nodeOffset = tensorOffset + 3 * 80;
+        final int parameterOffset = nodeOffset + 72;
+        final int fileSize = parameterOffset + 24;
+        ByteBuffer b = ByteBuffer.allocate(fileSize).order(ByteOrder.LITTLE_ENDIAN);
+        b.put(0, (byte) 'L').put(1, (byte) 'W').put(2, (byte) 'M').put(3, (byte) '0');
+        b.putShort(4, (short) 0).putShort(6, (short) 1).putInt(8, 160);
+        b.putInt(12, 1).putInt(16, 3).putInt(20, 1).putInt(24, 1).putInt(28, 1);
+        b.putLong(32, inputOffset).putLong(40, outputOffset).putLong(48, tensorOffset);
+        b.putLong(56, nodeOffset).putLong(64, parameterOffset).putLong(72, 0);
+        b.putLong(80, parameterOffset).putLong(88, 0).putLong(96, parameterOffset);
+        b.putLong(104, 24).putLong(112, fileSize).putLong(120, 0).putLong(128, 0);
+        b.putInt(inputOffset, 0).putInt(outputOffset, 2);
+        putTensor(b, tensorOffset, 2, 0, 0);
+        putTensor(b, tensorOffset + 80, 1, parameterOffset, 16);
+        putTensor(b, tensorOffset + 160, 4, 0, 0);
+        b.putShort(nodeOffset, (short) 2).putShort(nodeOffset + 2, (short) 2).putShort(nodeOffset + 4, (short) 1);
+        b.putInt(nodeOffset + 8, 0).putInt(nodeOffset + 12, 1).putInt(nodeOffset + 40, 2);
+        b.putFloat(parameterOffset, 1).putFloat(parameterOffset + 4, 2);
+        b.putFloat(parameterOffset + 8, 3).putFloat(parameterOffset + 12, 4);
+        b.putLong(128, fnv1a(b.array()));
+        return b.array();
+    }
+
+    private static void putTensor(ByteBuffer b, int offset, int flags, int dataOffset, int dataSize) {
+        b.putInt(offset, 1).putInt(offset + 4, 1).putInt(offset + 8, 4);
+        b.putInt(offset + 40, flags).putLong(offset + 48, dataOffset).putLong(offset + 56, dataSize);
+        b.putLong(offset + 64, 0xffffffffffffffffL);
+    }
+
+    private static long fnv1a(byte[] bytes) {
+        long value = 0xcbf29ce484222325L;
+        for (int i = 0; i < bytes.length; i++) {
+            int valueByte = i >= 128 && i < 136 ? 0 : bytes[i] & 0xff;
+            value ^= valueByte;
+            value *= 0x100000001b3L;
+        }
+        return value;
+    }
+}
