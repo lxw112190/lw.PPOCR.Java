@@ -47,6 +47,10 @@ DET 的 2 倍上采样 ConvTranspose、广播、激活、归约和 MatMul；其�
 完整 OCR 可以直接加载同一个无状态 Vector 后端，并配置动态 DET 最大边和
 CLS 行并行及 REC 宽度组并行：
 
+Vector 后端会在连接关系、形状、标量常量和中间张量使用次数全部匹配时，将 Tiny
+模型中的 `DIV -> ERF -> ADD -> MUL -> MUL` GELU 表达式融合执行；其他图结构仍按
+原始节点逐个执行，不影响 Scalar 正确性路径。性能诊断将整段融合耗时归入 ERF。
+
 ```java
 PaddleOcrOptions options = PaddleOcrOptions.builder()
         .setDetectionMaximumSideLength(320)

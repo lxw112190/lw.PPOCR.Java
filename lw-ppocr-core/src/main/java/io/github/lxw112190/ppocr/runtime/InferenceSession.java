@@ -2,6 +2,7 @@ package io.github.lxw112190.ppocr.runtime;
 
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.BinaryOp;
+import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
@@ -18,6 +19,7 @@ public final class InferenceSession implements AutoCloseable {
     private final PreparedExecution execution;
     private final Workspace workspace;
     private final KernelBackend backend;
+    private final FusedGeluBackend fusedGeluBackend;
     private final NodeInfo[] nodes;
     private final ByteBuffer[] parameters;
     private final IdentityHashMap<NodeInfo, Integer> nodeIndexes;
@@ -33,6 +35,7 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, int[]> layoutAxes;
     private final IdentityHashMap<NodeInfo, BinaryPlan> binaryPlans;
     private final InferenceProfiler.NodeDescriptor[] profileDescriptors;
+    private final GeluPlan[] geluPlans;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -50,6 +53,8 @@ public final class InferenceSession implements AutoCloseable {
         this.execution = new PreparedExecution(model, inputShapes);
         this.workspace = new Workspace(execution.workspacePlan());
         this.backend = backend;
+        this.fusedGeluBackend = backend instanceof FusedGeluBackend
+                ? (FusedGeluBackend) backend : null;
         List<NodeInfo> modelNodes = model.getNodes();
         this.nodes = modelNodes.toArray(new NodeInfo[modelNodes.size()]);
         this.parameters = new ByteBuffer[nodes.length];
@@ -66,6 +71,7 @@ public final class InferenceSession implements AutoCloseable {
         this.layoutAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
         this.binaryPlans = new IdentityHashMap<NodeInfo, BinaryPlan>(nodes.length);
         this.profileDescriptors = new InferenceProfiler.NodeDescriptor[nodes.length];
+        this.geluPlans = new GeluPlan[nodes.length];
         for (int i = 0; i < nodes.length; i++) {
             NodeInfo node = nodes[i];
             this.nodeIndexes.put(node, i);
@@ -79,6 +85,7 @@ public final class InferenceSession implements AutoCloseable {
             prepareConcat(node);
             prepareLayout(node);
         }
+        if (fusedGeluBackend != null) prepareGeluPlans();
     }
 
     public void run(float[] input, float[] output) {
@@ -92,7 +99,15 @@ public final class InferenceSession implements AutoCloseable {
         requireLength(output, execution.length(outputIndex), "output");
         float[] storage = workspace.fp32();
         System.arraycopy(input, 0, storage, execution.offset(inputIndex), input.length);
-        for (int i = 0; i < nodes.length; i++) executeNode(i, nodes[i], storage);
+        for (int i = 0; i < nodes.length; i++) {
+            GeluPlan gelu = geluPlans[i];
+            if (gelu == null) {
+                executeNode(i, nodes[i], storage);
+            } else {
+                executeGelu(i, gelu, storage);
+                i += 4;
+            }
+        }
         System.arraycopy(storage, execution.offset(outputIndex), output, 0, output.length);
     }
 
@@ -147,6 +162,116 @@ public final class InferenceSession implements AutoCloseable {
             result.append(execution.shapes().get(tensorIndexes[i]));
         }
         result.append(']');
+    }
+
+    private void executeGelu(int nodeIndex, GeluPlan plan, float[] storage) {
+        InferenceProfiler profiler = InferenceProfiler.current();
+        if (profiler == null) {
+            fusedGeluBackend.gelu(data(plan.input, storage), offset(plan.input),
+                    storage, offset(plan.output), execution.length(plan.output),
+                    plan.divisor, plan.addend, plan.multiplier);
+            return;
+        }
+        long start = System.nanoTime();
+        try {
+            fusedGeluBackend.gelu(data(plan.input, storage), offset(plan.input),
+                    storage, offset(plan.output), execution.length(plan.output),
+                    plan.divisor, plan.addend, plan.multiplier);
+        } finally {
+            long elapsedNanos = System.nanoTime() - start;
+            profiler.record(geluProfileDescriptor(nodeIndex, plan), elapsedNanos);
+        }
+    }
+
+    private InferenceProfiler.NodeDescriptor geluProfileDescriptor(int nodeIndex, GeluPlan plan) {
+        InferenceProfiler.NodeDescriptor descriptor = profileDescriptors[nodeIndex];
+        if (descriptor != null) return descriptor;
+        String description = "fused_gelu,input=" + execution.shapes().get(plan.input)
+                + ",output=" + execution.shapes().get(plan.output)
+                + ",divisor=" + plan.divisor + ",addend=" + plan.addend
+                + ",multiplier=" + plan.multiplier;
+        descriptor = new InferenceProfiler.NodeDescriptor(execution.model(), nodeIndex,
+                OperatorType.ERF, description);
+        profileDescriptors[nodeIndex] = descriptor;
+        return descriptor;
+    }
+
+    private void prepareGeluPlans() {
+        int[] uses = tensorUseCounts();
+        for (int start = 0; start + 4 < nodes.length; start++) {
+            NodeInfo divide = nodes[start];
+            NodeInfo erf = nodes[start + 1];
+            NodeInfo add = nodes[start + 2];
+            NodeInfo multiply = nodes[start + 3];
+            NodeInfo scale = nodes[start + 4];
+            if (divide.getOperator() != OperatorType.DIV ||
+                    erf.getOperator() != OperatorType.ERF ||
+                    add.getOperator() != OperatorType.ADD ||
+                    multiply.getOperator() != OperatorType.MUL ||
+                    scale.getOperator() != OperatorType.MUL) continue;
+            int[] divideInputs = nodeInputs.get(divide);
+            int[] divideOutputs = nodeOutputs.get(divide);
+            int[] erfInputs = nodeInputs.get(erf);
+            int[] erfOutputs = nodeOutputs.get(erf);
+            int[] addInputs = nodeInputs.get(add);
+            int[] addOutputs = nodeOutputs.get(add);
+            int[] multiplyInputs = nodeInputs.get(multiply);
+            int[] multiplyOutputs = nodeOutputs.get(multiply);
+            int[] scaleInputs = nodeInputs.get(scale);
+            int[] scaleOutputs = nodeOutputs.get(scale);
+            if (divideInputs.length != 2 || divideOutputs.length != 1 ||
+                    erfInputs.length != 1 || erfOutputs.length != 1 ||
+                    addInputs.length != 2 || addOutputs.length != 1 ||
+                    multiplyInputs.length != 2 || multiplyOutputs.length != 1 ||
+                    scaleInputs.length != 2 || scaleOutputs.length != 1) continue;
+            int input = divideInputs[0];
+            int divideOutput = divideOutputs[0];
+            int erfOutput = erfOutputs[0];
+            int addOutput = addOutputs[0];
+            int multiplyOutput = multiplyOutputs[0];
+            int output = scaleOutputs[0];
+            if (erfInputs[0] != divideOutput || addInputs[0] != erfOutput ||
+                    !samePair(multiplyInputs, input, addOutput) ||
+                    scaleInputs[0] != multiplyOutput || uses[divideOutput] != 1 ||
+                    uses[erfOutput] != 1 || uses[addOutput] != 1 ||
+                    uses[multiplyOutput] != 1 || !sameShape(input, divideOutput, erfOutput,
+                            addOutput, multiplyOutput, output)) {
+                continue;
+            }
+            Float divisor = scalarConstant(divideInputs[1]);
+            Float addend = scalarConstant(addInputs[1]);
+            Float multiplier = scalarConstant(scaleInputs[1]);
+            if (divisor == null || addend == null || multiplier == null) continue;
+            geluPlans[start] = new GeluPlan(input, output, divisor, addend, multiplier);
+            start += 4;
+        }
+    }
+
+    private int[] tensorUseCounts() {
+        int[] uses = new int[execution.model().getTensors().size()];
+        for (NodeInfo node : nodes) {
+            for (int input : nodeInputs.get(node)) uses[input]++;
+        }
+        for (int output : execution.model().getGraphOutputs()) uses[output]++;
+        return uses;
+    }
+
+    private Float scalarConstant(int tensorIndex) {
+        float[] constant = execution.constant(tensorIndex);
+        return constant != null && execution.length(tensorIndex) == 1 ? constant[0] : null;
+    }
+
+    private static boolean samePair(int[] values, int first, int second) {
+        return values.length == 2 && ((values[0] == first && values[1] == second) ||
+                (values[0] == second && values[1] == first));
+    }
+
+    private boolean sameShape(int first, int... remaining) {
+        TensorShape shape = execution.shapes().get(first);
+        for (int tensor : remaining) {
+            if (!shape.equals(execution.shapes().get(tensor))) return false;
+        }
+        return true;
     }
 
     private void executeNodeGuarded(NodeInfo node, float[] storage) {
@@ -727,6 +852,23 @@ public final class InferenceSession implements AutoCloseable {
             this.values = new float[inputCount][];
             this.offsets = new int[inputCount];
             this.axisSizes = new int[inputCount];
+        }
+    }
+
+    private static final class GeluPlan {
+        private final int input;
+        private final int output;
+        private final float divisor;
+        private final float addend;
+        private final float multiplier;
+
+        private GeluPlan(int input, int output, float divisor, float addend,
+                         float multiplier) {
+            this.input = input;
+            this.output = output;
+            this.divisor = divisor;
+            this.addend = addend;
+            this.multiplier = multiplier;
         }
     }
 

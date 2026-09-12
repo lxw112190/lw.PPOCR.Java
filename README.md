@@ -40,8 +40,10 @@ creating duplicate sessions.
 
 The optional JDK 25 Vector API backend accelerates all Conv configurations used
 by the Tiny models, the DET 2x upsampling ConvTranspose path, MatMul, reductions,
-activations, and binary broadcasting. Unsupported generic shapes continue to
-fall back to Scalar correctness.
+activations, and binary broadcasting. It also fuses the exact five-node
+`DIV -> ERF -> ADD -> MUL -> MUL` GELU expression used by the Tiny models after
+validating tensor connections, shapes, constants, and exclusive intermediate
+uses. Unsupported generic shapes continue to fall back to Scalar correctness.
 
 The runtime intentionally does not parse ONNX. Model conversion remains an
 offline responsibility of `lw.PPOCR.C` and its converter.

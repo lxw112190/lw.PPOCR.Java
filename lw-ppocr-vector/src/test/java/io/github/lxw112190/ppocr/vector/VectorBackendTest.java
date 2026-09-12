@@ -77,6 +77,40 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void fusedGeluMatchesFiveVectorOperationsWithOffsetsAndTail() {
+        int length = 37;
+        int inputOffset = 3;
+        int outputOffset = 5;
+        float divisor = 1.4142135f;
+        float addend = 1.0f;
+        float multiplier = 0.5f;
+        float[] input = values(inputOffset + length + 2, 0.125f, -2.5f);
+        float[] normalized = new float[length];
+        float[] erf = new float[length];
+        float[] shifted = new float[length];
+        float[] product = new float[length];
+        float[] expected = new float[outputOffset + length + 2];
+        float[] actual = new float[expected.length];
+        Arrays.fill(expected, -17.0f);
+        Arrays.fill(actual, -17.0f);
+        BinaryPlan scalar = new BinaryPlan(new TensorShape(length), new TensorShape(1),
+                new TensorShape(length));
+
+        vector.binary(BinaryOp.DIV, input, inputOffset, new float[] {divisor}, 0,
+                normalized, 0, scalar);
+        vector.erf(normalized, 0, erf, 0, length);
+        vector.binary(BinaryOp.ADD, erf, 0, new float[] {addend}, 0,
+                shifted, 0, scalar);
+        vector.mul(input, inputOffset, shifted, 0, product, 0, length);
+        vector.binary(BinaryOp.MUL, product, 0, new float[] {multiplier}, 0,
+                expected, outputOffset, scalar);
+        vector.gelu(input, inputOffset, actual, outputOffset, length,
+                divisor, addend, multiplier);
+
+        Assert.assertArrayEquals(expected, actual, 0.0f);
+    }
+
+    @Test
     public void matchesScalarContiguousSoftmax() {
         float[] input = values(2 * 37, 0.03125f, -1.0f);
         float[] expected = new float[input.length];

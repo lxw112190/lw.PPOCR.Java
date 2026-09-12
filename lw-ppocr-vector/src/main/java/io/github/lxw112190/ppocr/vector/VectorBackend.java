@@ -1,6 +1,7 @@
 package io.github.lxw112190.ppocr.vector;
 
 import io.github.lxw112190.ppocr.kernels.BinaryOp;
+import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.runtime.BinaryPlan;
@@ -13,7 +14,7 @@ import jdk.incubator.vector.VectorShuffle;
 import jdk.incubator.vector.VectorSpecies;
 
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
-public final class VectorBackend implements KernelBackend {
+public final class VectorBackend implements KernelBackend, FusedGeluBackend {
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
     private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.makeZip(SPECIES, 0);
@@ -219,20 +220,51 @@ public final class VectorBackend implements KernelBackend {
         int i = 0;
         for (; i < bound; i += SPECIES.length()) {
             FloatVector value = FloatVector.fromArray(SPECIES, input, inputOffset + i);
-            VectorMask<Float> negative = value.compare(VectorOperators.LT, 0.0f);
-            FloatVector magnitude = value.abs();
-            FloatVector t = FloatVector.broadcast(SPECIES, 1.0f)
-                    .div(magnitude.mul(0.3275911f).add(1.0f));
-            FloatVector polynomial = t.mul(1.061405429f).sub(1.453152027f)
-                    .mul(t).add(1.421413741f)
-                    .mul(t).sub(0.284496736f)
-                    .mul(t).add(0.254829592f)
-                    .mul(t);
-            FloatVector result = polynomial.mul(magnitude.mul(magnitude).neg()
-                    .lanewise(VectorOperators.EXP)).neg().add(1.0f);
-            result.blend(result.neg(), negative).intoArray(output, outputOffset + i);
+            erf(value).intoArray(output, outputOffset + i);
         }
         if (i < length) scalar.erf(input, inputOffset + i, output, outputOffset + i, length - i);
+    }
+
+    @Override
+    public void gelu(float[] input, int inputOffset, float[] output, int outputOffset,
+                     int length, float divisor, float addend, float multiplier) {
+        int bound = SPECIES.loopBound(length);
+        int i = 0;
+        for (; i < bound; i += SPECIES.length()) {
+            FloatVector value = FloatVector.fromArray(SPECIES, input, inputOffset + i);
+            erf(value.div(divisor)).add(addend).mul(value).mul(multiplier)
+                    .intoArray(output, outputOffset + i);
+        }
+        for (; i < length; i++) {
+            float value = input[inputOffset + i];
+            output[outputOffset + i] = ((erfScalar(value / divisor) + addend) * value)
+                    * multiplier;
+        }
+    }
+
+    private static FloatVector erf(FloatVector value) {
+        VectorMask<Float> negative = value.compare(VectorOperators.LT, 0.0f);
+        FloatVector magnitude = value.abs();
+        FloatVector t = FloatVector.broadcast(SPECIES, 1.0f)
+                .div(magnitude.mul(0.3275911f).add(1.0f));
+        FloatVector polynomial = t.mul(1.061405429f).sub(1.453152027f)
+                .mul(t).add(1.421413741f)
+                .mul(t).sub(0.284496736f)
+                .mul(t).add(0.254829592f)
+                .mul(t);
+        FloatVector result = polynomial.mul(magnitude.mul(magnitude).neg()
+                .lanewise(VectorOperators.EXP)).neg().add(1.0f);
+        return result.blend(result.neg(), negative);
+    }
+
+    private static float erfScalar(float input) {
+        double value = input;
+        double sign = value < 0 ? -1.0 : 1.0;
+        value = Math.abs(value);
+        double t = 1.0 / (1.0 + 0.3275911 * value);
+        double polynomial = (((((1.061405429 * t - 1.453152027) * t)
+                + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+        return (float) (sign * (1.0 - polynomial * Math.exp(-value * value)));
     }
     @Override public void hardSigmoid(float[] input, int inputOffset, float[] output, int outputOffset,
                                       int length, float alpha, float beta) {
