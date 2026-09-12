@@ -28,6 +28,7 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, int[]> sliceAxes;
     private final IdentityHashMap<NodeInfo, int[]> sliceSteps;
     private final IdentityHashMap<NodeInfo, ConcatPlan> concatPlans;
+    private final IdentityHashMap<NodeInfo, int[]> layoutAxes;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -57,6 +58,7 @@ public final class InferenceSession implements AutoCloseable {
         this.sliceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.sliceSteps = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         this.concatPlans = new IdentityHashMap<NodeInfo, ConcatPlan>(nodes.size());
+        this.layoutAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.size());
         for (int i = 0; i < nodes.size(); i++) {
             NodeInfo node = nodes.get(i);
             this.nodeIndexes.put(node, i);
@@ -67,6 +69,7 @@ public final class InferenceSession implements AutoCloseable {
             prepareReduceMean(node);
             prepareSlice(node);
             prepareConcat(node);
+            prepareLayout(node);
         }
     }
 
@@ -373,14 +376,17 @@ public final class InferenceSession implements AutoCloseable {
         }
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = parameterData(node);
-        int count = params.getShort(2) & 0xffff;
-        int[] axes = new int[count];
-        for (int i = 0; i < count; i++) axes[i] = params.getInt(4 + i * 4);
-        if (node.getOperator() == OperatorType.SQUEEZE) {
-            validateSqueeze(inputShape, outputShape, axes);
-        } else {
-            validateUnsqueeze(inputShape, outputShape, axes);
+        int[] axes = layoutAxes.get(node);
+        if (axes == null) {
+            ByteBuffer params = parameterData(node);
+            int count = params.getShort(2) & 0xffff;
+            axes = new int[count];
+            for (int i = 0; i < count; i++) axes[i] = params.getInt(4 + i * 4);
+            if (node.getOperator() == OperatorType.SQUEEZE) {
+                validateSqueeze(inputShape, outputShape, axes);
+            } else {
+                validateUnsqueeze(inputShape, outputShape, axes);
+            }
         }
         System.arraycopy(data(inputs[0], storage), offset(inputs[0]), storage, offset(output), execution.length(output));
     }
@@ -589,6 +595,30 @@ public final class InferenceSession implements AutoCloseable {
             if (dimension != axis && outputShape.get(dimension) != shape.get(dimension)) return;
         }
         concatPlans.put(node, plan);
+    }
+
+    private void prepareLayout(NodeInfo node) {
+        if (node.getOperator() != OperatorType.SQUEEZE && node.getOperator() != OperatorType.UNSQUEEZE) return;
+        int[] inputs = nodeInputs.get(node);
+        int[] outputs = nodeOutputs.get(node);
+        if (inputs.length != 1 || outputs.length != 1) return;
+        ByteBuffer params = parameterData(node);
+        int count = params.getShort(2) & 0xffff;
+        if (4L + count * 4L > params.limit()) return;
+        int[] axes = new int[count];
+        for (int i = 0; i < count; i++) axes[i] = params.getInt(4 + i * 4);
+        try {
+            TensorShape inputShape = execution.shapes().get(inputs[0]);
+            TensorShape outputShape = execution.shapes().get(outputs[0]);
+            if (node.getOperator() == OperatorType.SQUEEZE) {
+                validateSqueeze(inputShape, outputShape, axes);
+            } else {
+                validateUnsqueeze(inputShape, outputShape, axes);
+            }
+            layoutAxes.put(node, axes);
+        } catch (RuntimeException ignored) {
+            // Preserve the existing run-time validation and error reporting path.
+        }
     }
 
     private static final class ConcatPlan {
