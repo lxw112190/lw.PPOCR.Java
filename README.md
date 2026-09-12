@@ -80,9 +80,10 @@ time is the sum across participating threads. `stage_hot_nodes` reports the
 slowest resolved graph nodes and their tensor shapes for targeted tuning.
 Focused benchmarks track the `60 x 80` by `80 x 6906` REC projection MatMul and
 the `[1,24,24,480]` to `[1,48,12,240]` REC stride-two Conv without
-full-pipeline scheduling noise. A `[1,64,80,80]` to `[1,16,80,80]` benchmark
-tracks the largest DET stride-one Conv, and a `[1,16,160,160]` same-size
-benchmark tracks its 2x2 stride-one MaxPool under the same policy. The DET
+full-pipeline scheduling noise. `[1,64,80,80]` and `[1,64,128,128]` to
+16-channel benchmarks track the hot DET stride-one Conv at detector limits 320
+and 960. A `[1,16,160,160]` same-size benchmark tracks its 2x2 stride-one
+MaxPool under the same policy. The DET
 stride-two benchmark covers both the `[1,3,320,320]` stem and the
 `[1,32,160,160]` downsample layer, each with 16 output channels. Two additional
 benchmarks cover the same-size 2x2 DET layers with `16 -> 8` and `8 -> 16`
