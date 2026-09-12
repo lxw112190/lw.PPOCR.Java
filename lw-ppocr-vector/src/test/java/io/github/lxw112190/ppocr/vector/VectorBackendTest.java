@@ -155,7 +155,7 @@ public final class VectorBackendTest {
         int channels = 6;
         int plane = 23;
         int groups = 2;
-        int outputChannels = 26;
+        int outputChannels = 34;
         int inputOffset = 5;
         int weightOffset = 7;
         int biasOffset = 3;
