@@ -3,7 +3,7 @@ package io.github.lxw112190.ppocr.ppocr;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 
-/** Immutable thresholds and policies for the fixed-shape OCR pipeline. */
+/** Immutable thresholds, shape limits, and execution policies for the OCR pipeline. */
 public final class PaddleOcrOptions {
     private final float detectionBitmapThreshold;
     private final float detectionBoxThreshold;
@@ -13,11 +13,13 @@ public final class PaddleOcrOptions {
     private final float classifierThreshold;
     private final int readingOrder;
     private final int recognitionParallelism;
+    private final int detectionMaximumSideLength;
 
     private PaddleOcrOptions(float detectionBitmapThreshold, float detectionBoxThreshold,
                              float detectionUnclipRatio, boolean detectionDilation,
                              int maxDetectionCandidates, float classifierThreshold,
-                             int readingOrder, int recognitionParallelism) {
+                             int readingOrder, int recognitionParallelism,
+                             int detectionMaximumSideLength) {
         if (!Float.isFinite(detectionBitmapThreshold) || detectionBitmapThreshold < 0.0f ||
                 detectionBitmapThreshold > 1.0f || !Float.isFinite(detectionBoxThreshold) ||
                 detectionBoxThreshold < 0.0f || detectionBoxThreshold > 1.0f ||
@@ -26,7 +28,8 @@ public final class PaddleOcrOptions {
                 maxDetectionCandidates <= 0 || !Float.isFinite(classifierThreshold) ||
                 classifierThreshold < 0.0f || classifierThreshold > 1.0f ||
                 readingOrder < ReadingOrder.HORIZONTAL_LTR || readingOrder > ReadingOrder.VERTICAL_LTR ||
-                recognitionParallelism <= 0 || recognitionParallelism > 64) {
+                recognitionParallelism <= 0 || recognitionParallelism > 64 ||
+                detectionMaximumSideLength < 32) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "OCR options are invalid");
         }
         this.detectionBitmapThreshold = detectionBitmapThreshold;
@@ -37,6 +40,7 @@ public final class PaddleOcrOptions {
         this.classifierThreshold = classifierThreshold;
         this.readingOrder = readingOrder;
         this.recognitionParallelism = recognitionParallelism;
+        this.detectionMaximumSideLength = detectionMaximumSideLength;
     }
 
     public static PaddleOcrOptions defaults() {
@@ -55,6 +59,7 @@ public final class PaddleOcrOptions {
     public float getClassifierThreshold() { return classifierThreshold; }
     public int getReadingOrder() { return readingOrder; }
     public int getRecognitionParallelism() { return recognitionParallelism; }
+    public int getDetectionMaximumSideLength() { return detectionMaximumSideLength; }
 
     public static final class Builder {
         private float detectionBitmapThreshold = 0.3f;
@@ -65,6 +70,7 @@ public final class PaddleOcrOptions {
         private float classifierThreshold = 0.9f;
         private int readingOrder = ReadingOrder.HORIZONTAL_LTR;
         private int recognitionParallelism = 1;
+        private int detectionMaximumSideLength = 960;
 
         public Builder setDetectionBitmapThreshold(float value) {
             detectionBitmapThreshold = value;
@@ -107,10 +113,17 @@ public final class PaddleOcrOptions {
             return this;
         }
 
+        /** Sets the maximum input side used by dynamic DET models before 32-pixel alignment. */
+        public Builder setDetectionMaximumSideLength(int value) {
+            detectionMaximumSideLength = value;
+            return this;
+        }
+
         public PaddleOcrOptions build() {
             return new PaddleOcrOptions(detectionBitmapThreshold, detectionBoxThreshold,
                     detectionUnclipRatio, detectionDilation, maxDetectionCandidates,
-                    classifierThreshold, readingOrder, recognitionParallelism);
+                    classifierThreshold, readingOrder, recognitionParallelism,
+                    detectionMaximumSideLength);
         }
     }
 }

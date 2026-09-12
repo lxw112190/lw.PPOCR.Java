@@ -106,9 +106,15 @@ public final class PaddleOcrDetector implements AutoCloseable {
     }
 
     public static PaddleOcrDetector load(Path path) {
+        return load(path, DEFAULT_DYNAMIC_LIMIT_SIDE, new ScalarBackend());
+    }
+
+    /** Loads a detector using an explicit dynamic-shape limit and stateless backend. */
+    public static PaddleOcrDetector load(Path path, int maximumSideLength,
+                                         KernelBackend backend) {
         LwmModel model = LwmLoader.load(path);
         try {
-            return new PaddleOcrDetector(model);
+            return new PaddleOcrDetector(model, maximumSideLength, backend);
         } catch (RuntimeException e) {
             model.close();
             throw e;

@@ -25,7 +25,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
-/** Dynamic-width REC facade: BGR preprocessing, scalar graph execution, and CTC decoding. */
+/** Dynamic-width REC facade: BGR preprocessing, graph execution, and CTC decoding. */
 public final class PaddleOcrRecognizer implements AutoCloseable {
     private static final int DEFAULT_MAXIMUM_WIDTH = 960;
     private final LwmModel model;
@@ -62,11 +62,17 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     }
 
     public static PaddleOcrRecognizer load(Path modelPath, Path dictionaryPath) {
+        return load(modelPath, dictionaryPath, new ScalarBackend());
+    }
+
+    /** Loads a recognizer and dictionary using the supplied stateless kernel backend. */
+    public static PaddleOcrRecognizer load(Path modelPath, Path dictionaryPath,
+                                           KernelBackend backend) {
         LwmModel model = LwmLoader.load(modelPath);
         PaddleOcrDictionary dictionary = null;
         try {
             dictionary = PaddleOcrDictionary.load(dictionaryPath);
-            return new PaddleOcrRecognizer(model, dictionary);
+            return new PaddleOcrRecognizer(model, dictionary, backend);
         } catch (RuntimeException e) {
             if (dictionary != null) dictionary.close();
             model.close();

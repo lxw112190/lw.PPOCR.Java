@@ -31,8 +31,9 @@ GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windo
 </dependency>
 ```
 
-`lw-ppocr-vector` 是 JDK 25 可选加速后端，支持部分逐元素、MatMul 和 1x1
-卷积，并对其余算子回退到 Scalar。编译和运行都需要加入
+`lw-ppocr-vector` 是 JDK 25 可选加速后端，覆盖 Tiny 模型使用的全部 Conv、
+DET 的 2 倍上采样 ConvTranspose、广播、激活、归约和 MatMul；其他通用形状
+仍会回退到 Scalar。编译和运行都需要加入
 `--add-modules jdk.incubator.vector`；不使用该模块时，Scalar 正确性路径不受影响。
 
 ```xml
@@ -43,14 +44,24 @@ GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windo
 </dependency>
 ```
 
-Vector 后端按实例注入 DET、CLS 和 REC，三者可共享同一个无状态实例：
+完整 OCR 可以直接加载同一个无状态 Vector 后端，并配置动态 DET 最大边和
+REC 宽度组并行：
 
 ```java
-KernelBackend backend = new VectorBackend();
-PaddleOcrDetector detector = new PaddleOcrDetector(detModel, 320, backend);
-PaddleOcrClassifier classifier = new PaddleOcrClassifier(clsModel, backend);
-PaddleOcrRecognizer recognizer = new PaddleOcrRecognizer(recModel, dictionary, backend);
-PaddleOcr ocr = new PaddleOcr(detector, classifier, recognizer);
+PaddleOcrOptions options = PaddleOcrOptions.builder()
+        .setDetectionMaximumSideLength(320)
+        .setRecognitionParallelism(4)
+        .build();
+
+try (PaddleOcr ocr = PaddleOcr.load(
+        Path.of("models/det.lwm"),
+        Path.of("models/cls.lwm"),
+        Path.of("models/rec.lwm"),
+        Path.of("models/ppocr_keys.txt"),
+        options,
+        new VectorBackend())) {
+    OcrResult result = PaddleOcrImageIo.recognize(ocr, Path.of("sample.jpg"));
+}
 ```
 
 启动应用时加入：
@@ -88,10 +99,14 @@ try (PaddleOcr ocr = PaddleOcr.load(
 }
 ```
 
+动态 DET 默认最大边为 960。低延迟场景可通过
+`setDetectionMaximumSideLength(320)` 使用与仓库 Tiny Full OCR Golden 相同的
+输入策略；最大边越大，通常检测细节更充分，但推理时间和工作区也会增加。
+
 不使用 CLS 时，将第二个模型路径传为 `null`：
 
 ```java
-PaddleOcr ocr = PaddleOcr.load(detector, null, recognizer, dictionary);
+PaddleOcr ocr = PaddleOcr.load(detectorPath, null, recognizerPath, dictionaryPath);
 ```
 
 模型、识别器和 OCR 管线都实现 `AutoCloseable`，应用应使用 try-with-resources 或在生命周期结束时显式关闭。
@@ -134,6 +149,17 @@ PaddleOcrOptions options = PaddleOcrOptions.builder()
 宽度组并行执行，最终仍按原输入及阅读顺序返回。Session 和模型常量不会按文字行
 重复创建。默认值为 1，低核或严格限制线程的环境无需改动。
 
+## 性能与内存结果
+
+仓库中的 `sample.jpg` 位于
+`lw-ppocr-core/src/test/resources/golden/ocr/sample.jpg`，CI 使用它验证 16 行完整
+OCR。性能摘要明确区分 Scalar、Vector 和 Vector REC×4，并报告 DET/CLS/REC
+阶段耗时、模型常驻堆、GC 后存活堆、峰值堆和 GC 次数。不同 GitHub Runner
+之间波动较大，应只比较同一环境、同一参数和相同提交附近的结果。
+
 ## 当前范围
 
-v0.1-preview 面向固定形状 FP32 的 PP-OCRv6 Tiny/Small/Medium 合同，Scalar 是稳定参考路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU 或 Android；Vector API 后端是 JDK 25 可选加速路径，仍会对未优化算子回退 Scalar。性能数字仅用于同机研发比较，不构成发布性能承诺。
+v0.1-preview 当前验证的是动态形状 FP32 PP-OCRv6 Tiny 合同，Scalar 是稳定参考
+路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU 或 Android；Vector API
+后端是 JDK 25 可选加速路径，对优化范围外的通用形状回退 Scalar。性能数字仅
+用于同机研发比较，不构成发布性能承诺。

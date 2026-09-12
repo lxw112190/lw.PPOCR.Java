@@ -15,7 +15,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.Collections;
 
-/** Fixed-shape CLS facade: BGR preprocessing, scalar graph execution, and decision postprocess. */
+/** Fixed-shape CLS facade: BGR preprocessing, graph execution, and decision postprocess. */
 public final class PaddleOcrClassifier implements AutoCloseable {
     private static final int[] INPUT_DIMENSIONS = {1, 3, ClsPreprocess.INPUT_HEIGHT, ClsPreprocess.INPUT_WIDTH};
     private final LwmModel model;
@@ -47,9 +47,14 @@ public final class PaddleOcrClassifier implements AutoCloseable {
     }
 
     public static PaddleOcrClassifier load(Path path) {
+        return load(path, new ScalarBackend());
+    }
+
+    /** Loads a classifier using the supplied stateless kernel backend. */
+    public static PaddleOcrClassifier load(Path path, KernelBackend backend) {
         LwmModel model = LwmLoader.load(path);
         try {
-            return new PaddleOcrClassifier(model);
+            return new PaddleOcrClassifier(model, backend);
         } catch (RuntimeException e) {
             model.close();
             throw e;

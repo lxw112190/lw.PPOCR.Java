@@ -2,13 +2,15 @@ package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.image.BgrTransforms;
+import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Fixed-shape pure-Java OCR pipeline over decoded BGR images. */
+/** Pure-Java DET/CLS/REC OCR pipeline over decoded BGR images. */
 public final class PaddleOcr implements AutoCloseable {
     private final PaddleOcrDetector detector;
     private final PaddleOcrClassifier classifier;
@@ -47,18 +49,31 @@ public final class PaddleOcr implements AutoCloseable {
     public static PaddleOcr load(Path detectorPath, Path classifierPath,
                                  Path recognizerPath, Path dictionaryPath) {
         return load(detectorPath, classifierPath, recognizerPath, dictionaryPath,
-                PaddleOcrOptions.defaults());
+                PaddleOcrOptions.defaults(), new ScalarBackend());
     }
 
     public static PaddleOcr load(Path detectorPath, Path classifierPath,
                                  Path recognizerPath, Path dictionaryPath,
                                  PaddleOcrOptions options) {
-        PaddleOcrDetector detector = PaddleOcrDetector.load(detectorPath);
+        return load(detectorPath, classifierPath, recognizerPath, dictionaryPath,
+                options, new ScalarBackend());
+    }
+
+    /** Loads a complete OCR pipeline using one shared stateless kernel backend. */
+    public static PaddleOcr load(Path detectorPath, Path classifierPath,
+                                 Path recognizerPath, Path dictionaryPath,
+                                 PaddleOcrOptions options, KernelBackend backend) {
+        if (options == null || backend == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "OCR pipeline options and backend are required");
+        }
+        PaddleOcrDetector detector = PaddleOcrDetector.load(detectorPath,
+                options.getDetectionMaximumSideLength(), backend);
         PaddleOcrClassifier classifier = null;
         PaddleOcrRecognizer recognizer = null;
         try {
-            if (classifierPath != null) classifier = PaddleOcrClassifier.load(classifierPath);
-            recognizer = PaddleOcrRecognizer.load(recognizerPath, dictionaryPath);
+            if (classifierPath != null) classifier = PaddleOcrClassifier.load(classifierPath, backend);
+            recognizer = PaddleOcrRecognizer.load(recognizerPath, dictionaryPath, backend);
             return new PaddleOcr(detector, classifier, recognizer, options);
         } catch (RuntimeException e) {
             if (recognizer != null) recognizer.close();

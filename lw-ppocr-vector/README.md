@@ -1,8 +1,9 @@
 # lw-ppocr-vector
 
 Optional JDK 25 Vector API backend for the pure-Java PP-OCR runtime. It
-accelerates supported elementwise, MatMul, and pointwise-convolution kernels
-and falls back to the Scalar backend for the remaining operators.
+accelerates standard binary broadcasting, activations, reductions, MatMul, all
+Conv configurations used by the PP-OCRv6 Tiny models, and their 2x DET
+ConvTranspose path. Shapes outside the optimized paths fall back to Scalar.
 
 Add this module beside `lw-ppocr-core`, create a `VectorBackend`, and pass it
 to the DET, CLS, and REC constructors. Because the Vector API is incubating,
