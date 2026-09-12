@@ -344,6 +344,7 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
                        float[] output, int outputOffset, int rows, int inner, int columns) {
         int bound = SPECIES.loopBound(columns);
         int vectorWidth = SPECIES.length();
+        int pairedBound = columns - columns % (vectorWidth * 2);
         int blockWidth = vectorWidth * 4;
         int blockBound = columns - columns % blockWidth;
         int row = 0;
@@ -357,6 +358,43 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
             int outputRow2 = outputRow1 + columns;
             int outputRow3 = outputRow2 + columns;
             int column = 0;
+            for (; column < pairedBound; column += vectorWidth * 2) {
+                FloatVector sum00 = FloatVector.zero(SPECIES);
+                FloatVector sum01 = FloatVector.zero(SPECIES);
+                FloatVector sum10 = FloatVector.zero(SPECIES);
+                FloatVector sum11 = FloatVector.zero(SPECIES);
+                FloatVector sum20 = FloatVector.zero(SPECIES);
+                FloatVector sum21 = FloatVector.zero(SPECIES);
+                FloatVector sum30 = FloatVector.zero(SPECIES);
+                FloatVector sum31 = FloatVector.zero(SPECIES);
+                int rightRow = rightOffset + column;
+                for (int k = 0; k < inner; k++) {
+                    FloatVector values0 = FloatVector.fromArray(SPECIES, right, rightRow);
+                    FloatVector values1 = FloatVector.fromArray(
+                            SPECIES, right, rightRow + vectorWidth);
+                    float left0 = left[leftRow0 + k];
+                    float left1 = left[leftRow1 + k];
+                    float left2 = left[leftRow2 + k];
+                    float left3 = left[leftRow3 + k];
+                    sum00 = sum00.add(values0.mul(left0));
+                    sum01 = sum01.add(values1.mul(left0));
+                    sum10 = sum10.add(values0.mul(left1));
+                    sum11 = sum11.add(values1.mul(left1));
+                    sum20 = sum20.add(values0.mul(left2));
+                    sum21 = sum21.add(values1.mul(left2));
+                    sum30 = sum30.add(values0.mul(left3));
+                    sum31 = sum31.add(values1.mul(left3));
+                    rightRow += columns;
+                }
+                sum00.intoArray(output, outputRow0 + column);
+                sum01.intoArray(output, outputRow0 + column + vectorWidth);
+                sum10.intoArray(output, outputRow1 + column);
+                sum11.intoArray(output, outputRow1 + column + vectorWidth);
+                sum20.intoArray(output, outputRow2 + column);
+                sum21.intoArray(output, outputRow2 + column + vectorWidth);
+                sum30.intoArray(output, outputRow3 + column);
+                sum31.intoArray(output, outputRow3 + column + vectorWidth);
+            }
             for (; column < bound; column += vectorWidth) {
                 FloatVector sum0 = FloatVector.zero(SPECIES);
                 FloatVector sum1 = FloatVector.zero(SPECIES);

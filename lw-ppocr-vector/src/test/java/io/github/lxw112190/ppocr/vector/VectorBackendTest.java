@@ -63,7 +63,7 @@ public final class VectorBackendTest {
         vector.matMul(left, leftOffset, right, rightOffset, actual, outputOffset,
                 rows, inner, columns);
 
-        Assert.assertArrayEquals(expected, actual, 0.000001f);
+        Assert.assertArrayEquals(expected, actual, 0.0f);
     }
 
     @Test
