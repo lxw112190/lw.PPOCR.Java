@@ -21,6 +21,10 @@ planner prepares reusable storage for the graph executor.
 The scalar executor currently covers equal-shape elementwise arithmetic,
 ReLU, Sigmoid, NCHW Conv, Transpose, Reshape, Softmax, and rank-2 MatMul.
 
+REC business-layer groundwork now includes UTF-8 dictionary loading and greedy
+CTC decoding with the same blank, repeat-collapse, space-class, and confidence
+rules as `lw.PPOCR.C`.
+
 The runtime intentionally does not parse ONNX. Model conversion remains an
 offline responsibility of `lw.PPOCR.C` and its converter.
 
