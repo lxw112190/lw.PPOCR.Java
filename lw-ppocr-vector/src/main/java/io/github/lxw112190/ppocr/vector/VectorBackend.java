@@ -551,6 +551,162 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
         for (int n = 0; n < batch; n++) {
             for (int group = 0; group < groups; group++) {
                 int oc = 0;
+                for (; oc + 11 < outputChannelsPerGroup; oc += 12) {
+                    int outputChannel = group * outputChannelsPerGroup + oc;
+                    int outputBase0 = outputOffset +
+                            (n * outputChannels + outputChannel) * outputPlane;
+                    int outputBase1 = outputBase0 + outputPlane;
+                    int outputBase2 = outputBase1 + outputPlane;
+                    int outputBase3 = outputBase2 + outputPlane;
+                    int outputBase4 = outputBase3 + outputPlane;
+                    int outputBase5 = outputBase4 + outputPlane;
+                    int outputBase6 = outputBase5 + outputPlane;
+                    int outputBase7 = outputBase6 + outputPlane;
+                    int outputBase8 = outputBase7 + outputPlane;
+                    int outputBase9 = outputBase8 + outputPlane;
+                    int outputBase10 = outputBase9 + outputPlane;
+                    int outputBase11 = outputBase10 + outputPlane;
+                    Arrays.fill(output, outputBase0, outputBase0 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel]);
+                    Arrays.fill(output, outputBase1, outputBase1 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 1]);
+                    Arrays.fill(output, outputBase2, outputBase2 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 2]);
+                    Arrays.fill(output, outputBase3, outputBase3 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 3]);
+                    Arrays.fill(output, outputBase4, outputBase4 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 4]);
+                    Arrays.fill(output, outputBase5, outputBase5 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 5]);
+                    Arrays.fill(output, outputBase6, outputBase6 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 6]);
+                    Arrays.fill(output, outputBase7, outputBase7 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 7]);
+                    Arrays.fill(output, outputBase8, outputBase8 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 8]);
+                    Arrays.fill(output, outputBase9, outputBase9 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 9]);
+                    Arrays.fill(output, outputBase10, outputBase10 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 10]);
+                    Arrays.fill(output, outputBase11, outputBase11 + outputPlane,
+                            bias == null ? 0.0f : bias[biasOffset + outputChannel + 11]);
+                    int channelWeightStride = inputChannelsPerGroup * kernelPlane;
+                    for (int ic = 0; ic < inputChannelsPerGroup; ic++) {
+                        int inputChannel = group * inputChannelsPerGroup + ic;
+                        int inputBase = inputOffset +
+                                (n * channels + inputChannel) * inputPlane;
+                        int weightBase0 = weightOffset +
+                                (outputChannel * inputChannelsPerGroup + ic) * kernelPlane;
+                        int weightBase1 = weightBase0 + channelWeightStride;
+                        int weightBase2 = weightBase1 + channelWeightStride;
+                        int weightBase3 = weightBase2 + channelWeightStride;
+                        int weightBase4 = weightBase3 + channelWeightStride;
+                        int weightBase5 = weightBase4 + channelWeightStride;
+                        int weightBase6 = weightBase5 + channelWeightStride;
+                        int weightBase7 = weightBase6 + channelWeightStride;
+                        int weightBase8 = weightBase7 + channelWeightStride;
+                        int weightBase9 = weightBase8 + channelWeightStride;
+                        int weightBase10 = weightBase9 + channelWeightStride;
+                        int weightBase11 = weightBase10 + channelWeightStride;
+                        for (int kh = 0; kh < kernelHeight; kh++) {
+                            for (int kw = 0; kw < kernelWidth; kw++) {
+                                int kernelIndex = kh * kernelWidth + kw;
+                                float weight0 = weights[weightBase0 + kernelIndex];
+                                float weight1 = weights[weightBase1 + kernelIndex];
+                                float weight2 = weights[weightBase2 + kernelIndex];
+                                float weight3 = weights[weightBase3 + kernelIndex];
+                                float weight4 = weights[weightBase4 + kernelIndex];
+                                float weight5 = weights[weightBase5 + kernelIndex];
+                                float weight6 = weights[weightBase6 + kernelIndex];
+                                float weight7 = weights[weightBase7 + kernelIndex];
+                                float weight8 = weights[weightBase8 + kernelIndex];
+                                float weight9 = weights[weightBase9 + kernelIndex];
+                                float weight10 = weights[weightBase10 + kernelIndex];
+                                float weight11 = weights[weightBase11 + kernelIndex];
+                                int shift = padLeft - kw * dilationWidth;
+                                int start = Math.max(0, ceilDiv(shift, 2));
+                                int end = Math.min(outputWidth, ceilDiv(width + shift, 2));
+                                int vectorEnd = start +
+                                        SPECIES.loopBound(Math.max(0, end - start));
+                                for (int oh = 0; oh < outputHeight; oh++) {
+                                    int ih = oh * strideHeight - padTop + kh * dilationHeight;
+                                    if (ih < 0 || ih >= height) continue;
+                                    int source = inputBase + ih * width + start * 2 - shift;
+                                    int destination0 = outputBase0 + oh * outputWidth;
+                                    int destination1 = outputBase1 + oh * outputWidth;
+                                    int destination2 = outputBase2 + oh * outputWidth;
+                                    int destination3 = outputBase3 + oh * outputWidth;
+                                    int destination4 = outputBase4 + oh * outputWidth;
+                                    int destination5 = outputBase5 + oh * outputWidth;
+                                    int destination6 = outputBase6 + oh * outputWidth;
+                                    int destination7 = outputBase7 + oh * outputWidth;
+                                    int destination8 = outputBase8 + oh * outputWidth;
+                                    int destination9 = outputBase9 + oh * outputWidth;
+                                    int destination10 = outputBase10 + oh * outputWidth;
+                                    int destination11 = outputBase11 + oh * outputWidth;
+                                    int ow = start;
+                                    for (; ow < vectorEnd; ow += SPECIES.length()) {
+                                        FloatVector sample = FloatVector.fromArray(
+                                                SPECIES, input, source, STRIDE_TWO_INDEXES, 0);
+                                        FloatVector.fromArray(SPECIES, output, destination0 + ow)
+                                                .add(sample.mul(weight0))
+                                                .intoArray(output, destination0 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination1 + ow)
+                                                .add(sample.mul(weight1))
+                                                .intoArray(output, destination1 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination2 + ow)
+                                                .add(sample.mul(weight2))
+                                                .intoArray(output, destination2 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination3 + ow)
+                                                .add(sample.mul(weight3))
+                                                .intoArray(output, destination3 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination4 + ow)
+                                                .add(sample.mul(weight4))
+                                                .intoArray(output, destination4 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination5 + ow)
+                                                .add(sample.mul(weight5))
+                                                .intoArray(output, destination5 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination6 + ow)
+                                                .add(sample.mul(weight6))
+                                                .intoArray(output, destination6 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination7 + ow)
+                                                .add(sample.mul(weight7))
+                                                .intoArray(output, destination7 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination8 + ow)
+                                                .add(sample.mul(weight8))
+                                                .intoArray(output, destination8 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination9 + ow)
+                                                .add(sample.mul(weight9))
+                                                .intoArray(output, destination9 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination10 + ow)
+                                                .add(sample.mul(weight10))
+                                                .intoArray(output, destination10 + ow);
+                                        FloatVector.fromArray(SPECIES, output, destination11 + ow)
+                                                .add(sample.mul(weight11))
+                                                .intoArray(output, destination11 + ow);
+                                        source += SPECIES.length() * 2;
+                                    }
+                                    for (; ow < end; ow++) {
+                                        float sample = input[source];
+                                        output[destination0 + ow] += sample * weight0;
+                                        output[destination1 + ow] += sample * weight1;
+                                        output[destination2 + ow] += sample * weight2;
+                                        output[destination3 + ow] += sample * weight3;
+                                        output[destination4 + ow] += sample * weight4;
+                                        output[destination5 + ow] += sample * weight5;
+                                        output[destination6 + ow] += sample * weight6;
+                                        output[destination7 + ow] += sample * weight7;
+                                        output[destination8 + ow] += sample * weight8;
+                                        output[destination9 + ow] += sample * weight9;
+                                        output[destination10 + ow] += sample * weight10;
+                                        output[destination11 + ow] += sample * weight11;
+                                        source += 2;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 for (; oc + 7 < outputChannelsPerGroup; oc += 8) {
                     int outputChannel = group * outputChannelsPerGroup + oc;
                     int outputBase0 = outputOffset +

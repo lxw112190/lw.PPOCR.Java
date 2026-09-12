@@ -212,7 +212,7 @@ public final class VectorBackendTest {
 
     @Test
     public void matchesScalarStrideTwoConvolution() {
-        int outputChannels = 26;
+        int outputChannels = 34;
         float[] input = values(4 * 7 * 15, 0.001953125f, -0.375f);
         float[] weights = values(outputChannels * 2 * 3 * 3, 0.0078125f, -0.25f);
         float[] bias = values(outputChannels, 0.03125f, -0.0625f);
