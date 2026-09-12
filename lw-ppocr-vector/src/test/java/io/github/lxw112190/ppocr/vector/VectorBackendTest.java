@@ -140,6 +140,30 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarTwoByTwoTransposeConvolution() {
+        int batch = 2;
+        int inputChannels = 3;
+        int inputHeight = 3;
+        int inputWidth = 17;
+        int outputChannels = 5;
+        int outputHeight = inputHeight * 2;
+        int outputWidth = inputWidth * 2;
+        float[] input = values(batch * inputChannels * inputHeight * inputWidth,
+                0.001953125f, -0.25f);
+        float[] weights = values(inputChannels * outputChannels * 4, 0.0078125f, -0.125f);
+        float[] bias = values(outputChannels, 0.03125f, -0.0625f);
+        float[] expected = new float[batch * outputChannels * outputHeight * outputWidth];
+        float[] actual = new float[expected.length];
+        scalar.convTranspose(input, 0, weights, 0, bias, 0, expected, 0,
+                batch, inputChannels, inputHeight, inputWidth, outputChannels,
+                2, 2, 2, 2, 1, 1, 0, 0, 1, outputHeight, outputWidth);
+        vector.convTranspose(input, 0, weights, 0, bias, 0, actual, 0,
+                batch, inputChannels, inputHeight, inputWidth, outputChannels,
+                2, 2, 2, 2, 1, 1, 0, 0, 1, outputHeight, outputWidth);
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
     public void matchesScalarBroadcastVariants() {
         assertBroadcast(BinaryOp.ADD, new int[] {2, 3, 5}, new int[] {1}, new int[] {2, 3, 5});
         assertBroadcast(BinaryOp.SUB, new int[] {1}, new int[] {2, 3, 5}, new int[] {2, 3, 5});

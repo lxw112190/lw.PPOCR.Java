@@ -843,9 +843,81 @@ public final class VectorBackend implements KernelBackend {
                                         int strideHeight, int strideWidth, int dilationHeight,
                                         int dilationWidth, int padTop, int padLeft, int groups,
                                         int outputHeight, int outputWidth) {
+        if (groups == 1 && kernelHeight == 2 && kernelWidth == 2 &&
+                strideHeight == 2 && strideWidth == 2 &&
+                dilationHeight == 1 && dilationWidth == 1 &&
+                padTop == 0 && padLeft == 0 &&
+                outputHeight == inputHeight * 2 && outputWidth == inputWidth * 2) {
+            convTransposeTwoByTwo(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                    output, outputOffset, batch, inputChannels, inputHeight, inputWidth,
+                    outputChannels, outputHeight, outputWidth);
+            return;
+        }
         scalar.convTranspose(input, inputOffset, weights, weightOffset, bias, biasOffset,
                 output, outputOffset, batch, inputChannels, inputHeight, inputWidth, outputChannels,
                 kernelHeight, kernelWidth, strideHeight, strideWidth, dilationHeight, dilationWidth,
                 padTop, padLeft, groups, outputHeight, outputWidth);
+    }
+
+    private static void convTransposeTwoByTwo(float[] input, int inputOffset, float[] weights,
+                                               int weightOffset, float[] bias, int biasOffset,
+                                               float[] output, int outputOffset, int batch,
+                                               int inputChannels, int inputHeight, int inputWidth,
+                                               int outputChannels, int outputHeight, int outputWidth) {
+        int inputPlane = inputHeight * inputWidth;
+        int outputPlane = outputHeight * outputWidth;
+        int bound = SPECIES.loopBound(inputWidth);
+        for (int n = 0; n < batch; n++) {
+            for (int oc = 0; oc < outputChannels; oc++) {
+                float initial = bias == null ? 0.0f : bias[biasOffset + oc];
+                int outputBase = outputOffset + (n * outputChannels + oc) * outputPlane;
+                for (int ih = 0; ih < inputHeight; ih++) {
+                    int outputRow0 = outputBase + ih * 2 * outputWidth;
+                    int outputRow1 = outputRow0 + outputWidth;
+                    int iw = 0;
+                    for (; iw < bound; iw += SPECIES.length()) {
+                        FloatVector sum00 = FloatVector.broadcast(SPECIES, initial);
+                        FloatVector sum01 = FloatVector.broadcast(SPECIES, initial);
+                        FloatVector sum10 = FloatVector.broadcast(SPECIES, initial);
+                        FloatVector sum11 = FloatVector.broadcast(SPECIES, initial);
+                        for (int ic = 0; ic < inputChannels; ic++) {
+                            int inputBase = inputOffset +
+                                    (n * inputChannels + ic) * inputPlane + ih * inputWidth + iw;
+                            int kernel = weightOffset + (ic * outputChannels + oc) * 4;
+                            FloatVector sample = FloatVector.fromArray(SPECIES, input, inputBase);
+                            sum00 = sum00.add(sample.mul(weights[kernel]));
+                            sum01 = sum01.add(sample.mul(weights[kernel + 1]));
+                            sum10 = sum10.add(sample.mul(weights[kernel + 2]));
+                            sum11 = sum11.add(sample.mul(weights[kernel + 3]));
+                        }
+                        int outputColumn = iw * 2;
+                        sum00.intoArray(output, outputRow0 + outputColumn, STRIDE_TWO_INDEXES, 0);
+                        sum01.intoArray(output, outputRow0 + outputColumn + 1, STRIDE_TWO_INDEXES, 0);
+                        sum10.intoArray(output, outputRow1 + outputColumn, STRIDE_TWO_INDEXES, 0);
+                        sum11.intoArray(output, outputRow1 + outputColumn + 1, STRIDE_TWO_INDEXES, 0);
+                    }
+                    for (; iw < inputWidth; iw++) {
+                        float sum00 = initial;
+                        float sum01 = initial;
+                        float sum10 = initial;
+                        float sum11 = initial;
+                        for (int ic = 0; ic < inputChannels; ic++) {
+                            float sample = input[inputOffset +
+                                    (n * inputChannels + ic) * inputPlane + ih * inputWidth + iw];
+                            int kernel = weightOffset + (ic * outputChannels + oc) * 4;
+                            sum00 += sample * weights[kernel];
+                            sum01 += sample * weights[kernel + 1];
+                            sum10 += sample * weights[kernel + 2];
+                            sum11 += sample * weights[kernel + 3];
+                        }
+                        int outputColumn = iw * 2;
+                        output[outputRow0 + outputColumn] = sum00;
+                        output[outputRow0 + outputColumn + 1] = sum01;
+                        output[outputRow1 + outputColumn] = sum10;
+                        output[outputRow1 + outputColumn + 1] = sum11;
+                    }
+                }
+            }
+        }
     }
 }
