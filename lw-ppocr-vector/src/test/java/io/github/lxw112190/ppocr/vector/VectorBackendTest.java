@@ -40,6 +40,16 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarErfApproximation() {
+        float[] input = values(37, 0.16666667f, -3.0f);
+        float[] expected = new float[input.length];
+        float[] actual = new float[input.length];
+        scalar.erf(input, 0, expected, 0, input.length);
+        vector.erf(input, 0, actual, 0, input.length);
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
     public void matchesScalarPointwiseConvolution() {
         float[] input = new float[3 * 23];
         float[] weights = new float[8 * 3];
