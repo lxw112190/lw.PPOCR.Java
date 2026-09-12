@@ -54,9 +54,9 @@ lw-ppocr-benchmark/  Dependency-free loader benchmark harness
 ```
 
 GitHub Actions is the build authority for this repository. It compiles and
-tests on JDK 25 across Linux, Windows, and macOS, and runs the benchmark as a
-separate Linux job. Performance output is a development signal only; v0.x does
-not use it as a release gate.
+tests on JDK 25 across Linux, Windows, and macOS, and runs separate Linux
+benchmarks for LWM loading and DB postprocessing. Performance output is a
+development signal only; v0.x does not use it as a release gate.
 
 ## Scope boundaries
 

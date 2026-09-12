@@ -29,7 +29,7 @@ jobs:
         run: mvn --batch-mode --no-transfer-progress verify
 
   performance:
-    name: Loader performance (Linux)
+    name: OCR performance (Linux)
     runs-on: ubuntu-latest
     steps:
       - name: Check out source
@@ -48,14 +48,21 @@ jobs:
           java -cp "lw-ppocr-core/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.LwmLoaderPerformanceMain \
             | tee benchmark-results/lwm-loader.json
+          java -cp "lw-ppocr-core/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.DbPostprocessPerformanceMain \
+            | tee benchmark-results/db-postprocess.json
       - name: Publish benchmark summary
         run: |
           echo '### LWM loader performance' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/lwm-loader.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### DB postprocess performance' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/db-postprocess.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark result
         uses: actions/upload-artifact@v4
         with:
-          name: lwm-loader-performance
-          path: benchmark-results/lwm-loader.json
+          name: ppocr-performance
+          path: benchmark-results/*.json
