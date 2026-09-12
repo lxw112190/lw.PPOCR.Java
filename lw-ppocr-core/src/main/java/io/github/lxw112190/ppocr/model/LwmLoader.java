@@ -84,15 +84,15 @@ public final class LwmLoader {
         if (major != 0 || minor != 1) {
             throw invalid(OcrErrorCode.UNSUPPORTED_MODEL_VERSION, "unsupported LWM format version");
         }
-        if (u32(bytes, 8) != HEADER_SIZE) {
+        if (u32Unsigned(bytes, 8) != HEADER_SIZE) {
             throw invalid(OcrErrorCode.INVALID_MODEL, "invalid LWM header size");
         }
 
         int flags = u32(bytes, 12);
-        long tensorCount = u32(bytes, 16);
-        long nodeCount = u32(bytes, 20);
-        long inputCount = u32(bytes, 24);
-        long outputCount = u32(bytes, 28);
+        long tensorCount = u32Unsigned(bytes, 16);
+        long nodeCount = u32Unsigned(bytes, 20);
+        long inputCount = u32Unsigned(bytes, 24);
+        long outputCount = u32Unsigned(bytes, 28);
         long inputOffset = u64(bytes, 32);
         long outputOffset = u64(bytes, 40);
         long tensorOffset = u64(bytes, 48);
@@ -153,7 +153,7 @@ public final class LwmLoader {
             DataType type = DataType.fromCode(typeCode);
             int rank = u32(bytes, base + 4);
             int flagsValue = u32(bytes, base + 40);
-            if (rank > limits.getMaxRank() || (flagsValue & ~7) != 0 || u32(bytes, base + 44) != 0) {
+            if (rank < 0 || rank > limits.getMaxRank() || (flagsValue & ~7) != 0 || u32(bytes, base + 44) != 0) {
                 throw invalid(OcrErrorCode.INVALID_MODEL, "invalid tensor type, rank, flags, or reserved field");
             }
             int[] dimensions = new int[rank];
@@ -226,7 +226,7 @@ public final class LwmLoader {
                 }
             }
             long nodeParameterOffset = u64(bytes, base + 56);
-            long nodeParameterSize = u32(bytes, base + 64);
+            long nodeParameterSize = u32Unsigned(bytes, base + 64);
             if (nodeParameterSize != operator.expectedParameterSize() ||
                     (nodeParameterSize == 0 && nodeParameterOffset != 0) ||
                     (nodeParameterSize != 0 && ((nodeParameterOffset & 7L) != 0 ||
@@ -315,6 +315,7 @@ public final class LwmLoader {
 
     private static int u16(ByteBuffer bytes, int offset) { return bytes.getShort(offset) & 0xffff; }
     private static int u32(ByteBuffer bytes, int offset) { return bytes.getInt(offset); }
+    private static long u32Unsigned(ByteBuffer bytes, int offset) { return bytes.getInt(offset) & 0xffffffffL; }
     private static int i32(ByteBuffer bytes, int offset) { return bytes.getInt(offset); }
     private static long u64(ByteBuffer bytes, int offset) { return bytes.getLong(offset); }
 

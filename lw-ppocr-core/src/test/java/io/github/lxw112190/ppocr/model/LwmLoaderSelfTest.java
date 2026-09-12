@@ -39,6 +39,32 @@ public final class LwmLoaderSelfTest {
         }
     }
 
+    @Test
+    public void rejectsUnsignedHeaderCountAboveLimit() {
+        byte[] bytes = minimalModel();
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).putInt(16, 0x80000000);
+        rewriteChecksum(bytes);
+        try {
+            LwmLoader.load(new ByteArrayInputStream(bytes));
+            Assert.fail("expected resource limit");
+        } catch (OcrException e) {
+            Assert.assertEquals(OcrErrorCode.RESOURCE_LIMIT, e.getCode());
+        }
+    }
+
+    @Test
+    public void rejectsUnsignedTensorRank() {
+        byte[] bytes = minimalModel();
+        ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN).putInt(180, 0x80000000);
+        rewriteChecksum(bytes);
+        try {
+            LwmLoader.load(new ByteArrayInputStream(bytes));
+            Assert.fail("expected invalid model");
+        } catch (OcrException e) {
+            Assert.assertEquals(OcrErrorCode.INVALID_MODEL, e.getCode());
+        }
+    }
+
     static byte[] minimalModel() {
         final int inputOffset = 160;
         final int outputOffset = 168;
@@ -66,6 +92,12 @@ public final class LwmLoaderSelfTest {
         byte[] copy = source.clone();
         copy[copy.length - 1] ^= 1;
         return copy;
+    }
+
+    private static void rewriteChecksum(byte[] bytes) {
+        ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        buffer.putLong(128, 0);
+        buffer.putLong(128, fnv1a(bytes));
     }
 
     private static long fnv1a(byte[] bytes) {
