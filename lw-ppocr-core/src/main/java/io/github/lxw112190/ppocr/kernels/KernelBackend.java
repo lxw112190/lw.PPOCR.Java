@@ -18,6 +18,25 @@ public interface KernelBackend {
 
     void sigmoid(float[] input, int inputOffset, float[] output, int outputOffset, int length);
 
+    void erf(float[] input, int inputOffset, float[] output, int outputOffset, int length);
+
+    void hardSigmoid(float[] input, int inputOffset, float[] output, int outputOffset,
+                     int length, float alpha, float beta);
+
+    void sqrt(float[] input, int inputOffset, float[] output, int outputOffset, int length);
+
+    void pow(float[] left, int leftOffset, float[] right, int rightOffset,
+             float[] output, int outputOffset, int length);
+
+    void reduceMean(float[] input, int inputOffset, float[] output, int outputOffset,
+                    int[] inputDimensions, int[] axes, boolean keepDimensions);
+
+    void concat(float[][] inputs, int[] inputOffsets, float[] output, int outputOffset,
+                int[] inputDimensions, int axis, int[] axisSizes);
+
+    void slice(float[] input, int inputOffset, float[] output, int outputOffset,
+               int[] inputDimensions, int[] starts, int[] axes, int[] steps);
+
     void matMul(float[] left, int leftOffset, float[] right, int rightOffset,
                 float[] output, int outputOffset, int rows, int inner, int columns);
 

@@ -41,6 +41,150 @@ public final class ScalarBackend implements KernelBackend {
     }
 
     @Override
+    public void erf(float[] input, int inputOffset, float[] output, int outputOffset, int length) {
+        for (int i = 0; i < length; i++) {
+            double value = input[inputOffset + i];
+            double sign = value < 0 ? -1.0 : 1.0;
+            value = Math.abs(value);
+            double t = 1.0 / (1.0 + 0.3275911 * value);
+            double polynomial = (((((1.061405429 * t - 1.453152027) * t)
+                    + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t;
+            output[outputOffset + i] = (float) (sign * (1.0 - polynomial * Math.exp(-value * value)));
+        }
+    }
+
+    @Override
+    public void hardSigmoid(float[] input, int inputOffset, float[] output, int outputOffset,
+                            int length, float alpha, float beta) {
+        for (int i = 0; i < length; i++) {
+            output[outputOffset + i] = Math.max(0.0f, Math.min(1.0f, alpha * input[inputOffset + i] + beta));
+        }
+    }
+
+    @Override
+    public void sqrt(float[] input, int inputOffset, float[] output, int outputOffset, int length) {
+        for (int i = 0; i < length; i++) {
+            output[outputOffset + i] = (float) Math.sqrt(input[inputOffset + i]);
+        }
+    }
+
+    @Override
+    public void pow(float[] left, int leftOffset, float[] right, int rightOffset,
+                    float[] output, int outputOffset, int length) {
+        for (int i = 0; i < length; i++) {
+            output[outputOffset + i] = (float) Math.pow(left[leftOffset + i], right[rightOffset + i]);
+        }
+    }
+
+    @Override
+    public void reduceMean(float[] input, int inputOffset, float[] output, int outputOffset,
+                           int[] inputDimensions, int[] axes, boolean keepDimensions) {
+        int rank = inputDimensions.length;
+        boolean[] reduced = new boolean[rank];
+        int reducedElements = 1;
+        for (int axis : axes) {
+            if (axis < 0) axis += rank;
+            if (axis < 0 || axis >= rank || reduced[axis]) throw new IllegalArgumentException("invalid reduction axis");
+            reduced[axis] = true;
+            reducedElements *= inputDimensions[axis];
+        }
+        int[] inputStrides = strides(inputDimensions);
+        int[] outputDimensions = new int[keepDimensions ? rank : rank - axes.length];
+        int outputAxis = 0;
+        for (int axis = 0; axis < rank; axis++) {
+            if (keepDimensions) outputDimensions[outputAxis++] = reduced[axis] ? 1 : inputDimensions[axis];
+            else if (!reduced[axis]) outputDimensions[outputAxis++] = inputDimensions[axis];
+        }
+        int outputLength = product(outputDimensions);
+        for (int i = 0; i < outputLength; i++) output[outputOffset + i] = 0.0f;
+        for (int linear = 0; linear < product(inputDimensions); linear++) {
+            int remainder = linear;
+            int target = 0;
+            for (int axis = 0; axis < rank; axis++) {
+                int coordinate = remainder / inputStrides[axis];
+                remainder %= inputStrides[axis];
+                if (!reduced[axis]) {
+                    target = target * outputDimensions[keepDimensions ? axis : targetAxis(reduced, axis)] + coordinate;
+                }
+            }
+            output[outputOffset + target] += input[inputOffset + linear];
+        }
+        for (int i = 0; i < outputLength; i++) output[outputOffset + i] /= reducedElements;
+    }
+
+    @Override
+    public void concat(float[][] inputs, int[] inputOffsets, float[] output, int outputOffset,
+                       int[] inputDimensions, int axis, int[] axisSizes) {
+        int rank = inputDimensions.length - 1;
+        int outer = 1;
+        for (int i = 0; i < axis; i++) outer *= inputDimensions[i];
+        int inner = 1;
+        for (int i = axis + 1; i < inputDimensions.length; i++) inner *= inputDimensions[i];
+        int outputAxis = 0;
+        for (int size : axisSizes) outputAxis += size;
+        int outputBlock = outputAxis * inner;
+        for (int outerIndex = 0; outerIndex < outer; outerIndex++) {
+            int destination = outputOffset + outerIndex * outputBlock;
+            for (int inputIndex = 0; inputIndex < inputs.length; inputIndex++) {
+                int count = axisSizes[inputIndex] * inner;
+                System.arraycopy(inputs[inputIndex], inputOffsets[inputIndex] + outerIndex * axisSizes[inputIndex] * inner,
+                        output, destination, count);
+                destination += count;
+            }
+        }
+    }
+
+    @Override
+    public void slice(float[] input, int inputOffset, float[] output, int outputOffset,
+                      int[] inputDimensions, int[] starts, int[] axes, int[] steps) {
+        int[] inputStrides = strides(inputDimensions);
+        int[] outputDimensions = inputDimensions.clone();
+        for (int i = 0; i < axes.length; i++) {
+            int axis = axes[i] < 0 ? axes[i] + inputDimensions.length : axes[i];
+            outputDimensions[axis] = (inputDimensions[axis] - starts[i] + steps[i] - 1) / steps[i];
+        }
+        int outputLength = product(outputDimensions);
+        int[] outputStrides = strides(outputDimensions);
+        for (int linear = 0; linear < outputLength; linear++) {
+            int remainder = linear;
+            int source = 0;
+            for (int axis = 0; axis < outputDimensions.length; axis++) {
+                int coordinate = remainder / outputStrides[axis];
+                remainder %= outputStrides[axis];
+                int sourceCoordinate = coordinate;
+                for (int i = 0; i < axes.length; i++) {
+                    int selectedAxis = axes[i] < 0 ? axes[i] + inputDimensions.length : axes[i];
+                    if (selectedAxis == axis) sourceCoordinate = starts[i] + coordinate * steps[i];
+                }
+                source += sourceCoordinate * inputStrides[axis];
+            }
+            output[outputOffset + linear] = input[inputOffset + source];
+        }
+    }
+
+    private static int[] strides(int[] dimensions) {
+        int[] result = new int[dimensions.length];
+        int stride = 1;
+        for (int axis = dimensions.length - 1; axis >= 0; axis--) {
+            result[axis] = stride;
+            stride *= dimensions[axis];
+        }
+        return result;
+    }
+
+    private static int product(int[] dimensions) {
+        int result = 1;
+        for (int dimension : dimensions) result *= dimension;
+        return result;
+    }
+
+    private static int targetAxis(boolean[] reduced, int axis) {
+        int result = 0;
+        for (int i = 0; i < axis; i++) if (!reduced[i]) result++;
+        return result;
+    }
+
+    @Override
     public void matMul(float[] left, int leftOffset, float[] right, int rightOffset,
                        float[] output, int outputOffset, int rows, int inner, int columns) {
         for (int row = 0; row < rows; row++) {

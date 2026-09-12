@@ -90,6 +90,36 @@ public final class InferenceSession implements AutoCloseable {
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
                 backend.sigmoid(left, leftOffset, storage, offset(output), execution.length(output));
                 break;
+            case ERF:
+                if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
+                backend.erf(left, leftOffset, storage, offset(output), execution.length(output));
+                break;
+            case HARD_SIGMOID:
+                if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
+                ByteBuffer hardSigmoid = execution.model().parameterData(indexOf(node));
+                backend.hardSigmoid(left, leftOffset, storage, offset(output), execution.length(output),
+                        hardSigmoid.getFloat(4), hardSigmoid.getFloat(8));
+                break;
+            case SQRT:
+                if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
+                backend.sqrt(left, leftOffset, storage, offset(output), execution.length(output));
+                break;
+            case POW:
+                if (inputs.length != 2 || execution.length(inputs[0]) != execution.length(inputs[1]) ||
+                        execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "only equal-length Pow tensors are supported");
+                right = data(inputs[1], storage);
+                rightOffset = offset(inputs[1]);
+                backend.pow(left, leftOffset, right, rightOffset, storage, offset(output), execution.length(output));
+                break;
+            case REDUCE_MEAN:
+                executeReduceMean(node, storage, output);
+                break;
+            case CONCAT:
+                executeConcat(node, storage, output);
+                break;
+            case SLICE:
+                executeSlice(node, storage, output);
+                break;
             case CONV:
                 executeConv(node, storage, output);
                 break;
@@ -170,6 +200,58 @@ public final class InferenceSession implements AutoCloseable {
         for (int i = axis + 1; i < shape.getRank(); i++) inner *= shape.get(i);
         backend.softmax(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
                 outer, shape.get(axis), inner);
+    }
+
+    private void executeReduceMean(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 1) throw unsupported(node, "ReduceMean requires one input");
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int count = params.getShort(2) & 0xffff;
+        int[] axes = new int[count];
+        for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
+        backend.reduceMean(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
+                execution.shapes().get(inputs[0]).getDimensions(), axes, params.getInt(4) != 0);
+    }
+
+    private void executeConcat(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length == 0) throw unsupported(node, "Concat requires inputs");
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int axis = params.getInt(4);
+        TensorShape shape = execution.shapes().get(inputs[0]);
+        if (axis < 0) axis += shape.getRank();
+        if (axis < 0 || axis >= shape.getRank()) throw unsupported(node, "Concat axis is invalid");
+        float[][] values = new float[inputs.length][];
+        int[] offsets = new int[inputs.length];
+        int[] axisSizes = new int[inputs.length];
+        for (int i = 0; i < inputs.length; i++) {
+            TensorShape inputShape = execution.shapes().get(inputs[i]);
+            if (inputShape.getRank() != shape.getRank()) throw unsupported(node, "Concat rank mismatch");
+            for (int dimension = 0; dimension < shape.getRank(); dimension++) {
+                if (dimension != axis && inputShape.get(dimension) != shape.get(dimension)) throw unsupported(node, "Concat shape mismatch");
+            }
+            values[i] = data(inputs[i], storage);
+            offsets[i] = offset(inputs[i]);
+            axisSizes[i] = inputShape.get(axis);
+        }
+        backend.concat(values, offsets, storage, offset(output), shape.getDimensions(), axis, axisSizes);
+    }
+
+    private void executeSlice(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 1) throw unsupported(node, "Slice requires one input");
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int count = params.getShort(2) & 0xffff;
+        int[] starts = new int[count];
+        int[] axes = new int[count];
+        int[] steps = new int[count];
+        for (int i = 0; i < count; i++) {
+            starts[i] = params.getInt(4 + i * 4);
+            axes[i] = params.getInt(68 + i * 4);
+            steps[i] = params.getInt(100 + i * 4);
+        }
+        backend.slice(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
+                execution.shapes().get(inputs[0]).getDimensions(), starts, axes, steps);
     }
 
     private void executeTranspose(NodeInfo node, float[] storage, int output) {
