@@ -23,6 +23,42 @@ public final class ScalarBackendTest {
     }
 
     @Test
+    public void computesMultiChannelPointwiseConvolution() {
+        float[] output = new float[8];
+        backend.conv(new float[] {1, 2, 3, 4, 5, 6, 7, 8}, 0,
+                new float[] {1, 2, -1, 0.5f}, 0,
+                new float[] {0, 1}, 0, output, 0,
+                1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1,
+                0, 0, 1, 2, 2);
+        Assert.assertArrayEquals(new float[] {11, 14, 17, 20, 2.5f, 2, 1.5f, 1},
+                output, 0.0f);
+    }
+
+    @Test
+    public void computesPaddedDepthwiseConvolution() {
+        float[] output = new float[8];
+        float[] weights = {
+                1, 1, 1, 1, 1, 1, 1, 1, 1,
+                2, 2, 2, 2, 2, 2, 2, 2, 2
+        };
+        backend.conv(new float[] {1, 2, 3, 4, 5, 6, 7, 8}, 0,
+                weights, 0, new float[] {0, 1}, 0, output, 0,
+                1, 2, 2, 2, 2, 3, 3, 1, 1, 1, 1,
+                1, 1, 2, 2, 2);
+        Assert.assertArrayEquals(new float[] {10, 10, 10, 10, 53, 53, 53, 53},
+                output, 0.0f);
+    }
+
+    @Test
+    public void computesMatrixMultiplicationWithContiguousRows() {
+        float[] output = new float[4];
+        backend.matMul(new float[] {1, 2, 3, 4, 5, 6}, 0,
+                new float[] {7, 8, 9, 10, 11, 12}, 0,
+                output, 0, 2, 3, 2);
+        Assert.assertArrayEquals(new float[] {58, 64, 139, 154}, output, 0.0f);
+    }
+
+    @Test
     public void computesStableSoftmax() {
         float[] output = new float[3];
         backend.softmax(new float[] {1000, 1001, 1002}, 0, output, 0, 1, 3, 1);

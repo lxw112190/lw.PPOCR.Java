@@ -2,6 +2,7 @@ package io.github.lxw112190.ppocr.kernels;
 
 import io.github.lxw112190.ppocr.runtime.BinaryPlan;
 import io.github.lxw112190.ppocr.runtime.BinaryVariant;
+import java.util.Arrays;
 
 /** Readable reference kernels; optimized backends must preserve their semantics. */
 public final class ScalarBackend implements KernelBackend {
@@ -221,12 +222,15 @@ public final class ScalarBackend implements KernelBackend {
     public void matMul(float[] left, int leftOffset, float[] right, int rightOffset,
                        float[] output, int outputOffset, int rows, int inner, int columns) {
         for (int row = 0; row < rows; row++) {
-            for (int column = 0; column < columns; column++) {
-                float sum = 0.0f;
-                for (int k = 0; k < inner; k++) {
-                    sum += left[leftOffset + row * inner + k] * right[rightOffset + k * columns + column];
+            int outputRow = outputOffset + row * columns;
+            Arrays.fill(output, outputRow, outputRow + columns, 0.0f);
+            int leftRow = leftOffset + row * inner;
+            for (int k = 0; k < inner; k++) {
+                float value = left[leftRow + k];
+                int rightRow = rightOffset + k * columns;
+                for (int column = 0; column < columns; column++) {
+                    output[outputRow + column] += value * right[rightRow + column];
                 }
-                output[outputOffset + row * columns + column] = sum;
             }
         }
     }
@@ -253,6 +257,21 @@ public final class ScalarBackend implements KernelBackend {
                      int padBottom, int padRight, int groups, int outputHeight, int outputWidth) {
         int inputChannelsPerGroup = channels / groups;
         int outputChannelsPerGroup = outputChannels / groups;
+        if (kernelHeight == 1 && kernelWidth == 1 && dilationHeight == 1 && dilationWidth == 1) {
+            convPointwise(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                    output, outputOffset, batch, channels, height, width, outputChannels,
+                    strideHeight, strideWidth, padTop, padLeft, groups, outputHeight, outputWidth,
+                    inputChannelsPerGroup, outputChannelsPerGroup);
+            return;
+        }
+        if (groups == channels && outputChannels == channels && inputChannelsPerGroup == 1 &&
+                outputChannelsPerGroup == 1) {
+            convDepthwise(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                    output, outputOffset, batch, channels, height, width, kernelHeight,
+                    kernelWidth, strideHeight, strideWidth, dilationHeight, dilationWidth,
+                    padTop, padLeft, outputHeight, outputWidth);
+            return;
+        }
         for (int n = 0; n < batch; n++) {
             for (int group = 0; group < groups; group++) {
                 for (int oc = 0; oc < outputChannelsPerGroup; oc++) {
@@ -275,6 +294,102 @@ public final class ScalarBackend implements KernelBackend {
                                 }
                             }
                             output[outputOffset + ((n * outputChannels + outputChannel) * outputHeight + oh) * outputWidth + ow] = sum;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static void convPointwise(float[] input, int inputOffset, float[] weights,
+                                      int weightOffset, float[] bias, int biasOffset,
+                                      float[] output, int outputOffset, int batch, int channels,
+                                      int height, int width, int outputChannels,
+                                      int strideHeight, int strideWidth, int padTop, int padLeft,
+                                      int groups, int outputHeight, int outputWidth,
+                                      int inputChannelsPerGroup, int outputChannelsPerGroup) {
+        int inputPlane = height * width;
+        int outputPlane = outputHeight * outputWidth;
+        for (int n = 0; n < batch; n++) {
+            for (int group = 0; group < groups; group++) {
+                for (int oc = 0; oc < outputChannelsPerGroup; oc++) {
+                    int outputChannel = group * outputChannelsPerGroup + oc;
+                    int outputBase = outputOffset + (n * outputChannels + outputChannel) * outputPlane;
+                    float initial = bias == null ? 0.0f : bias[biasOffset + outputChannel];
+                    Arrays.fill(output, outputBase, outputBase + outputPlane, initial);
+                    int weightBase = weightOffset + outputChannel * inputChannelsPerGroup;
+                    for (int ic = 0; ic < inputChannelsPerGroup; ic++) {
+                        int inputChannel = group * inputChannelsPerGroup + ic;
+                        int inputBase = inputOffset + (n * channels + inputChannel) * inputPlane;
+                        float weight = weights[weightBase + ic];
+                        for (int oh = 0; oh < outputHeight; oh++) {
+                            int ih = oh * strideHeight - padTop;
+                            if (ih < 0 || ih >= height) continue;
+                            int inputRow = inputBase + ih * width;
+                            int outputRow = outputBase + oh * outputWidth;
+                            if (strideWidth == 1) {
+                                int start = Math.max(0, padLeft);
+                                int end = Math.min(outputWidth, width + padLeft);
+                                int source = inputRow + start - padLeft;
+                                for (int ow = start; ow < end; ow++) {
+                                    output[outputRow + ow] += input[source++] * weight;
+                                }
+                            } else {
+                                for (int ow = 0; ow < outputWidth; ow++) {
+                                    int iw = ow * strideWidth - padLeft;
+                                    if (iw >= 0 && iw < width) {
+                                        output[outputRow + ow] += input[inputRow + iw] * weight;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static void convDepthwise(float[] input, int inputOffset, float[] weights,
+                                      int weightOffset, float[] bias, int biasOffset,
+                                      float[] output, int outputOffset, int batch, int channels,
+                                      int height, int width, int kernelHeight, int kernelWidth,
+                                      int strideHeight, int strideWidth, int dilationHeight,
+                                      int dilationWidth, int padTop, int padLeft,
+                                      int outputHeight, int outputWidth) {
+        int inputPlane = height * width;
+        int outputPlane = outputHeight * outputWidth;
+        int kernelPlane = kernelHeight * kernelWidth;
+        for (int n = 0; n < batch; n++) {
+            for (int channel = 0; channel < channels; channel++) {
+                int inputBase = inputOffset + (n * channels + channel) * inputPlane;
+                int outputBase = outputOffset + (n * channels + channel) * outputPlane;
+                float initial = bias == null ? 0.0f : bias[biasOffset + channel];
+                Arrays.fill(output, outputBase, outputBase + outputPlane, initial);
+                int kernelBase = weightOffset + channel * kernelPlane;
+                for (int kh = 0; kh < kernelHeight; kh++) {
+                    for (int kw = 0; kw < kernelWidth; kw++) {
+                        float weight = weights[kernelBase + kh * kernelWidth + kw];
+                        for (int oh = 0; oh < outputHeight; oh++) {
+                            int ih = oh * strideHeight - padTop + kh * dilationHeight;
+                            if (ih < 0 || ih >= height) continue;
+                            int inputRow = inputBase + ih * width;
+                            int outputRow = outputBase + oh * outputWidth;
+                            if (strideWidth == 1) {
+                                int shift = padLeft - kw * dilationWidth;
+                                int start = Math.max(0, shift);
+                                int end = Math.min(outputWidth, width + shift);
+                                int source = inputRow + start - shift;
+                                for (int ow = start; ow < end; ow++) {
+                                    output[outputRow + ow] += input[source++] * weight;
+                                }
+                            } else {
+                                for (int ow = 0; ow < outputWidth; ow++) {
+                                    int iw = ow * strideWidth - padLeft + kw * dilationWidth;
+                                    if (iw >= 0 && iw < width) {
+                                        output[outputRow + ow] += input[inputRow + iw] * weight;
+                                    }
+                                }
+                            }
                         }
                     }
                 }
