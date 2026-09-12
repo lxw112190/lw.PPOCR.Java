@@ -28,8 +28,8 @@ public final class PaddleOcrDictionary implements AutoCloseable {
 
     public static PaddleOcrDictionary load(Path path) {
         if (path == null) throw invalid("dictionary path is required");
-        try {
-            return fromBytes(Files.readAllBytes(path));
+        try (InputStream input = Files.newInputStream(path)) {
+            return load(input);
         } catch (IOException e) {
             throw new OcrException(OcrErrorCode.IO_ERROR, "unable to read recognition dictionary", e);
         }

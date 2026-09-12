@@ -65,8 +65,13 @@ public final class PaddleOcrDetector implements AutoCloseable {
             throw invalid("DET probability map dimensions are invalid");
         }
         this.model = model;
-        this.session = new InferenceSession(model,
-                Collections.singletonList(new TensorShape(inputDimensions)));
+        try {
+            this.session = new InferenceSession(model,
+                    Collections.singletonList(new TensorShape(inputDimensions)));
+        } catch (RuntimeException e) {
+            model.close();
+            throw e;
+        }
         this.inputHeight = inputDimensions[2];
         this.inputWidth = inputDimensions[3];
         this.mapHeight = mapHeight;

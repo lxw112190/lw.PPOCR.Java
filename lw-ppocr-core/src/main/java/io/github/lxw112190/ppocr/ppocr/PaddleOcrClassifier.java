@@ -24,8 +24,13 @@ public final class PaddleOcrClassifier implements AutoCloseable {
         if (model == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "CLS model is required");
         validateModel(model);
         this.model = model;
-        this.session = new InferenceSession(model,
-                Collections.singletonList(new TensorShape(INPUT_DIMENSIONS)));
+        try {
+            this.session = new InferenceSession(model,
+                    Collections.singletonList(new TensorShape(INPUT_DIMENSIONS)));
+        } catch (RuntimeException e) {
+            model.close();
+            throw e;
+        }
     }
 
     public static PaddleOcrClassifier load(Path path) {

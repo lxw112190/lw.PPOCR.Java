@@ -28,10 +28,17 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         int inputIndex = validateModel(model, dictionary);
         TensorInfo input = model.getTensors().get(inputIndex);
         TensorShape inputShape = new TensorShape(input.getDimensions());
+        int resolvedTimeSteps = outputTimeSteps(model, dictionary);
         this.model = model;
         this.dictionary = dictionary;
-        this.session = new InferenceSession(model, Collections.singletonList(inputShape));
-        this.timeSteps = outputTimeSteps(model, dictionary);
+        try {
+            this.session = new InferenceSession(model, Collections.singletonList(inputShape));
+        } catch (RuntimeException e) {
+            dictionary.close();
+            model.close();
+            throw e;
+        }
+        this.timeSteps = resolvedTimeSteps;
     }
 
     public static PaddleOcrRecognizer load(Path modelPath, Path dictionaryPath) {
