@@ -250,9 +250,49 @@ public final class VectorBackend implements KernelBackend {
                               float[] output, int outputOffset, int length) {
         scalar.pow(left, leftOffset, right, rightOffset, output, outputOffset, length);
     }
-    @Override public void reduceMean(float[] input, int inputOffset, float[] output, int outputOffset,
-                                     int[] dimensions, int[] axes, boolean keepDimensions) {
-        scalar.reduceMean(input, inputOffset, output, outputOffset, dimensions, axes, keepDimensions);
+    @Override
+    public void reduceMean(float[] input, int inputOffset, float[] output, int outputOffset,
+                           int[] dimensions, int[] axes, boolean keepDimensions) {
+        int firstReduced = contiguousReducedSuffix(dimensions.length, axes);
+        if (firstReduced < 0) {
+            scalar.reduceMean(input, inputOffset, output, outputOffset, dimensions, axes, keepDimensions);
+            return;
+        }
+        int reducedElements = 1;
+        for (int axis = firstReduced; axis < dimensions.length; axis++) {
+            reducedElements = Math.multiplyExact(reducedElements, dimensions[axis]);
+        }
+        int outer = 1;
+        for (int axis = 0; axis < firstReduced; axis++) {
+            outer = Math.multiplyExact(outer, dimensions[axis]);
+        }
+        int bound = SPECIES.loopBound(reducedElements);
+        for (int index = 0; index < outer; index++) {
+            int base = inputOffset + index * reducedElements;
+            FloatVector vectorSum = FloatVector.zero(SPECIES);
+            int element = 0;
+            for (; element < bound; element += SPECIES.length()) {
+                vectorSum = vectorSum.add(FloatVector.fromArray(SPECIES, input, base + element));
+            }
+            float sum = vectorSum.reduceLanes(VectorOperators.ADD);
+            for (; element < reducedElements; element++) sum += input[base + element];
+            output[outputOffset + index] = sum / reducedElements;
+        }
+    }
+
+    private static int contiguousReducedSuffix(int rank, int[] axes) {
+        if (axes.length == 0) return -1;
+        boolean[] reduced = new boolean[rank];
+        int first = rank;
+        for (int axisValue : axes) {
+            int axis = axisValue < 0 ? axisValue + rank : axisValue;
+            if (axis < 0 || axis >= rank || reduced[axis]) return -1;
+            reduced[axis] = true;
+            first = Math.min(first, axis);
+        }
+        if (rank - first != axes.length) return -1;
+        for (int axis = first; axis < rank; axis++) if (!reduced[axis]) return -1;
+        return first;
     }
     @Override public void concat(float[][] inputs, int[] inputOffsets, float[] output, int outputOffset,
                                  int[] dimensions, int axis, int[] axisSizes) {
@@ -473,7 +513,45 @@ public final class VectorBackend implements KernelBackend {
     }
     @Override public void softmax(float[] input, int inputOffset, float[] output, int outputOffset,
                                   int outer, int axisLength, int inner) {
-        scalar.softmax(input, inputOffset, output, outputOffset, outer, axisLength, inner);
+        if (inner != 1) {
+            scalar.softmax(input, inputOffset, output, outputOffset, outer, axisLength, inner);
+            return;
+        }
+        int bound = SPECIES.loopBound(axisLength);
+        for (int outerIndex = 0; outerIndex < outer; outerIndex++) {
+            int inputBase = inputOffset + outerIndex * axisLength;
+            int outputBase = outputOffset + outerIndex * axisLength;
+            FloatVector vectorMaximum = FloatVector.broadcast(SPECIES, -Float.MAX_VALUE);
+            int axis = 0;
+            for (; axis < bound; axis += SPECIES.length()) {
+                vectorMaximum = vectorMaximum.max(
+                        FloatVector.fromArray(SPECIES, input, inputBase + axis));
+            }
+            float maximum = vectorMaximum.reduceLanes(VectorOperators.MAX);
+            for (; axis < axisLength; axis++) maximum = Math.max(maximum, input[inputBase + axis]);
+
+            FloatVector vectorSum = FloatVector.zero(SPECIES);
+            axis = 0;
+            for (; axis < bound; axis += SPECIES.length()) {
+                FloatVector values = FloatVector.fromArray(SPECIES, input, inputBase + axis)
+                        .sub(maximum).lanewise(VectorOperators.EXP);
+                values.intoArray(output, outputBase + axis);
+                vectorSum = vectorSum.add(values);
+            }
+            float sum = vectorSum.reduceLanes(VectorOperators.ADD);
+            for (; axis < axisLength; axis++) {
+                float value = (float) Math.exp(input[inputBase + axis] - maximum);
+                output[outputBase + axis] = value;
+                sum += value;
+            }
+
+            axis = 0;
+            for (; axis < bound; axis += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, output, outputBase + axis).div(sum)
+                        .intoArray(output, outputBase + axis);
+            }
+            for (; axis < axisLength; axis++) output[outputBase + axis] /= sum;
+        }
     }
     @Override public void pool(float[] input, int inputOffset, float[] output, int outputOffset,
                                int batch, int channels, int height, int width, int kernelHeight,

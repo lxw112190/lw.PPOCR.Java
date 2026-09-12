@@ -50,6 +50,28 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarContiguousSoftmax() {
+        float[] input = values(2 * 37, 0.03125f, -1.0f);
+        float[] expected = new float[input.length];
+        float[] actual = new float[input.length];
+        scalar.softmax(input, 0, expected, 0, 2, 37, 1);
+        vector.softmax(input, 0, actual, 0, 2, 37, 1);
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
+    public void matchesScalarContiguousReduceMean() {
+        int[] dimensions = {2, 3, 4, 5};
+        int[] axes = {2, 3};
+        float[] input = values(2 * 3 * 4 * 5, 0.015625f, -0.75f);
+        float[] expected = new float[2 * 3];
+        float[] actual = new float[expected.length];
+        scalar.reduceMean(input, 0, expected, 0, dimensions, axes, true);
+        vector.reduceMean(input, 0, actual, 0, dimensions, axes, true);
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
     public void matchesScalarPointwiseConvolution() {
         float[] input = new float[3 * 23];
         float[] weights = new float[8 * 3];
