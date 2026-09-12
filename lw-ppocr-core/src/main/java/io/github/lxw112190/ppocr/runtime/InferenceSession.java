@@ -100,6 +100,9 @@ public final class InferenceSession implements AutoCloseable {
                 backend.hardSigmoid(left, leftOffset, storage, offset(output), execution.length(output),
                         hardSigmoid.getFloat(4), hardSigmoid.getFloat(8));
                 break;
+            case BATCH_NORMALIZATION:
+                executeBatchNormalization(node, storage, output);
+                break;
             case SQRT:
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
                 backend.sqrt(left, leftOffset, storage, offset(output), execution.length(output));
@@ -135,6 +138,10 @@ public final class InferenceSession implements AutoCloseable {
                 break;
             case TRANSPOSE:
                 executeTranspose(node, storage, output);
+                break;
+            case SQUEEZE:
+            case UNSQUEEZE:
+                executeSqueezeOrUnsqueeze(node, storage, output);
                 break;
             case RESHAPE:
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "reshape element count mismatch");
@@ -281,6 +288,93 @@ public final class InferenceSession implements AutoCloseable {
         for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
         backend.reduceMean(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
                 execution.shapes().get(inputs[0]).getDimensions(), axes, params.getInt(4) != 0);
+    }
+
+    private void executeBatchNormalization(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 5 || execution.shapes().get(inputs[0]).getRank() < 2 ||
+                execution.length(inputs[0]) != execution.length(output)) {
+            throw unsupported(node, "BatchNormalization requires five inputs and matching output");
+        }
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        int channels = inputShape.get(1);
+        for (int i = 1; i < inputs.length; i++) {
+            TensorShape parameterShape = execution.shapes().get(inputs[i]);
+            if (parameterShape.getRank() != 1 || parameterShape.get(0) != channels) {
+                throw unsupported(node, "BatchNormalization parameter shape mismatch");
+            }
+        }
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        float epsilon = params.getFloat(4);
+        if (!Float.isFinite(epsilon) || epsilon <= 0.0f) {
+            throw unsupported(node, "BatchNormalization epsilon is invalid");
+        }
+        backend.batchNormalization(data(inputs[0], storage), offset(inputs[0]),
+                data(inputs[1], storage), offset(inputs[1]), data(inputs[2], storage), offset(inputs[2]),
+                data(inputs[3], storage), offset(inputs[3]), data(inputs[4], storage), offset(inputs[4]),
+                epsilon, storage, offset(output), inputShape.getDimensions());
+    }
+
+    private void executeSqueezeOrUnsqueeze(NodeInfo node, float[] storage, int output) {
+        int[] inputs = node.getInputs();
+        if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) {
+            throw unsupported(node, "layout operator shape mismatch");
+        }
+        TensorShape inputShape = execution.shapes().get(inputs[0]);
+        TensorShape outputShape = execution.shapes().get(output);
+        ByteBuffer params = execution.model().parameterData(indexOf(node));
+        int count = params.getShort(2) & 0xffff;
+        int[] axes = new int[count];
+        for (int i = 0; i < count; i++) axes[i] = params.getInt(4 + i * 4);
+        if (node.getOperator() == OperatorType.SQUEEZE) {
+            validateSqueeze(inputShape, outputShape, axes);
+        } else {
+            validateUnsqueeze(inputShape, outputShape, axes);
+        }
+        System.arraycopy(data(inputs[0], storage), offset(inputs[0]), storage, offset(output), execution.length(output));
+    }
+
+    private void validateSqueeze(TensorShape input, TensorShape output, int[] axes) {
+        boolean[] squeezed = new boolean[input.getRank()];
+        if (axes.length == 0) {
+            for (int axis = 0; axis < input.getRank(); axis++) squeezed[axis] = input.get(axis) == 1;
+        } else {
+            for (int axisValue : axes) {
+                int axis = normalizeAxis(axisValue, input.getRank());
+                if (axis < 0 || axis >= input.getRank() || squeezed[axis] || input.get(axis) != 1) {
+                    throw new IllegalArgumentException("invalid squeeze axis");
+                }
+                squeezed[axis] = true;
+            }
+        }
+        int outputAxis = 0;
+        for (int axis = 0; axis < input.getRank(); axis++) {
+            if (!squeezed[axis] && (outputAxis >= output.getRank() || output.get(outputAxis++) != input.get(axis))) {
+                throw new IllegalArgumentException("squeeze output shape mismatch");
+            }
+        }
+        if (outputAxis != output.getRank()) throw new IllegalArgumentException("squeeze output rank mismatch");
+    }
+
+    private void validateUnsqueeze(TensorShape input, TensorShape output, int[] axes) {
+        if (input.getRank() + axes.length != output.getRank()) throw new IllegalArgumentException("unsqueeze rank mismatch");
+        boolean[] inserted = new boolean[output.getRank()];
+        for (int axisValue : axes) {
+            int axis = normalizeAxis(axisValue, output.getRank());
+            if (axis < 0 || axis >= output.getRank() || inserted[axis]) {
+                throw new IllegalArgumentException("invalid unsqueeze axis");
+            }
+            inserted[axis] = true;
+        }
+        int inputAxis = 0;
+        for (int axis = 0; axis < output.getRank(); axis++) {
+            int expected = inserted[axis] ? 1 : input.get(inputAxis++);
+            if (output.get(axis) != expected) throw new IllegalArgumentException("unsqueeze output shape mismatch");
+        }
+    }
+
+    private int normalizeAxis(int axis, int rank) {
+        return axis < 0 ? axis + rank : axis;
     }
 
     private void executeConcat(NodeInfo node, float[] storage, int output) {

@@ -69,4 +69,14 @@ public final class ScalarBackendTest {
                 1, 1, 1, 1, 1, 2, 2, 2, 2, 1, 1, 0, 0, 1, 2, 2);
         Assert.assertArrayEquals(new float[] {3, 4, 5, 6}, transposed, 0.0f);
     }
+
+    @Test
+    public void computesBatchNormalizationPerChannel() {
+        float[] output = new float[4];
+        backend.batchNormalization(new float[] {1, 3, 5, 7}, 0,
+                new float[] {1, 1}, 0, new float[] {0, 0}, 0,
+                new float[] {1, 2}, 0, new float[] {0, 0}, 0, 1.0f,
+                output, 0, new int[] {1, 2, 2});
+        Assert.assertArrayEquals(new float[] {0, 2, 3, 5}, output, 0.00001f);
+    }
 }

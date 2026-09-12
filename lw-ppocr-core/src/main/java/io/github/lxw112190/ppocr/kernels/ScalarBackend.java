@@ -237,6 +237,28 @@ public final class ScalarBackend implements KernelBackend {
     }
 
     @Override
+    public void batchNormalization(float[] input, int inputOffset, float[] scale, int scaleOffset,
+                                   float[] bias, int biasOffset, float[] mean, int meanOffset,
+                                   float[] variance, int varianceOffset, float epsilon,
+                                   float[] output, int outputOffset, int[] dimensions) {
+        int channels = dimensions[1];
+        int spatial = 1;
+        for (int axis = 2; axis < dimensions.length; axis++) spatial *= dimensions[axis];
+        for (int channel = 0; channel < channels; channel++) {
+            float factor = scale[scaleOffset + channel]
+                    / (float) Math.sqrt(variance[varianceOffset + channel] + epsilon);
+            for (int batch = 0; batch < dimensions[0]; batch++) {
+                int base = inputOffset + (batch * channels + channel) * spatial;
+                int outputBase = outputOffset + (batch * channels + channel) * spatial;
+                for (int index = 0; index < spatial; index++) {
+                    output[outputBase + index] = (input[base + index] - mean[meanOffset + channel]) * factor
+                            + bias[biasOffset + channel];
+                }
+            }
+        }
+    }
+
+    @Override
     public void softmax(float[] input, int inputOffset, float[] output, int outputOffset,
                         int outer, int axisLength, int inner) {
         for (int outerIndex = 0; outerIndex < outer; outerIndex++) {

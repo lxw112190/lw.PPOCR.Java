@@ -47,6 +47,11 @@ public interface KernelBackend {
               int dilationHeight, int dilationWidth, int padTop, int padLeft,
               int groups, int outputHeight, int outputWidth);
 
+    void batchNormalization(float[] input, int inputOffset, float[] scale, int scaleOffset,
+                            float[] bias, int biasOffset, float[] mean, int meanOffset,
+                            float[] variance, int varianceOffset, float epsilon,
+                            float[] output, int outputOffset, int[] dimensions);
+
     void softmax(float[] input, int inputOffset, float[] output, int outputOffset,
                  int outer, int axisLength, int inner);
 
