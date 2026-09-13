@@ -22,6 +22,8 @@ All notable changes to this project are documented in this file.
   arrays, and read-only parameter views across shape-specialized sessions.
 - Model-wide tensor consumer counts and last-use indexes for fusion-safety and
   future workspace-alias planning, reused by REC terminal-fusion detection.
+- Shape-specialized `PreparedNode[]` execution metadata with direct indexed
+  plans, removing `IdentityHashMap` lookups from the inference hot loop.
 - Cross-platform Vector projection parity now uses a numerical tolerance for
   softmax probabilities while retaining exact class-ID comparison.
 

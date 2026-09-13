@@ -11,7 +11,6 @@ import io.github.lxw112190.ppocr.model.OperatorType;
 import io.github.lxw112190.ppocr.model.NodeInfo;
 import java.nio.ByteBuffer;
 import java.util.Collections;
-import java.util.IdentityHashMap;
 import java.util.List;
 
 /** Prepared, reusable scalar execution session for the initial operator subset. */
@@ -20,20 +19,16 @@ public final class InferenceSession implements AutoCloseable {
     private final Workspace workspace;
     private final KernelBackend backend;
     private final FusedGeluBackend fusedGeluBackend;
-    private final NodeInfo[] nodes;
-    private final ByteBuffer[] parameters;
-    private final IdentityHashMap<NodeInfo, Integer> nodeIndexes;
-    private final IdentityHashMap<NodeInfo, int[]> nodeInputs;
-    private final IdentityHashMap<NodeInfo, int[]> nodeOutputs;
-    private final IdentityHashMap<NodeInfo, int[]> transposePermutations;
-    private final IdentityHashMap<NodeInfo, int[]> transposeInputStrides;
-    private final IdentityHashMap<NodeInfo, int[]> reduceAxes;
-    private final IdentityHashMap<NodeInfo, int[]> sliceStarts;
-    private final IdentityHashMap<NodeInfo, int[]> sliceAxes;
-    private final IdentityHashMap<NodeInfo, int[]> sliceSteps;
-    private final IdentityHashMap<NodeInfo, ConcatPlan> concatPlans;
-    private final IdentityHashMap<NodeInfo, int[]> layoutAxes;
-    private final IdentityHashMap<NodeInfo, BinaryPlan> binaryPlans;
+    private final PreparedNode[] nodes;
+    private final int[][] transposePermutations;
+    private final int[][] transposeInputStrides;
+    private final int[][] reduceAxes;
+    private final int[][] sliceStarts;
+    private final int[][] sliceAxes;
+    private final int[][] sliceSteps;
+    private final ConcatPlan[] concatPlans;
+    private final int[][] layoutAxes;
+    private final BinaryPlan[] binaryPlans;
     private final InferenceProfiler.NodeDescriptor[] profileDescriptors;
     private final GeluPlan[] geluPlans;
     private final int inputIndex;
@@ -79,35 +74,30 @@ public final class InferenceSession implements AutoCloseable {
         this.fusedGeluBackend = backend instanceof FusedGeluBackend
                 ? (FusedGeluBackend) backend : null;
         CompiledModel compiledModel = execution.compiledModel();
-        this.nodes = new NodeInfo[sessionNodes.size()];
-        this.parameters = new ByteBuffer[nodes.length];
-        this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.length);
-        this.nodeInputs = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.nodeOutputs = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.transposePermutations = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.transposeInputStrides = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.reduceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.sliceStarts = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.sliceAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.sliceSteps = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.concatPlans = new IdentityHashMap<NodeInfo, ConcatPlan>(nodes.length);
-        this.layoutAxes = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
-        this.binaryPlans = new IdentityHashMap<NodeInfo, BinaryPlan>(nodes.length);
+        this.nodes = new PreparedNode[sessionNodes.size()];
+        this.transposePermutations = new int[nodes.length][];
+        this.transposeInputStrides = new int[nodes.length][];
+        this.reduceAxes = new int[nodes.length][];
+        this.sliceStarts = new int[nodes.length][];
+        this.sliceAxes = new int[nodes.length][];
+        this.sliceSteps = new int[nodes.length][];
+        this.concatPlans = new ConcatPlan[nodes.length];
+        this.layoutAxes = new int[nodes.length][];
+        this.binaryPlans = new BinaryPlan[nodes.length];
         this.profileDescriptors = new InferenceProfiler.NodeDescriptor[nodes.length];
         this.geluPlans = new GeluPlan[nodes.length];
         for (int i = 0; i < nodes.length; i++) {
             NodeInfo node = compiledModel.node(i);
-            this.nodes[i] = node;
-            this.nodeIndexes.put(node, i);
-            this.nodeInputs.put(node, compiledModel.nodeInputs(i));
-            this.nodeOutputs.put(node, compiledModel.nodeOutputs(i));
-            this.parameters[i] = compiledModel.parameterData(i);
-            prepareBinary(node);
-            prepareTranspose(node);
-            prepareReduceMean(node);
-            prepareSlice(node);
-            prepareConcat(node);
-            prepareLayout(node);
+            PreparedNode prepared = new PreparedNode(i, node.getOperator(),
+                    compiledModel.nodeInputs(i), compiledModel.nodeOutputs(i),
+                    compiledModel.parameterData(i));
+            this.nodes[i] = prepared;
+            prepareBinary(prepared);
+            prepareTranspose(prepared);
+            prepareReduceMean(prepared);
+            prepareSlice(prepared);
+            prepareConcat(prepared);
+            prepareLayout(prepared);
         }
         if (fusedGeluBackend != null) prepareGeluPlans();
     }
@@ -138,7 +128,7 @@ public final class InferenceSession implements AutoCloseable {
     @Override
     public void close() { closed = true; }
 
-    private void executeNode(int nodeIndex, NodeInfo node, float[] storage) {
+    private void executeNode(int nodeIndex, PreparedNode node, float[] storage) {
         InferenceProfiler profiler = InferenceProfiler.current();
         if (profiler == null) {
             executeNodeGuarded(node, storage);
@@ -153,17 +143,17 @@ public final class InferenceSession implements AutoCloseable {
         }
     }
 
-    private InferenceProfiler.NodeDescriptor profileDescriptor(int nodeIndex, NodeInfo node) {
+    private InferenceProfiler.NodeDescriptor profileDescriptor(int nodeIndex, PreparedNode node) {
         InferenceProfiler.NodeDescriptor descriptor = profileDescriptors[nodeIndex];
         if (descriptor != null) return descriptor;
-        int[] inputs = nodeInputs.get(node);
-        int[] outputs = nodeOutputs.get(node);
+        int[] inputs = node.inputs;
+        int[] outputs = node.outputs;
         StringBuilder description = new StringBuilder("inputs=");
         appendShapes(description, inputs);
         description.append(",outputs=");
         appendShapes(description, outputs);
         if (node.getOperator() == OperatorType.CONV) {
-            ByteBuffer params = parameterData(node);
+            ByteBuffer params = node.parameters;
             description.append(",groups=").append(params.getInt(4))
                     .append(",kernel=").append(params.getInt(8)).append('x')
                     .append(params.getInt(12)).append(",stride=")
@@ -175,7 +165,7 @@ public final class InferenceSession implements AutoCloseable {
                     .append(params.getInt(44));
         } else if (node.getOperator() == OperatorType.MAX_POOL
                 || node.getOperator() == OperatorType.AVERAGE_POOL) {
-            ByteBuffer params = parameterData(node);
+            ByteBuffer params = node.parameters;
             description.append(",kernel=").append(params.getInt(8)).append('x')
                     .append(params.getInt(12)).append(",stride=")
                     .append(params.getInt(16)).append('x').append(params.getInt(20))
@@ -233,26 +223,26 @@ public final class InferenceSession implements AutoCloseable {
     private void prepareGeluPlans() {
         int[] uses = tensorUseCounts();
         for (int start = 0; start + 4 < nodes.length; start++) {
-            NodeInfo divide = nodes[start];
-            NodeInfo erf = nodes[start + 1];
-            NodeInfo add = nodes[start + 2];
-            NodeInfo multiply = nodes[start + 3];
-            NodeInfo scale = nodes[start + 4];
+            PreparedNode divide = nodes[start];
+            PreparedNode erf = nodes[start + 1];
+            PreparedNode add = nodes[start + 2];
+            PreparedNode multiply = nodes[start + 3];
+            PreparedNode scale = nodes[start + 4];
             if (divide.getOperator() != OperatorType.DIV ||
                     erf.getOperator() != OperatorType.ERF ||
                     add.getOperator() != OperatorType.ADD ||
                     multiply.getOperator() != OperatorType.MUL ||
                     scale.getOperator() != OperatorType.MUL) continue;
-            int[] divideInputs = nodeInputs.get(divide);
-            int[] divideOutputs = nodeOutputs.get(divide);
-            int[] erfInputs = nodeInputs.get(erf);
-            int[] erfOutputs = nodeOutputs.get(erf);
-            int[] addInputs = nodeInputs.get(add);
-            int[] addOutputs = nodeOutputs.get(add);
-            int[] multiplyInputs = nodeInputs.get(multiply);
-            int[] multiplyOutputs = nodeOutputs.get(multiply);
-            int[] scaleInputs = nodeInputs.get(scale);
-            int[] scaleOutputs = nodeOutputs.get(scale);
+            int[] divideInputs = divide.inputs;
+            int[] divideOutputs = divide.outputs;
+            int[] erfInputs = erf.inputs;
+            int[] erfOutputs = erf.outputs;
+            int[] addInputs = add.inputs;
+            int[] addOutputs = add.outputs;
+            int[] multiplyInputs = multiply.inputs;
+            int[] multiplyOutputs = multiply.outputs;
+            int[] scaleInputs = scale.inputs;
+            int[] scaleOutputs = scale.outputs;
             if (divideInputs.length != 2 || divideOutputs.length != 1 ||
                     erfInputs.length != 1 || erfOutputs.length != 1 ||
                     addInputs.length != 2 || addOutputs.length != 1 ||
@@ -283,8 +273,8 @@ public final class InferenceSession implements AutoCloseable {
 
     private int[] tensorUseCounts() {
         int[] uses = new int[execution.model().getTensors().size()];
-        for (NodeInfo node : nodes) {
-            for (int input : nodeInputs.get(node)) uses[input]++;
+        for (PreparedNode node : nodes) {
+            for (int input : node.inputs) uses[input]++;
         }
         uses[outputIndex]++;
         return uses;
@@ -308,7 +298,7 @@ public final class InferenceSession implements AutoCloseable {
         return true;
     }
 
-    private void executeNodeGuarded(NodeInfo node, float[] storage) {
+    private void executeNodeGuarded(PreparedNode node, float[] storage) {
         try {
             executeNodeUnchecked(node, storage);
         } catch (OcrException e) {
@@ -318,9 +308,9 @@ public final class InferenceSession implements AutoCloseable {
         }
     }
 
-    private void executeNodeUnchecked(NodeInfo node, float[] storage) {
-        int[] inputs = nodeInputs.get(node);
-        int[] outputs = nodeOutputs.get(node);
+    private void executeNodeUnchecked(PreparedNode node, float[] storage) {
+        int[] inputs = node.inputs;
+        int[] outputs = node.outputs;
         if (inputs.length == 0) {
             throw unsupported(node, "node has no inputs");
         }
@@ -350,7 +340,7 @@ public final class InferenceSession implements AutoCloseable {
                 break;
             case HARD_SIGMOID:
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
-                ByteBuffer hardSigmoid = parameterData(node);
+                ByteBuffer hardSigmoid = node.parameters;
                 backend.hardSigmoid(left, leftOffset, storage, offset(output), execution.length(output),
                         hardSigmoid.getFloat(4), hardSigmoid.getFloat(8));
                 break;
@@ -433,10 +423,10 @@ public final class InferenceSession implements AutoCloseable {
         }
     }
 
-    private void executeBinary(NodeInfo node, float[] storage, int output, BinaryOp operation) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeBinary(PreparedNode node, float[] storage, int output, BinaryOp operation) {
+        int[] inputs = node.inputs;
         if (inputs.length != 2) throw unsupported(node, "binary operator requires two inputs");
-        BinaryPlan plan = binaryPlans.get(node);
+        BinaryPlan plan = binaryPlans[node.index];
         if (plan == null) {
             if (execution.length(inputs[0]) != execution.length(inputs[1]) ||
                     execution.length(inputs[0]) != execution.length(output)) {
@@ -449,15 +439,15 @@ public final class InferenceSession implements AutoCloseable {
                 data(inputs[1], storage), offset(inputs[1]), storage, offset(output), plan);
     }
 
-    private void prepareBinary(NodeInfo node) {
+    private void prepareBinary(PreparedNode node) {
         OperatorType operator = node.getOperator();
         if (operator != OperatorType.ADD && operator != OperatorType.MUL && operator != OperatorType.DIV &&
                 operator != OperatorType.SUB && operator != OperatorType.POW) return;
-        int[] inputs = nodeInputs.get(node);
-        int[] outputs = nodeOutputs.get(node);
+        int[] inputs = node.inputs;
+        int[] outputs = node.outputs;
         if (inputs.length != 2 || outputs.length != 1) return;
-        binaryPlans.put(node, new BinaryPlan(execution.shapes().get(inputs[0]), execution.shapes().get(inputs[1]),
-                execution.shapes().get(outputs[0])));
+        binaryPlans[node.index] = new BinaryPlan(execution.shapes().get(inputs[0]),
+                execution.shapes().get(inputs[1]), execution.shapes().get(outputs[0]));
     }
 
     private static BinaryOp binaryOperation(OperatorType operator) {
@@ -470,8 +460,8 @@ public final class InferenceSession implements AutoCloseable {
         }
     }
 
-    private void executeConv(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeConv(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length < 2 || inputs.length > 3 || execution.shapes().get(inputs[0]).getRank() != 4 ||
                 execution.shapes().get(inputs[1]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "Conv requires rank-4 input, weights, and output");
@@ -479,7 +469,7 @@ public final class InferenceSession implements AutoCloseable {
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape weightShape = execution.shapes().get(inputs[1]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int groups = params.getInt(4);
         int kernelHeight = params.getInt(8);
         int kernelWidth = params.getInt(12);
@@ -507,10 +497,10 @@ public final class InferenceSession implements AutoCloseable {
                 outputShape.get(2), outputShape.get(3));
     }
 
-    private void executeSoftmax(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeSoftmax(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int axis = params.getInt(4);
         TensorShape shape = execution.shapes().get(inputs[0]);
         if (axis < 0) axis += shape.getRank();
@@ -523,12 +513,12 @@ public final class InferenceSession implements AutoCloseable {
                 outer, shape.get(axis), inner);
     }
 
-    private void executePool(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executePool(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "pool requires rank-4 input and output");
         }
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
         backend.pool(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
@@ -539,12 +529,12 @@ public final class InferenceSession implements AutoCloseable {
                 node.getOperator() == OperatorType.MAX_POOL, params.getInt(44) != 0);
     }
 
-    private void executeResize(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeResize(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 1 || execution.shapes().get(inputs[0]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "Resize requires rank-4 input and output");
         }
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
         backend.resizeNearest(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
@@ -552,8 +542,8 @@ public final class InferenceSession implements AutoCloseable {
                 outputShape.get(2), outputShape.get(3), params.getFloat(12), params.getFloat(16));
     }
 
-    private void executeConvTranspose(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeConvTranspose(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length < 2 || inputs.length > 3 || execution.shapes().get(inputs[0]).getRank() != 4 ||
                 execution.shapes().get(inputs[1]).getRank() != 4 || execution.shapes().get(output).getRank() != 4) {
             throw unsupported(node, "ConvTranspose requires rank-4 input, weights, and output");
@@ -561,7 +551,7 @@ public final class InferenceSession implements AutoCloseable {
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape weightShape = execution.shapes().get(inputs[1]);
         TensorShape outputShape = execution.shapes().get(output);
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int groups = params.getInt(4);
         int kernelHeight = params.getInt(8);
         int kernelWidth = params.getInt(12);
@@ -584,11 +574,11 @@ public final class InferenceSession implements AutoCloseable {
                 outputShape.get(2), outputShape.get(3));
     }
 
-    private void executeReduceMean(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeReduceMean(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 1) throw unsupported(node, "ReduceMean requires one input");
-        ByteBuffer params = parameterData(node);
-        int[] axes = reduceAxes.get(node);
+        ByteBuffer params = node.parameters;
+        int[] axes = reduceAxes[node.index];
         if (axes == null) {
             int count = params.getShort(2) & 0xffff;
             axes = new int[count];
@@ -598,8 +588,8 @@ public final class InferenceSession implements AutoCloseable {
                 execution.shapes().get(inputs[0]).dimensionsUnsafe(), axes, params.getInt(4) != 0);
     }
 
-    private void executeBatchNormalization(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeBatchNormalization(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 5 || execution.shapes().get(inputs[0]).getRank() < 2 ||
                 execution.length(inputs[0]) != execution.length(output)) {
             throw unsupported(node, "BatchNormalization requires five inputs and matching output");
@@ -612,7 +602,7 @@ public final class InferenceSession implements AutoCloseable {
                 throw unsupported(node, "BatchNormalization parameter shape mismatch");
             }
         }
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         float epsilon = params.getFloat(4);
         if (!Float.isFinite(epsilon) || epsilon <= 0.0f) {
             throw unsupported(node, "BatchNormalization epsilon is invalid");
@@ -623,16 +613,16 @@ public final class InferenceSession implements AutoCloseable {
                 epsilon, storage, offset(output), inputShape.dimensionsUnsafe());
     }
 
-    private void executeSqueezeOrUnsqueeze(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeSqueezeOrUnsqueeze(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) {
             throw unsupported(node, "layout operator shape mismatch");
         }
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
-        int[] axes = layoutAxes.get(node);
+        int[] axes = layoutAxes[node.index];
         if (axes == null) {
-            ByteBuffer params = parameterData(node);
+            ByteBuffer params = node.parameters;
             int count = params.getShort(2) & 0xffff;
             axes = new int[count];
             for (int i = 0; i < count; i++) axes[i] = params.getInt(4 + i * 4);
@@ -688,10 +678,10 @@ public final class InferenceSession implements AutoCloseable {
         return axis < 0 ? axis + rank : axis;
     }
 
-    private void executeConcat(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeConcat(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length == 0) throw unsupported(node, "Concat requires inputs");
-        ConcatPlan plan = concatPlans.get(node);
+        ConcatPlan plan = concatPlans[node.index];
         TensorShape shape = execution.shapes().get(inputs[0]);
         if (plan != null) {
             for (int i = 0; i < inputs.length; i++) plan.values[i] = data(inputs[i], storage);
@@ -699,7 +689,7 @@ public final class InferenceSession implements AutoCloseable {
                     shape.dimensionsUnsafe(), plan.axis, plan.axisSizes);
             return;
         }
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int axis = params.getInt(4);
         if (axis < 0) axis += shape.getRank();
         if (axis < 0 || axis >= shape.getRank()) throw unsupported(node, "Concat axis is invalid");
@@ -719,14 +709,14 @@ public final class InferenceSession implements AutoCloseable {
         backend.concat(values, offsets, storage, offset(output), shape.dimensionsUnsafe(), axis, axisSizes);
     }
 
-    private void executeSlice(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeSlice(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 1) throw unsupported(node, "Slice requires one input");
-        int[] starts = sliceStarts.get(node);
-        int[] axes = sliceAxes.get(node);
-        int[] steps = sliceSteps.get(node);
+        int[] starts = sliceStarts[node.index];
+        int[] axes = sliceAxes[node.index];
+        int[] steps = sliceSteps[node.index];
         if (starts == null) {
-            ByteBuffer params = parameterData(node);
+            ByteBuffer params = node.parameters;
             int count = params.getShort(2) & 0xffff;
             starts = new int[count];
             axes = new int[count];
@@ -741,16 +731,16 @@ public final class InferenceSession implements AutoCloseable {
                 execution.shapes().get(inputs[0]).dimensionsUnsafe(), starts, axes, steps);
     }
 
-    private void executeTranspose(NodeInfo node, float[] storage, int output) {
-        int[] inputs = nodeInputs.get(node);
+    private void executeTranspose(PreparedNode node, float[] storage, int output) {
+        int[] inputs = node.inputs;
         if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "shape mismatch");
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(output);
-        int[] permutation = transposePermutations.get(node);
-        int[] inputStrides = transposeInputStrides.get(node);
+        int[] permutation = transposePermutations[node.index];
+        int[] inputStrides = transposeInputStrides[node.index];
         int rank;
         if (permutation == null) {
-            ByteBuffer params = parameterData(node);
+            ByteBuffer params = node.parameters;
             rank = params.getShort(2) & 0xffff;
             if (rank != inputShape.getRank() || rank != outputShape.getRank()) {
                 throw unsupported(node, "Transpose rank mismatch");
@@ -774,35 +764,35 @@ public final class InferenceSession implements AutoCloseable {
         }
     }
 
-    private void prepareTranspose(NodeInfo node) {
+    private void prepareTranspose(PreparedNode node) {
         if (node.getOperator() != OperatorType.TRANSPOSE) return;
-        int[] inputs = nodeInputs.get(node);
-        int[] outputs = nodeOutputs.get(node);
+        int[] inputs = node.inputs;
+        int[] outputs = node.outputs;
         if (inputs.length != 1 || outputs.length != 1) return;
         TensorShape inputShape = execution.shapes().get(inputs[0]);
         TensorShape outputShape = execution.shapes().get(outputs[0]);
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int rank = params.getShort(2) & 0xffff;
         if (rank != inputShape.getRank() || rank != outputShape.getRank()) return;
         int[] permutation = new int[rank];
         for (int i = 0; i < rank; i++) permutation[i] = params.getInt(4 + i * 4);
-        transposePermutations.put(node, permutation);
-        transposeInputStrides.put(node, strides(inputShape));
+        transposePermutations[node.index] = permutation;
+        transposeInputStrides[node.index] = strides(inputShape);
     }
 
-    private void prepareReduceMean(NodeInfo node) {
+    private void prepareReduceMean(PreparedNode node) {
         if (node.getOperator() != OperatorType.REDUCE_MEAN) return;
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int count = params.getShort(2) & 0xffff;
         if (12L + count * 4L > params.limit()) return;
         int[] axes = new int[count];
         for (int i = 0; i < count; i++) axes[i] = params.getInt(12 + i * 4);
-        reduceAxes.put(node, axes);
+        reduceAxes[node.index] = axes;
     }
 
-    private void prepareSlice(NodeInfo node) {
+    private void prepareSlice(PreparedNode node) {
         if (node.getOperator() != OperatorType.SLICE) return;
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int count = params.getShort(2) & 0xffff;
         if (4L + count * 4L > params.limit() || 68L + count * 4L > params.limit() ||
                 100L + count * 4L > params.limit()) return;
@@ -814,21 +804,21 @@ public final class InferenceSession implements AutoCloseable {
             axes[i] = params.getInt(68 + i * 4);
             steps[i] = params.getInt(100 + i * 4);
         }
-        sliceStarts.put(node, starts);
-        sliceAxes.put(node, axes);
-        sliceSteps.put(node, steps);
+        sliceStarts[node.index] = starts;
+        sliceAxes[node.index] = axes;
+        sliceSteps[node.index] = steps;
     }
 
-    private void prepareConcat(NodeInfo node) {
+    private void prepareConcat(PreparedNode node) {
         if (node.getOperator() != OperatorType.CONCAT) return;
-        int[] inputs = nodeInputs.get(node);
+        int[] inputs = node.inputs;
         if (inputs.length == 0) return;
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int axis = params.getInt(4);
         TensorShape shape = execution.shapes().get(inputs[0]);
         if (axis < 0) axis += shape.getRank();
         if (axis < 0 || axis >= shape.getRank()) return;
-        int[] outputs = nodeOutputs.get(node);
+        int[] outputs = node.outputs;
         if (outputs.length != 1) return;
         TensorShape outputShape = execution.shapes().get(outputs[0]);
         if (outputShape.getRank() != shape.getRank()) return;
@@ -848,15 +838,15 @@ public final class InferenceSession implements AutoCloseable {
         for (int dimension = 0; dimension < shape.getRank(); dimension++) {
             if (dimension != axis && outputShape.get(dimension) != shape.get(dimension)) return;
         }
-        concatPlans.put(node, plan);
+        concatPlans[node.index] = plan;
     }
 
-    private void prepareLayout(NodeInfo node) {
+    private void prepareLayout(PreparedNode node) {
         if (node.getOperator() != OperatorType.SQUEEZE && node.getOperator() != OperatorType.UNSQUEEZE) return;
-        int[] inputs = nodeInputs.get(node);
-        int[] outputs = nodeOutputs.get(node);
+        int[] inputs = node.inputs;
+        int[] outputs = node.outputs;
         if (inputs.length != 1 || outputs.length != 1) return;
-        ByteBuffer params = parameterData(node);
+        ByteBuffer params = node.parameters;
         int count = params.getShort(2) & 0xffff;
         if (4L + count * 4L > params.limit()) return;
         int[] axes = new int[count];
@@ -869,7 +859,7 @@ public final class InferenceSession implements AutoCloseable {
             } else {
                 validateUnsqueeze(inputShape, outputShape, axes);
             }
-            layoutAxes.put(node, axes);
+            layoutAxes[node.index] = axes;
         } catch (RuntimeException ignored) {
             // Preserve the existing run-time validation and error reporting path.
         }
@@ -916,16 +906,6 @@ public final class InferenceSession implements AutoCloseable {
         return strides;
     }
 
-    private int indexOf(NodeInfo target) {
-        Integer index = nodeIndexes.get(target);
-        if (index == null) throw new IllegalStateException("prepared node is not owned by model");
-        return index;
-    }
-
-    private ByteBuffer parameterData(NodeInfo node) {
-        return parameters[indexOf(node)];
-    }
-
     private float[] data(int tensorIndex, float[] storage) {
         float[] constant = execution.constant(tensorIndex);
         return constant == null ? storage : constant;
@@ -940,11 +920,11 @@ public final class InferenceSession implements AutoCloseable {
         if (values == null || values.length != expected) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, name + " length does not match tensor shape");
     }
 
-    private OcrException unsupported(NodeInfo node, String detail) {
+    private OcrException unsupported(PreparedNode node, String detail) {
         return new OcrException(OcrErrorCode.UNSUPPORTED_OPERATOR, node.getOperator() + ": " + detail);
     }
 
-    private OcrException unsupported(NodeInfo node, String detail, Throwable cause) {
+    private OcrException unsupported(PreparedNode node, String detail, Throwable cause) {
         return new OcrException(OcrErrorCode.UNSUPPORTED_OPERATOR,
                 node.getOperator() + ": " + detail, cause);
     }
