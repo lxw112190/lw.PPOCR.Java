@@ -34,6 +34,23 @@ jobs:
           cache: maven
       - name: Compile and test
         run: mvn --batch-mode --no-transfer-progress verify
+      - name: Report test failures
+        if: failure()
+        shell: bash
+        run: |
+          found=0
+          while IFS= read -r -d '' report; do
+            if grep -Eq 'Failures: [1-9]|Errors: [1-9]|<<< FAILURE|<<< ERROR' "$report"; then
+              found=1
+              message=$(tr '\n' ' ' < "$report" | cut -c1-4000)
+              message=${message//'%'/'%25'}
+              message=${message//$'\r'/'%0D'}
+              echo "::error file=$report::$message"
+            fi
+          done < <(find . -path '*/target/surefire-reports/*.txt' -type f -print0)
+          if [ "$found" -eq 0 ]; then
+            echo "No failing Surefire text report was produced; inspect the failed Maven step."
+          fi
 
   performance:
     name: OCR performance (Linux)
