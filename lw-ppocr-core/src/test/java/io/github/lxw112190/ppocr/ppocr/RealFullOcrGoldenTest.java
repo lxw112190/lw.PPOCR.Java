@@ -9,6 +9,16 @@ import org.junit.Test;
 public final class RealFullOcrGoldenTest {
     @Test
     public void matchesPinnedCPipeline() throws Exception {
+        assertPipeline(PaddleOcrOptions.defaults());
+    }
+
+    @Test
+    public void automaticParallelismPreservesPinnedPipelineOutput() throws Exception {
+        assertPipeline(PaddleOcrOptions.builder()
+                .setParallelismMode(ParallelismPolicy.AUTO).build());
+    }
+
+    private static void assertPipeline(PaddleOcrOptions options) throws Exception {
         BgrImage image = FullOcrGoldenFixture.loadImage(RealFullOcrGoldenTest.class);
         try (LwmModel detectorModel = FullOcrGoldenFixture.loadModel(
                     RealFullOcrGoldenTest.class, FullOcrGoldenFixture.ROOT + "det/det.lwm");
@@ -20,7 +30,7 @@ public final class RealFullOcrGoldenTest {
              PaddleOcrClassifier classifier = new PaddleOcrClassifier(classifierModel);
              PaddleOcrDictionary dictionary = FullOcrGoldenFixture.loadDictionary(RealFullOcrGoldenTest.class);
              PaddleOcrRecognizer recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary);
-             PaddleOcr ocr = new PaddleOcr(detector, classifier, recognizer)) {
+             PaddleOcr ocr = new PaddleOcr(detector, classifier, recognizer, options)) {
             FullOcrGoldenFixture.assertMatches(ocr.recognize(image));
         }
     }

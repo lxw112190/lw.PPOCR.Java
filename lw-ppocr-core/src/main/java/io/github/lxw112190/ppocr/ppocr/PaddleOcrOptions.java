@@ -14,13 +14,14 @@ public final class PaddleOcrOptions {
     private final int readingOrder;
     private final int classificationParallelism;
     private final int recognitionParallelism;
+    private final ParallelismPolicy parallelismPolicy;
     private final int detectionMaximumSideLength;
 
     private PaddleOcrOptions(float detectionBitmapThreshold, float detectionBoxThreshold,
                              float detectionUnclipRatio, boolean detectionDilation,
                              int maxDetectionCandidates, float classifierThreshold,
                              int readingOrder, int classificationParallelism,
-                             int recognitionParallelism,
+                             int recognitionParallelism, ParallelismPolicy parallelismPolicy,
                              int detectionMaximumSideLength) {
         if (!Float.isFinite(detectionBitmapThreshold) || detectionBitmapThreshold < 0.0f ||
                 detectionBitmapThreshold > 1.0f || !Float.isFinite(detectionBoxThreshold) ||
@@ -32,6 +33,7 @@ public final class PaddleOcrOptions {
                 readingOrder < ReadingOrder.HORIZONTAL_LTR || readingOrder > ReadingOrder.VERTICAL_LTR ||
                 classificationParallelism <= 0 || classificationParallelism > 64 ||
                 recognitionParallelism <= 0 || recognitionParallelism > 64 ||
+                parallelismPolicy == null ||
                 detectionMaximumSideLength < 32) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "OCR options are invalid");
         }
@@ -44,6 +46,7 @@ public final class PaddleOcrOptions {
         this.readingOrder = readingOrder;
         this.classificationParallelism = classificationParallelism;
         this.recognitionParallelism = recognitionParallelism;
+        this.parallelismPolicy = parallelismPolicy;
         this.detectionMaximumSideLength = detectionMaximumSideLength;
     }
 
@@ -64,6 +67,7 @@ public final class PaddleOcrOptions {
     public int getReadingOrder() { return readingOrder; }
     public int getClassificationParallelism() { return classificationParallelism; }
     public int getRecognitionParallelism() { return recognitionParallelism; }
+    public ParallelismPolicy getParallelismPolicy() { return parallelismPolicy; }
     public int getDetectionMaximumSideLength() { return detectionMaximumSideLength; }
 
     public static final class Builder {
@@ -76,6 +80,7 @@ public final class PaddleOcrOptions {
         private int readingOrder = ReadingOrder.HORIZONTAL_LTR;
         private int classificationParallelism = 1;
         private int recognitionParallelism = 1;
+        private ParallelismPolicy parallelismPolicy = ParallelismPolicy.MANUAL;
         private int detectionMaximumSideLength = 960;
 
         public Builder setDetectionBitmapThreshold(float value) {
@@ -116,12 +121,32 @@ public final class PaddleOcrOptions {
         /** Sets the maximum number of fixed-shape CLS evaluations run concurrently. */
         public Builder setClassificationParallelism(int value) {
             classificationParallelism = value;
+            parallelismPolicy = ParallelismPolicy.MANUAL;
             return this;
         }
 
         /** Sets the maximum number of REC width groups evaluated concurrently. */
         public Builder setRecognitionParallelism(int value) {
             recognitionParallelism = value;
+            parallelismPolicy = ParallelismPolicy.MANUAL;
+            return this;
+        }
+
+        /** Selects automatic CPU budgeting or the explicit CLS/REC worker values. */
+        public Builder setParallelismMode(ParallelismPolicy value) {
+            parallelismPolicy = value;
+            return this;
+        }
+
+        /** Zero selects AUTO; a positive value sets both CLS and REC worker limits. */
+        public Builder setParallelism(int value) {
+            if (value == 0) {
+                parallelismPolicy = ParallelismPolicy.AUTO;
+            } else {
+                classificationParallelism = value;
+                recognitionParallelism = value;
+                parallelismPolicy = ParallelismPolicy.MANUAL;
+            }
             return this;
         }
 
@@ -135,8 +160,16 @@ public final class PaddleOcrOptions {
             return new PaddleOcrOptions(detectionBitmapThreshold, detectionBoxThreshold,
                     detectionUnclipRatio, detectionDilation, maxDetectionCandidates,
                     classifierThreshold, readingOrder, classificationParallelism,
-                    recognitionParallelism,
+                    recognitionParallelism, parallelismPolicy,
                     detectionMaximumSideLength);
         }
+    }
+
+    ParallelismPlan parallelismPlan(int lineCount) {
+        int processors = Math.max(1, Runtime.getRuntime().availableProcessors());
+        return parallelismPolicy == ParallelismPolicy.AUTO
+                ? ParallelismPlan.automatic(processors, lineCount)
+                : ParallelismPlan.manual(processors, lineCount,
+                        classificationParallelism, recognitionParallelism);
     }
 }

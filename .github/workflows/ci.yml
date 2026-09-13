@@ -72,6 +72,11 @@ jobs:
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.ProjectionArgMaxPerformanceMain vector \
             | tee benchmark-results/rec-projection-argmax.json
+          for cpu in 1 2 4 8; do
+            java -XX:ActiveProcessorCount=$cpu \
+              -cp "lw-ppocr-core/target/classes:lw-ppocr-benchmark/target/classes" \
+              io.github.lxw112190.ppocr.benchmark.ParallelismPolicyMain 16
+          done | tee benchmark-results/parallelism-policy.jsonl
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.StrideTwoConvPerformanceMain vector \
@@ -130,6 +135,14 @@ jobs:
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector 4 4 \
             | tee benchmark-results/full-ocr-vector-parallel-det320.json
+          java -XX:ActiveProcessorCount=2 -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector auto \
+            | tee benchmark-results/full-ocr-vector-auto-cpu2.json
+          java -XX:ActiveProcessorCount=8 -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector auto \
+            | tee benchmark-results/full-ocr-vector-auto-cpu8.json
       - name: Publish benchmark summary
         run: |
           echo '### LWM loader performance' >> "$GITHUB_STEP_SUMMARY"
@@ -155,6 +168,10 @@ jobs:
           echo '### REC terminal fusion performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/rec-projection-argmax.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### AUTO CPU budget matrix' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/parallelism-policy.jsonl >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### REC stride-two Conv performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
@@ -213,11 +230,18 @@ jobs:
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-vector-parallel-det320.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Full OCR AUTO parallelism (Vector API, ActiveProcessorCount 2/8)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/full-ocr-vector-auto-cpu2.json >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/full-ocr-vector-auto-cpu8.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark result
         uses: actions/upload-artifact@v4
         with:
           name: ppocr-performance
-          path: benchmark-results/*.json
+          path: |
+            benchmark-results/*.json
+            benchmark-results/*.jsonl
 
   release-candidate:
     name: Release candidate bundle

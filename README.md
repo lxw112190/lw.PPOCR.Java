@@ -41,6 +41,13 @@ that share decoded model constants. REC queues the largest estimated width-group
 workloads first so idle workers can immediately take the next group without
 creating duplicate sessions.
 
+For CPU-budgeted scheduling, use
+`setParallelismMode(ParallelismPolicy.AUTO)` (or `setParallelism(0)`). AUTO
+derives one plan from the processors visible to the JVM, caps line workers at
+four, clamps workers to the detected line count, and prevents its planned REC
+worker/intra-op product from exceeding that CPU budget. MANUAL remains the
+default for compatibility; either individual worker setter selects it.
+
 The optional JDK 25 Vector API backend accelerates all Conv configurations used
 by the Tiny models, the DET 2x upsampling ConvTranspose path, MatMul, reductions,
 activations, and binary broadcasting. It also fuses the exact five-node
@@ -87,7 +94,8 @@ lw-ppocr-benchmark/  Dependency-free loader benchmark harness
 GitHub Actions is the build authority for this repository. It compiles and
 tests on JDK 25 across Linux, Windows, and macOS. The Linux performance job
 reports loading, DB postprocess, preprocessing, model workload, and complete
-OCR results for Scalar, Vector, and Vector with four CLS and REC workers. Full OCR
+OCR results for Scalar, Vector, Vector with four CLS and REC workers, and AUTO
+plans under constrained processor counts. Full OCR
 JSON separates stage timing, GC activity, model memory, retained heap, and
 transient heap. Schema 3 measures wall time without the operator profiler and
 runs one separate warmed diagnostic invocation. Aggregate `operators` remain

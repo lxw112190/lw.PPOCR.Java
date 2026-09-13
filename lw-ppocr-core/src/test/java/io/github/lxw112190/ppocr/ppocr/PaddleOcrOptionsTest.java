@@ -16,6 +16,7 @@ public class PaddleOcrOptionsTest {
         Assert.assertEquals(ReadingOrder.HORIZONTAL_LTR, options.getReadingOrder());
         Assert.assertEquals(1, options.getClassificationParallelism());
         Assert.assertEquals(1, options.getRecognitionParallelism());
+        Assert.assertEquals(ParallelismPolicy.MANUAL, options.getParallelismPolicy());
         Assert.assertEquals(960, options.getDetectionMaximumSideLength());
     }
 
@@ -41,6 +42,30 @@ public class PaddleOcrOptionsTest {
         Assert.assertEquals(3, first.getClassificationParallelism());
         Assert.assertEquals(4, first.getRecognitionParallelism());
         Assert.assertEquals(320, first.getDetectionMaximumSideLength());
+        Assert.assertEquals(ParallelismPolicy.MANUAL, first.getParallelismPolicy());
+    }
+
+    @Test
+    public void supportsAutomaticAndUnifiedParallelism() {
+        PaddleOcrOptions automatic = PaddleOcrOptions.builder()
+                .setParallelismMode(ParallelismPolicy.AUTO).build();
+        Assert.assertEquals(ParallelismPolicy.AUTO, automatic.getParallelismPolicy());
+        Assert.assertEquals(ParallelismPolicy.AUTO,
+                PaddleOcrOptions.builder().setParallelism(0).build().getParallelismPolicy());
+        PaddleOcrOptions manual = PaddleOcrOptions.builder().setParallelism(3).build();
+        Assert.assertEquals(ParallelismPolicy.MANUAL, manual.getParallelismPolicy());
+        Assert.assertEquals(3, manual.getClassificationParallelism());
+        Assert.assertEquals(3, manual.getRecognitionParallelism());
+    }
+
+    @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)
+    public void rejectsNullParallelismPolicy() {
+        PaddleOcrOptions.builder().setParallelismMode(null).build();
+    }
+
+    @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)
+    public void rejectsNegativeUnifiedParallelism() {
+        PaddleOcrOptions.builder().setParallelism(-1).build();
     }
 
     @Test(expected = io.github.lxw112190.ppocr.model.OcrException.class)

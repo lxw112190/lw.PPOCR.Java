@@ -17,6 +17,7 @@ import io.github.lxw112190.ppocr.ppocr.PaddleOcrDetector;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrDictionary;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrOptions;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrRecognizer;
+import io.github.lxw112190.ppocr.ppocr.ParallelismPlan;
 import io.github.lxw112190.ppocr.ppocr.PerspectiveCrop;
 import io.github.lxw112190.ppocr.ppocr.RecRecognitionResult;
 import io.github.lxw112190.ppocr.runtime.InferenceProfiler;
@@ -52,10 +53,17 @@ public final class FullOcrPerformanceMain {
         int detectorLimit = args.length > 2
                 ? positive(args[2], "detector limit") : DEFAULT_DETECTOR_LIMIT;
         String backendName = args.length > 3 ? args[3] : "scalar";
-        int recognitionParallelism = args.length > 4
-                ? positive(args[4], "recognition parallelism") : 1;
-        int classificationParallelism = args.length > 5
-                ? positive(args[5], "classification parallelism") : 1;
+        boolean automaticParallelism = args.length > 4 && "auto".equalsIgnoreCase(args[4]);
+        ParallelismPlan automaticPlan = automaticParallelism
+                ? ParallelismPlan.automatic(
+                        Math.max(1, Runtime.getRuntime().availableProcessors()), 16) : null;
+        int recognitionParallelism = automaticParallelism
+                ? automaticPlan.getRecognizerWorkers()
+                : args.length > 4 ? positive(args[4], "recognition parallelism") : 1;
+        int classificationParallelism = automaticParallelism
+                ? automaticPlan.getClassifierWorkers()
+                : args.length > 5 ? positive(args[5], "classification parallelism") : 1;
+        String parallelismPolicy = automaticParallelism ? "auto" : "manual";
         if (detectorLimit < 32) throw new IllegalArgumentException("detector limit must be at least 32");
         KernelBackend backend = createBackend(backendName);
 
@@ -119,7 +127,9 @@ public final class FullOcrPerformanceMain {
             String profileScope = "all-threads";
             System.out.printf(Locale.ROOT,
                     "{\"schema\":3,\"benchmark\":\"%s\",\"backend\":\"%s\","
-                            + "\"features\":{\"rec_projection_fusion\":%s},"
+                            + "\"features\":{\"rec_projection_fusion\":%s,"
+                            + "\"auto_parallelism\":%s},"
+                            + "\"parallelism_policy\":\"%s\","
                             + "\"classification_parallelism\":%d,"
                             + "\"recognition_parallelism\":%d,"
                             + "\"operator_profile_scope\":\"%s\","
@@ -143,7 +153,9 @@ public final class FullOcrPerformanceMain {
                             + "\"gc_time_ms_delta\":%d,\"operators\":%s,"
                             + "\"stage_operators\":%s,\"stage_hot_nodes\":%s}%n",
                     benchmark, backendName,
-                    Boolean.toString(pipeline.isProjectionFusionActive()), classificationParallelism,
+                    Boolean.toString(pipeline.isProjectionFusionActive()),
+                    Boolean.toString(automaticParallelism), parallelismPolicy,
+                    classificationParallelism,
                     recognitionParallelism, profileScope,
                     milliseconds(profiledSample.totalNanos),
                     image.width(), image.height(), detectorLimit, lineCount,

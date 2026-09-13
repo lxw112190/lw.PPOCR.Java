@@ -12,6 +12,8 @@ All notable changes to this project are documented in this file.
   `-Dlwppocr.disableProjectionFusion=true`.
 - Dynamic-width parity coverage at widths 192, 320, 480, 640, and 960, plus a
   focused dense-versus-fused CI benchmark.
+- Opt-in AUTO CPU budgeting with deterministic 1/2/4/8-core worker plans and
+  retained MANUAL controls for advanced callers.
 
 ### Changed
 

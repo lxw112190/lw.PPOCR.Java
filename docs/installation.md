@@ -81,6 +81,19 @@ try (PaddleOcr ocr = PaddleOcr.load(
 }
 ```
 
+也可以让运行时按 JVM 可见处理器统一规划 CLS/REC Worker：
+
+```java
+PaddleOcrOptions options = PaddleOcrOptions.builder()
+        .setDetectionMaximumSideLength(320)
+        .setParallelismMode(ParallelismPolicy.AUTO)
+        .build();
+```
+
+`setParallelism(0)` 是 AUTO 的简写。AUTO 的行级 Worker 最多为 4，并会按检测行数
+收缩；低核环境不会产生独立配置 `CLS=4`、`REC=4` 的超额线程计划。默认仍为
+MANUAL/1，以保持 0.1 的线程与内存行为；`setParallelism(n)` 可同时设置两个手动上限。
+
 启动应用时加入：
 
 ```text
@@ -167,8 +180,8 @@ CLS 会把固定形状的文字行分配到独立 Session worker，所有 worker
 模型常量，只保留各自的执行和预处理工作区。REC 会先按 192/320/480/640/960
 目标宽度分组：同一宽度组内顺序执行，不同
 宽度组按预估工作量从大到小进入共享任务队列，空闲线程会继续领取下一组，最终仍
-按原输入及阅读顺序返回。Session 和模型常量不会按文字行重复创建。两项默认值均为 1，
-低核或严格限制线程的环境无需改动。
+按原输入及阅读顺序返回。Session 和模型常量不会按文字行重复创建。两项默认值均为 1；
+可按上文选择 AUTO，低核或严格限制线程的环境也可继续保持 MANUAL/1。
 
 ## 性能与内存结果
 

@@ -35,6 +35,12 @@ CLS 和 REC 支持相互独立的可选并行度，同时保持输入顺序和�
 文本行分发到共享已解码模型常量的多个 Session；REC 会优先排队预计宽度最大的
 任务组，使空闲 Worker 能立即处理下一组任务，同时避免创建重复 Session。
 
+需要统一 CPU 预算时，可使用
+`setParallelismMode(ParallelismPolicy.AUTO)`（或 `setParallelism(0)`）。AUTO
+会根据 JVM 可见处理器生成一份计划：行级 Worker 最多为 4，并受实际检测行数限制，
+同时保证计划中的 REC Worker 与 intra-op 乘积不超过 CPU 预算。为保持兼容，默认仍为
+MANUAL；调用任一独立 Worker 设置方法也会切回 MANUAL。
+
 可选的 JDK 25 Vector API 后端会加速 Tiny 模型使用的全部 Conv 配置、DET 2×
 上采样 ConvTranspose、MatMul、归约、激活函数和二元广播。它还会在校验张量连接、
 形状、常量和中间结果独占关系后，融合 Tiny 模型使用的精确五节点
@@ -75,7 +81,7 @@ lw-ppocr-benchmark/  无额外依赖的加载和性能基准工具
 
 GitHub Actions 是本仓库的权威构建环境，会在 Linux、Windows 和 macOS 上使用
 JDK 25 编译和测试。Linux 性能任务会输出模型加载、DB 后处理、预处理、模型工作量，
-以及 Scalar、Vector、Vector 四个 CLS/REC Worker 三种模式的完整 OCR 结果。
+以及 Scalar、Vector、Vector 四个 CLS/REC Worker 和受限 CPU 下 AUTO 模式的完整 OCR 结果。
 完整 OCR JSON 会分别记录阶段耗时、GC 活动、模型内存、保留堆和瞬时堆。
 Schema 3 的墙钟时间测量不启用算子分析器，之后再单独运行一次已预热的诊断调用。
 汇总字段 `operators` 仍然保留，`stage_operators` 会拆分 DET、CLS 和 REC；并行模式下
