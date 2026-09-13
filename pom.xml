@@ -6,12 +6,41 @@
 
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-parent</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
     <packaging>pom</packaging>
 
     <name>lw.PPOCR.Java</name>
     <description>Pure Java PP-OCR runtime sharing the LWM model format.</description>
     <url>https://github.com/lxw112190/lw.PPOCR.Java</url>
+
+    <licenses>
+        <license>
+            <name>MIT License</name>
+            <url>https://opensource.org/licenses/MIT</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <developers>
+        <developer>
+            <id>lxw112190</id>
+            <name>天天代码码天天</name>
+            <email>819069052@qq.com</email>
+            <url>https://github.com/lxw112190</url>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/lxw112190/lw.PPOCR.Java.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/lxw112190/lw.PPOCR.Java.git</developerConnection>
+        <url>https://github.com/lxw112190/lw.PPOCR.Java</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub Issues</system>
+        <url>https://github.com/lxw112190/lw.PPOCR.Java/issues</url>
+    </issueManagement>
 
     <modules>
         <module>lw-ppocr-core</module>
@@ -22,8 +51,7 @@
 
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>8</maven.compiler.source>
-        <maven.compiler.target>8</maven.compiler.target>
+        <maven.compiler.release>8</maven.compiler.release>
         <junit.version>4.13.2</junit.version>
     </properties>
 

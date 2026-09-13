@@ -1,0 +1,33 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+## [0.1.0] - 2026-09-13
+
+### Added
+
+- Complete pure-Java PP-OCRv6 Tiny DET, CLS, and REC pipeline.
+- Defensive LWM v0.1 loader with shape, graph, bounds, and checksum validation.
+- Scalar correctness backend targeting the Java 8 API and bytecode contract.
+- Optional JDK 25 Vector API backend with optimized Conv, ConvTranspose,
+  MatMul, activation, reduction, pooling, and binary-broadcast paths.
+- Dynamic DET and REC sessions, reusable workspaces, optional CLS/REC
+  parallelism, DB postprocess, perspective crop, CTC decode, and reading order.
+- ImageIO adapter for `Path`, `InputStream`, and `BufferedImage` inputs.
+- Real-model DET, CLS, REC, and 16-line full OCR Golden tests pinned to
+  `lw.PPOCR.C` commit `9b31f1b`.
+- Linux performance reporting for model loading, preprocessing, DB postprocess,
+  focused kernels, full OCR latency, JVM heap, GC, and hot graph nodes.
+- JDK 25 CI on Linux, Windows, and macOS.
+
+### Compatibility and limits
+
+- The verified model contract is dynamic-shape FP32 PP-OCRv6 Tiny in LWM v0.1.
+- Core and ImageIO artifacts use the Java 8 API/bytecode contract; building the
+  full reactor and using the optional Vector backend require JDK 25.
+- CPU inference only. ONNX parsing, GPU, Android, and arbitrary graph topology
+  are outside the `0.1.0` support contract.
+- This is a pre-1.0 release; public APIs may still evolve in later minor
+  versions.
+
+[0.1.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.1.0

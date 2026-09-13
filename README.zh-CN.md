@@ -2,7 +2,8 @@
 
 [English](README.md)
 
-一个轻量级的纯 Java PP-OCR 推理运行时。
+A lightweight pure-Java PP-OCRv6 inference runtime with no native
+dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 
 - 不依赖 Python
 - 不依赖 Paddle Inference
@@ -49,8 +50,18 @@ CLS 和 REC 支持相互独立的可选并行度，同时保持输入顺序和�
 这个可选模块与 Scalar 正确性路径完全分离。
 
 ```text
-mvn test
+mvn verify
 ```
+
+## 发布版本
+
+`0.1.0` 是首个 1.0 之前的正式版本。Tag 构建会生成发布候选包，其中包含三个运行时
+JAR、PP-OCRv6 Tiny LWM 模型、字典、示例图片、文档和许可证声明。每个 ZIP 都附带
+SHA-256 文件；CI 会先解压候选包并运行一次完整 OCR，再上传构建产物。
+
+当前产物尚未发布到 Maven Central。可以执行 `mvn clean install` 安装到本机 Maven
+仓库，或使用 Tag 对应的 GitHub Actions Artifact 中的 JAR。维护者发布步骤参阅
+[发布清单](docs/releasing.md)，版本变化参阅 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 项目结构
 
@@ -98,14 +109,16 @@ Maven 依赖、模型目录、BGR/ImageIO 用法、生命周期和并发指导�
 
 ## 使用边界
 
-当前经过验证的范围是仓库内动态形状 FP32 PP-OCRv6 Tiny 模型集。运行时不承诺
+`0.1.0` 当前经过验证的范围是仓库内动态形状 FP32 PP-OCRv6 Tiny 模型集。运行时不承诺
 兼容任意 ONNX 拓扑，也不提供自动模型发现、GPU 或 Android 支持。Vector API
 后端是可选组件，对于专门优化范围之外的形状仍会保留 Scalar 回退路径。
 图像解码由可选的 `lw-ppocr-imageio` 模块单独提供。
 
 ## 许可证
 
-本项目采用 [MIT License](LICENSE)，版权所有 © 2026 天天代码码天天。
+Java 源码采用 [MIT License](LICENSE)，版权所有 © 2026 天天代码码天天。
+仓库内 PP-OCRv6 Tiny 模型资产及其 Golden 派生数据按 Apache License 2.0
+重新分发，详情见 [第三方声明](THIRD-PARTY-NOTICES.md)。
 
 ## 联系与支持
 

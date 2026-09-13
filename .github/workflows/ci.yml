@@ -3,6 +3,7 @@ name: Java CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
 
 permissions:
@@ -203,3 +204,110 @@ jobs:
         with:
           name: ppocr-performance
           path: benchmark-results/*.json
+
+  release-candidate:
+    name: Release candidate bundle
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-and-test, performance]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - name: Build and verify release sources
+        run: mvn --batch-mode --no-transfer-progress clean verify
+      - name: Verify tag matches Maven version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(mvn --batch-mode --no-transfer-progress help:evaluate \
+            -Dexpression=project.version -DforceStdout -q)"
+          test "$GITHUB_REF_NAME" = "v$version"
+      - name: Verify release model manifest
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("release/ppocrv6-tiny-manifest.json").read_text("utf-8"))
+          assets = {
+              "det.lwm": Path("lw-ppocr-core/src/test/resources/golden/det/det.lwm"),
+              "cls.lwm": Path("lw-ppocr-core/src/test/resources/golden/cls/cls.lwm"),
+              "rec.lwm": Path("lw-ppocr-core/src/test/resources/golden/rec/rec.lwm"),
+              "ppocr_keys.txt": Path("lw-ppocr-core/src/test/resources/golden/rec/ppocr_keys.txt"),
+              "sample.jpg": Path("lw-ppocr-core/src/test/resources/golden/ocr/sample.jpg"),
+          }
+          if set(manifest["files"]) != set(assets):
+              raise SystemExit("release model manifest file set mismatch")
+          for name, path in assets.items():
+              actual = hashlib.sha256(path.read_bytes()).hexdigest()
+              expected = manifest["files"][name]
+              if actual != expected:
+                  raise SystemExit(f"{name}: expected {expected}, got {actual}")
+          print("release model manifest: verified")
+          PY
+      - name: Stage release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="lw.PPOCR.Java-$GITHUB_REF_NAME"
+          version="${GITHUB_REF_NAME#v}"
+          root="dist/$package"
+          mkdir -p "$root/lib" "$root/models/ppocrv6-tiny"
+          cp "lw-ppocr-core/target/lw-ppocr-core-$version.jar" "$root/lib/"
+          cp "lw-ppocr-imageio/target/lw-ppocr-imageio-$version.jar" "$root/lib/"
+          cp "lw-ppocr-vector/target/lw-ppocr-vector-$version.jar" "$root/lib/"
+          cp lw-ppocr-core/src/test/resources/golden/det/det.lwm \
+            "$root/models/ppocrv6-tiny/"
+          cp lw-ppocr-core/src/test/resources/golden/cls/cls.lwm \
+            "$root/models/ppocrv6-tiny/"
+          cp lw-ppocr-core/src/test/resources/golden/rec/rec.lwm \
+            "$root/models/ppocrv6-tiny/"
+          cp lw-ppocr-core/src/test/resources/golden/rec/ppocr_keys.txt \
+            "$root/models/ppocrv6-tiny/"
+          cp lw-ppocr-core/src/test/resources/golden/ocr/sample.jpg \
+            "$root/models/ppocrv6-tiny/"
+          cp release/ppocrv6-tiny-manifest.json \
+            "$root/models/ppocrv6-tiny/manifest.json"
+          cp README.md README.zh-CN.md CHANGELOG.md LICENSE THIRD-PARTY-NOTICES.md "$root/"
+          cp -R docs licenses "$root/"
+          (
+            cd "$root"
+            find . -type f ! -name SHA256SUMS.txt -print0 \
+              | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          )
+          (
+            cd dist
+            zip -X -q -r "$package.zip" "$package"
+            sha256sum "$package.zip" > "$package.zip.sha256"
+          )
+      - name: Test extracted release candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="lw.PPOCR.Java-$GITHUB_REF_NAME"
+          mkdir -p dist/extracted
+          unzip -q "dist/$package.zip" -d dist/extracted
+          (
+            cd "dist/extracted/$package"
+            sha256sum -c SHA256SUMS.txt
+          )
+          java --add-modules jdk.incubator.vector \
+            -cp "dist/extracted/$package/lib/*:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.ReleasePackageSmokeMain \
+            "dist/extracted/$package"
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: lw-ppocr-java-${{ github.ref_name }}
+          if-no-files-found: error
+          path: |
+            dist/lw.PPOCR.Java-${{ github.ref_name }}.zip
+            dist/lw.PPOCR.Java-${{ github.ref_name }}.zip.sha256

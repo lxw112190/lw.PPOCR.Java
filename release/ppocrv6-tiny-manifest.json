@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "model_set": "ppocrv6-tiny-lwm-v0.1",
+  "source_repository": "https://github.com/lxw112190/lw.PPOCR.C",
+  "source_commit": "9b31f1b",
+  "license": "Apache-2.0",
+  "files": {
+    "det.lwm": "ba9164d371ac7003f90710c3106a344aeb906df2b0f1e7617fcf4608fa8cd66c",
+    "cls.lwm": "d426c23f4758c9f21c5cbd0550ea9b90f1e7c0dd0289e1541e9754dee2e6ed61",
+    "rec.lwm": "59440146ae64068b70441f9c16b5878ccba21e75b41cb27220c8d9cc2d61e0ae",
+    "ppocr_keys.txt": "5911341b8d8bdef3924e1ab7c85094f09cf05107d9983476a10c0ee57dac1d82",
+    "sample.jpg": "30c417c9f758a3b62718729f5a944f7d2e10cdd2bde0e8ce6785523ddb68ffe9"
+  }
+}

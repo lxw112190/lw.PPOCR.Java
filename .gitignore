@@ -1,10 +1,17 @@
 target/
 .maven-repository/
+benchmark-results/
+dist/
+*.rar
 *.class
 *.jar
+*.log
 .idea/
+.vscode/
 *.iml
 .classpath
 .project
 .settings/
 hs_err_pid*
+.DS_Store
+Thumbs.db

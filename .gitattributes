@@ -1,1 +1,6 @@
 lw-ppocr-core/src/test/resources/golden/rec/ppocr_keys.txt -text
+*.lwm -text
+*.f32 -text
+*.bgr -text
+*.jpg -text
+*.ppm -text

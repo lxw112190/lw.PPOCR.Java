@@ -9,6 +9,18 @@
 
 GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windows 和 macOS。
 
+## 获取 0.1.0 构件
+
+当前版本尚未发布到 Maven Central。可以从源码将构件安装到本机 Maven 仓库：
+
+```text
+mvn --batch-mode --no-transfer-progress clean install
+```
+
+完整 Reactor（包括可选 Vector 模块）需要 JDK 25。Tag 构建生成的 GitHub Actions
+Artifact 也会提供 `lw-ppocr-core-0.1.0.jar`、`lw-ppocr-imageio-0.1.0.jar` 和
+`lw-ppocr-vector-0.1.0.jar`，以及 Tiny 模型、字典、示例图片和许可证文件。
+
 ## Maven 模块
 
 应用只使用核心运行时：
@@ -17,7 +29,7 @@ GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windo
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-core</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
@@ -27,7 +39,7 @@ GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windo
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-imageio</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
@@ -40,7 +52,7 @@ DET 的 2 倍上采样 ConvTranspose、广播、激活、归约和 MatMul；其�
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-vector</artifactId>
-    <version>0.1.0-SNAPSHOT</version>
+    <version>0.1.0</version>
 </dependency>
 ```
 
@@ -59,13 +71,13 @@ PaddleOcrOptions options = PaddleOcrOptions.builder()
         .build();
 
 try (PaddleOcr ocr = PaddleOcr.load(
-        Path.of("models/det.lwm"),
-        Path.of("models/cls.lwm"),
-        Path.of("models/rec.lwm"),
-        Path.of("models/ppocr_keys.txt"),
+        Paths.get("models/det.lwm"),
+        Paths.get("models/cls.lwm"),
+        Paths.get("models/rec.lwm"),
+        Paths.get("models/ppocr_keys.txt"),
         options,
         new VectorBackend())) {
-    OcrResult result = PaddleOcrImageIo.recognize(ocr, Path.of("sample.jpg"));
+    OcrResult result = PaddleOcrImageIo.recognize(ocr, Paths.get("sample.jpg"));
 }
 ```
 
@@ -95,10 +107,10 @@ models/
 
 ```java
 try (PaddleOcr ocr = PaddleOcr.load(
-        Path.of("models/det.lwm"),
-        Path.of("models/cls.lwm"),
-        Path.of("models/rec.lwm"),
-        Path.of("models/ppocr_keys.txt"))) {
+        Paths.get("models/det.lwm"),
+        Paths.get("models/cls.lwm"),
+        Paths.get("models/rec.lwm"),
+        Paths.get("models/ppocr_keys.txt"))) {
     BgrImage image = new BgrImage(pixels, width, height, stride);
     OcrResult result = ocr.recognize(image);
 }
@@ -122,7 +134,7 @@ PaddleOcr ocr = PaddleOcr.load(detectorPath, null, recognizerPath, dictionaryPat
 
 ```java
 try (PaddleOcr ocr = PaddleOcr.load(detector, classifier, recognizer, dictionary)) {
-    OcrResult result = PaddleOcrImageIo.recognize(ocr, Path.of("sample.png"));
+    OcrResult result = PaddleOcrImageIo.recognize(ocr, Paths.get("sample.png"));
 }
 ```
 
@@ -176,7 +188,11 @@ OCR。性能摘要明确区分 Scalar、Vector 和 Vector CLS×4/REC×4，并报
 
 ## 当前范围
 
-v0.1-preview 当前验证的是动态形状 FP32 PP-OCRv6 Tiny 合同，Scalar 是稳定参考
+v0.1.0 当前验证的是动态形状 FP32 PP-OCRv6 Tiny 合同，Scalar 是稳定参考
 路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU 或 Android；Vector API
 后端是 JDK 25 可选加速路径，对优化范围外的通用形状回退 Scalar。性能数字仅
 用于同机研发比较，不构成发布性能承诺。
+
+Java 源码采用 MIT License。仓库及发布候选包中的 PP-OCRv6 Tiny 模型、字典、
+示例图片和派生 Golden 数据按 Apache License 2.0 重新分发；使用和再分发前请阅读
+根目录的 `THIRD-PARTY-NOTICES.md` 与 `licenses/PaddleOCR-models-APACHE-2.0.txt`。

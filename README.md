@@ -2,7 +2,8 @@
 
 [中文说明](README.zh-CN.md)
 
-A lightweight pure-Java PP-OCR inference runtime.
+A lightweight pure-Java PP-OCRv6 inference runtime with no native
+dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 
 - No Python
 - No Paddle Inference
@@ -58,8 +59,20 @@ API at compile time and launch time. The optional module is deliberately
 separate and has no role in Scalar correctness.
 
 ```text
-mvn test
+mvn verify
 ```
+
+## Release
+
+`0.1.0` is the first pre-1.0 release. Tagged builds produce a release-candidate
+bundle containing the three runtime JARs, PP-OCRv6 Tiny LWM models, dictionary,
+sample image, documentation, and license notices. Each ZIP has a SHA-256
+sidecar, and CI runs full OCR from the extracted bundle before uploading it.
+
+The artifacts are not published to Maven Central yet. Install them into the
+local Maven repository with `mvn clean install`, or use the JARs from the tagged
+GitHub Actions artifact. See [docs/releasing.md](docs/releasing.md) for the
+maintainer checklist and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Project layout
 
@@ -115,6 +128,12 @@ compatibility, automatic model discovery, GPU, or Android support. The Vector
 API backend is optional and keeps Scalar fallbacks for shapes outside its
 optimized paths. Image decoding is available separately through the optional
 `lw-ppocr-imageio` module.
+
+## License
+
+The Java source is available under the [MIT License](LICENSE). The committed
+PP-OCRv6 Tiny model assets and derived Golden fixtures are redistributed under
+Apache License 2.0; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
 ## 联系与支持
 
