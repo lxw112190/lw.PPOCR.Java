@@ -143,6 +143,17 @@ jobs:
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector auto \
             | tee benchmark-results/full-ocr-vector-auto-cpu8.json
+          java -Xms64m -Xmx512m \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 2 5 320 scalar auto \
+            | tee benchmark-results/full-ocr-allocation-scalar.json
+          java -XX:StartFlightRecording=filename=benchmark-results/full-ocr-allocation-vector.jfr,settings=profile,dumponexit=true \
+            -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 2 5 320 vector auto \
+            | tee benchmark-results/full-ocr-allocation-vector.json
+          jfr view --width 160 allocation-by-class benchmark-results/full-ocr-allocation-vector.jfr \
+            | tee benchmark-results/full-ocr-allocation-vector-by-class.txt
       - name: Publish benchmark summary
         run: |
           echo '### LWM loader performance' >> "$GITHUB_STEP_SUMMARY"
@@ -235,6 +246,15 @@ jobs:
           cat benchmark-results/full-ocr-vector-auto-cpu2.json >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-vector-auto-cpu8.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Full OCR allocation report (Scalar and Vector API, DET 320, AUTO)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/full-ocr-allocation-scalar.json >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/full-ocr-allocation-vector.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Top allocation classes (JFR)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          head -n 30 benchmark-results/full-ocr-allocation-vector-by-class.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
       - name: Upload benchmark result
         uses: actions/upload-artifact@v4
         with:
@@ -242,6 +262,8 @@ jobs:
           path: |
             benchmark-results/*.json
             benchmark-results/*.jsonl
+            benchmark-results/*.txt
+            benchmark-results/*.jfr
 
   release-candidate:
     name: Release candidate bundle

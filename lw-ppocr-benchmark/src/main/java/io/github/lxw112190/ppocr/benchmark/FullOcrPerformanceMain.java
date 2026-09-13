@@ -69,6 +69,7 @@ public final class FullOcrPerformanceMain {
 
         BgrImage image = loadImage();
         MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
+        ThreadAllocationProbe allocationProbe = ThreadAllocationProbe.create();
         long heapBefore = stabilizedHeap(memory);
         long loadStart = System.nanoTime();
         try (ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend,
@@ -83,6 +84,7 @@ public final class FullOcrPerformanceMain {
             resetHeapPeaks();
             long gcCountBefore = gcCount();
             long gcTimeBefore = gcTimeMillis();
+            long allocatedBefore = allocationProbe.totalAllocatedBytes();
             long[] total = new long[iterations];
             long[] detection = new long[iterations];
             long[] crop = new long[iterations];
@@ -102,6 +104,7 @@ public final class FullOcrPerformanceMain {
                 sorting[i] = sample.sortingNanos;
                 lineCount = sample.lines;
             }
+            long allocatedBytes = allocationProbe.deltaSince(allocatedBefore);
             long peakHeap = Math.max(heapPeakUsed(), usedHeap(memory));
             long gcCountDelta = nonNegativeDelta(gcCount(), gcCountBefore);
             long gcTimeDelta = nonNegativeDelta(gcTimeMillis(), gcTimeBefore);
@@ -126,7 +129,7 @@ public final class FullOcrPerformanceMain {
                     ? "full-ocr-default" : "full-ocr-det" + detectorLimit;
             String profileScope = "all-threads";
             System.out.printf(Locale.ROOT,
-                    "{\"schema\":3,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                    "{\"schema\":4,\"benchmark\":\"%s\",\"backend\":\"%s\","
                             + "\"features\":{\"rec_projection_fusion\":%s,"
                             + "\"auto_parallelism\":%s},"
                             + "\"parallelism_policy\":\"%s\","
@@ -150,7 +153,11 @@ public final class FullOcrPerformanceMain {
                             + "\"peak_heap_bytes\":%d,\"peak_heap_delta_bytes\":%d,"
                             + "\"transient_heap_bytes\":%d,"
                             + "\"heap_peak_method\":\"mxbean-pool-sum\",\"gc_count_delta\":%d,"
-                            + "\"gc_time_ms_delta\":%d,\"operators\":%s,"
+                            + "\"gc_time_ms_delta\":%d,"
+                            + "\"allocation_measurement\":\"%s\","
+                            + "\"allocated_bytes_total\":%d,"
+                            + "\"allocated_bytes_per_ocr\":%d,"
+                            + "\"allocated_bytes_per_line\":%d,\"operators\":%s,"
                             + "\"stage_operators\":%s,\"stage_hot_nodes\":%s}%n",
                     benchmark, backendName,
                     Boolean.toString(pipeline.isProjectionFusionActive()),
@@ -168,6 +175,9 @@ public final class FullOcrPerformanceMain {
                     heapBefore, heapAfterLoad, heapAfterLoad, modelHeap, heapAfter, heapAfter,
                     heapAfterGc, retainedHeap,
                     peakHeap, peakDelta, transientHeap, gcCountDelta, gcTimeDelta,
+                    allocationProbe.method(), allocatedBytes,
+                    perOperation(allocatedBytes, iterations),
+                    perOperation(allocatedBytes, (long) iterations * Math.max(1, lineCount)),
                     operatorJson(profiledSample.detectionProfile,
                             profiledSample.classificationProfile,
                             profiledSample.recognitionProfile),
@@ -306,6 +316,11 @@ public final class FullOcrPerformanceMain {
         return Math.max(0L, after - before);
     }
 
+    private static long perOperation(long total, long operations) {
+        if (total < 0L || operations <= 0L) return -1L;
+        return (total + operations / 2L) / operations;
+    }
+
     private static int positive(String value, String name) {
         try {
             int parsed = Integer.parseInt(value);
@@ -404,6 +419,9 @@ public final class FullOcrPerformanceMain {
         private final PaddleOcrOptions options = PaddleOcrOptions.defaults();
         private final int recognitionParallelism;
         private final int classificationParallelism;
+        private final ArrayList<OcrLineResult> lines = new ArrayList<OcrLineResult>();
+        private final ArrayList<BgrImage> crops = new ArrayList<BgrImage>();
+        private boolean[] rotations = new boolean[0];
 
         private ProfiledPipeline(PaddleOcrDetector detector, PaddleOcrClassifier classifier,
                                  PaddleOcrRecognizer recognizer, int recognitionParallelism,
@@ -442,65 +460,71 @@ public final class FullOcrPerformanceMain {
             }
             sample.detectionNanos = System.nanoTime() - start;
 
-            List<OcrLineResult> lines = new ArrayList<OcrLineResult>(boxes.size());
-            List<BgrImage> crops = new ArrayList<BgrImage>(boxes.size());
-            List<Boolean> rotations = new ArrayList<Boolean>(boxes.size());
-            for (int line = 0; line < boxes.size(); line++) {
-                DetectionBox box = boxes.get(line);
-                start = System.nanoTime();
-                BgrImage crop = cropper.crop(source, box, line);
-                sample.cropNanos += System.nanoTime() - start;
-                crops.add(crop);
-            }
-            start = System.nanoTime();
-            List<ClsClassificationResult> classifications;
-            if (profileOperators) {
-                try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
-                    classifications = classifier.classifyAll(crops, classificationParallelism);
-                    sample.classificationProfile = profiler.snapshot();
-                }
-            } else {
-                classifications = classifier.classifyAll(crops, classificationParallelism);
-            }
-            sample.classificationNanos = System.nanoTime() - start;
-            for (int line = 0; line < boxes.size(); line++) {
-                BgrImage crop = crops.get(line);
-                ClsClassificationResult classification = classifications.get(line);
-                boolean rotated = false;
-                if (classification.requiresRotation(options.getClassifierThreshold())) {
+            lines.clear();
+            crops.clear();
+            lines.ensureCapacity(boxes.size());
+            crops.ensureCapacity(boxes.size());
+            if (rotations.length < boxes.size()) rotations = new boolean[boxes.size()];
+            try {
+                for (int line = 0; line < boxes.size(); line++) {
+                    DetectionBox box = boxes.get(line);
                     start = System.nanoTime();
-                    crop = BgrTransforms.rotate180(crop);
-                    sample.rotationNanos += System.nanoTime() - start;
-                    rotated = true;
+                    BgrImage crop = cropper.crop(source, box, line);
+                    sample.cropNanos += System.nanoTime() - start;
+                    crops.add(crop);
                 }
-                crops.set(line, crop);
-                rotations.add(rotated);
-            }
-            start = System.nanoTime();
-            List<RecRecognitionResult> recognitions;
-            if (profileOperators) {
-                try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
+                start = System.nanoTime();
+                List<ClsClassificationResult> classifications;
+                if (profileOperators) {
+                    try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
+                        classifications = classifier.classifyAll(crops, classificationParallelism);
+                        sample.classificationProfile = profiler.snapshot();
+                    }
+                } else {
+                    classifications = classifier.classifyAll(crops, classificationParallelism);
+                }
+                sample.classificationNanos = System.nanoTime() - start;
+                for (int line = 0; line < boxes.size(); line++) {
+                    BgrImage crop = crops.get(line);
+                    ClsClassificationResult classification = classifications.get(line);
+                    boolean rotated = false;
+                    if (classification.requiresRotation(options.getClassifierThreshold())) {
+                        start = System.nanoTime();
+                        crop = BgrTransforms.rotate180(crop);
+                        sample.rotationNanos += System.nanoTime() - start;
+                        rotated = true;
+                    }
+                    crops.set(line, crop);
+                    rotations[line] = rotated;
+                }
+                start = System.nanoTime();
+                List<RecRecognitionResult> recognitions;
+                if (profileOperators) {
+                    try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
+                        recognitions = recognizer.recognizeAll(crops, recognitionParallelism);
+                        sample.recognitionProfile = profiler.snapshot();
+                    }
+                } else {
                     recognitions = recognizer.recognizeAll(crops, recognitionParallelism);
-                    sample.recognitionProfile = profiler.snapshot();
                 }
-            } else {
-                recognitions = recognizer.recognizeAll(crops, recognitionParallelism);
+                sample.recognitionNanos = System.nanoTime() - start;
+                for (int i = 0; i < boxes.size(); i++) {
+                    RecRecognitionResult recognition = recognitions.get(i);
+                    ClsClassificationResult classification = classifications.get(i);
+                    DetectionBox box = boxes.get(i);
+                    lines.add(new OcrLineResult(box, recognition.getText(), recognition.getScore(),
+                            classification, rotations[i]));
+                }
+                start = System.nanoTime();
+                OcrResult result = new OcrResult(lines).sorted(options.getReadingOrder());
+                sample.sortingNanos = System.nanoTime() - start;
+                sample.lines = result.getLines().size();
+                sample.totalNanos = System.nanoTime() - totalStart;
+                return sample;
+            } finally {
+                lines.clear();
+                crops.clear();
             }
-            sample.recognitionNanos = System.nanoTime() - start;
-            for (int i = 0; i < boxes.size(); i++) {
-                RecRecognitionResult recognition = recognitions.get(i);
-                ClsClassificationResult classification = classifications.get(i);
-                boolean rotated = rotations.get(i);
-                DetectionBox box = boxes.get(i);
-                lines.add(new OcrLineResult(box, recognition.getText(), recognition.getScore(),
-                        classification, rotated));
-            }
-            start = System.nanoTime();
-            OcrResult result = new OcrResult(lines).sorted(options.getReadingOrder());
-            sample.sortingNanos = System.nanoTime() - start;
-            sample.lines = result.getLines().size();
-            sample.totalNanos = System.nanoTime() - totalStart;
-            return sample;
         }
 
         private List<DetectionBox> detect(BgrImage source) {
@@ -530,5 +554,46 @@ public final class FullOcrPerformanceMain {
         private InferenceProfiler.Profile detectionProfile;
         private InferenceProfiler.Profile classificationProfile;
         private InferenceProfiler.Profile recognitionProfile;
+    }
+
+    /** Optional HotSpot allocation counter; unavailable JVMs report -1 without failing CI. */
+    private static final class ThreadAllocationProbe {
+        private final com.sun.management.ThreadMXBean bean;
+
+        private ThreadAllocationProbe(com.sun.management.ThreadMXBean bean) {
+            this.bean = bean;
+        }
+
+        private static ThreadAllocationProbe create() {
+            java.lang.management.ThreadMXBean base = ManagementFactory.getThreadMXBean();
+            if (!(base instanceof com.sun.management.ThreadMXBean)) {
+                return new ThreadAllocationProbe(null);
+            }
+            com.sun.management.ThreadMXBean bean = (com.sun.management.ThreadMXBean) base;
+            if (!bean.isThreadAllocatedMemorySupported()) return new ThreadAllocationProbe(null);
+            if (!bean.isThreadAllocatedMemoryEnabled()) bean.setThreadAllocatedMemoryEnabled(true);
+            return new ThreadAllocationProbe(bean);
+        }
+
+        private long totalAllocatedBytes() {
+            if (bean == null) return -1L;
+            long[] ids = ManagementFactory.getThreadMXBean().getAllThreadIds();
+            long[] bytes = bean.getThreadAllocatedBytes(ids);
+            long total = 0L;
+            for (long value : bytes) {
+                if (value >= 0L) total += value;
+            }
+            return total;
+        }
+
+        private long deltaSince(long before) {
+            if (before < 0L) return -1L;
+            long after = totalAllocatedBytes();
+            return after < 0L ? -1L : nonNegativeDelta(after, before);
+        }
+
+        private String method() {
+            return bean == null ? "unavailable" : "hotspot-thread-mxbean-all-live-threads";
+        }
     }
 }

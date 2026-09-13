@@ -14,11 +14,15 @@ All notable changes to this project are documented in this file.
   focused dense-versus-fused CI benchmark.
 - Opt-in AUTO CPU budgeting with deterministic 1/2/4/8-core worker plans and
   retained MANUAL controls for advanced callers.
+- Full OCR allocation reporting through HotSpot thread counters, with an
+  uploaded JFR recording and top allocation-class summary in Linux CI.
 
 ### Changed
 
 - REC sessions no longer retain the dense `[T,C]` probability matrix when the
   supported terminal pattern is active.
+- Synchronous OCR calls reuse line, crop, classification, recognition, rotation,
+  REC width-group, and task-future staging storage at their high-water sizes.
 
 ## [0.1.0] - 2026-09-13
 

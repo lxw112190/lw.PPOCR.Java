@@ -96,12 +96,15 @@ tests on JDK 25 across Linux, Windows, and macOS. The Linux performance job
 reports loading, DB postprocess, preprocessing, model workload, and complete
 OCR results for Scalar, Vector, Vector with four CLS and REC workers, and AUTO
 plans under constrained processor counts. Full OCR
-JSON separates stage timing, GC activity, model memory, retained heap, and
-transient heap. Schema 3 measures wall time without the operator profiler and
+JSON separates stage timing, allocated bytes per OCR and per line, GC activity,
+model memory, retained heap, and transient heap. Schema 4 measures wall time without the operator profiler and
 runs one separate warmed diagnostic invocation. Aggregate `operators` remain
 available, while `stage_operators` separates DET, CLS, and REC; parallel operator
 time is the sum across participating threads. `stage_hot_nodes` reports the
 slowest resolved graph nodes and their tensor shapes for targeted tuning.
+The allocation run reports both Scalar and Vector backends, uploads the complete
+Vector JFR recording, and publishes its top allocation classes, so object churn
+can be traced separately from retained heap.
 Focused benchmarks track the `60 x 80` by `80 x 6906` REC projection MatMul and
 the fused REC terminal path (`MatMul + bias + Softmax + ArgMax`). Supported REC
 graphs use the fused path by default, retaining one class row plus compact CTC
@@ -123,8 +126,8 @@ separated from backend speedups.
 Performance output is a development signal only; v0.x does not use it as a release gate.
 
 Prepared inference sessions, preprocessing arrays, DB geometry scratch space,
-and per-line perspective-crop pixel buffers are reused across synchronous OCR
-calls. A `PaddleOcr` instance is therefore intended for one caller at a time;
+per-line perspective-crop pixel buffers, width groups, and task staging arrays
+are reused across synchronous OCR calls. A `PaddleOcr` instance is therefore intended for one caller at a time;
 use separate instances or `OcrWorkerPool` for concurrent requests.
 
 For applications using AWT/ImageIO, `lw-ppocr-imageio` also provides

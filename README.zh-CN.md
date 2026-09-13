@@ -82,11 +82,14 @@ lw-ppocr-benchmark/  无额外依赖的加载和性能基准工具
 GitHub Actions 是本仓库的权威构建环境，会在 Linux、Windows 和 macOS 上使用
 JDK 25 编译和测试。Linux 性能任务会输出模型加载、DB 后处理、预处理、模型工作量，
 以及 Scalar、Vector、Vector 四个 CLS/REC Worker 和受限 CPU 下 AUTO 模式的完整 OCR 结果。
-完整 OCR JSON 会分别记录阶段耗时、GC 活动、模型内存、保留堆和瞬时堆。
-Schema 3 的墙钟时间测量不启用算子分析器，之后再单独运行一次已预热的诊断调用。
+完整 OCR JSON 会分别记录阶段耗时、单次 OCR/单行分配字节数、GC 活动、模型内存、
+保留堆和瞬时堆。Schema 4 的墙钟时间测量不启用算子分析器，之后再单独运行一次
+已预热的诊断调用。
 汇总字段 `operators` 仍然保留，`stage_operators` 会拆分 DET、CLS 和 REC；并行模式下
 的算子时间是所有参与线程耗时之和。`stage_hot_nodes` 会报告最慢的已解析图节点及其
 张量形状，便于定向优化。
+分配专项任务会同时报告 Scalar 和 Vector 后端，上传完整的 Vector JFR 记录，并在
+CI 摘要中列出主要分配类型，便于把对象抖动与保留堆占用分开定位。
 
 专项性能基准覆盖以下关键工作负载：
 
@@ -106,8 +109,8 @@ Schema 3 的墙钟时间测量不启用算子分析器，之后再单独运行�
 专项基准可以把内核加速与完整流水线的调度噪声分开。性能输出仅作为开发信号；
 v0.x 阶段不会将其作为发布门禁。
 
-同步 OCR 调用之间会复用已准备好的推理 Session、预处理数组、DB 几何临时空间，
-以及逐行透视裁剪像素缓冲区。因此一个 `PaddleOcr` 实例设计为同一时刻只由一个
+同步 OCR 调用之间会复用已准备好的推理 Session、预处理数组、DB 几何临时空间、
+逐行透视裁剪像素缓冲区、REC 宽度分组和任务编排数组。因此一个 `PaddleOcr` 实例设计为同一时刻只由一个
 调用方使用；需要并发时，请使用独立实例或 `OcrWorkerPool`。
 
 对于使用 AWT/ImageIO 的应用，`lw-ppocr-imageio` 还提供面向 `Path`、
