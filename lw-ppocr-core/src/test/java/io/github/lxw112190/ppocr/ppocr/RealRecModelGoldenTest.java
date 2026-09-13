@@ -8,6 +8,7 @@ import io.github.lxw112190.ppocr.runtime.CtcProjectionSession;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import org.junit.Assert;
 import org.junit.Test;
@@ -50,12 +51,25 @@ public final class RealRecModelGoldenTest {
              PaddleOcrDictionary dictionary = PaddleOcrDictionary.load(GoldenTestSupport.resource(
                      RealRecModelGoldenTest.class, RESOURCE_ROOT + "ppocr_keys.txt"));
              PaddleOcrRecognizer recognizer = new PaddleOcrRecognizer(model, dictionary)) {
-            RecRecognitionResult result = recognizer.recognize(new io.github.lxw112190.ppocr.image.BgrImage(
-                    pixels, 7, 5, 21));
+            io.github.lxw112190.ppocr.image.BgrImage source =
+                    new io.github.lxw112190.ppocr.image.BgrImage(pixels, 7, 5, 21);
+            RecRecognitionResult result = recognizer.recognize(source);
             Assert.assertEquals("2", result.getText());
             Assert.assertEquals(1, result.getEmittedCount());
             Assert.assertEquals(68, result.getResizedWidth());
             Assert.assertEquals(0.217422441f, result.getScore(), 1.0e-4f);
+
+            java.util.List<io.github.lxw112190.ppocr.image.BgrImage> batch =
+                    Arrays.asList(source, source, source);
+            RecRecognitionResult[] reusable = new RecRecognitionResult[batch.size()];
+            recognizer.recognizeAllInto(batch, 3, reusable);
+            RecRecognitionResult firstResult = reusable[0];
+            recognizer.recognizeAllInto(batch, 2, reusable);
+            for (RecRecognitionResult item : reusable) {
+                Assert.assertEquals(firstResult.getText(), item.getText());
+                Assert.assertEquals(firstResult.getScore(), item.getScore(), 0.0f);
+                Assert.assertEquals(firstResult.getResizedWidth(), item.getResizedWidth());
+            }
         }
     }
 

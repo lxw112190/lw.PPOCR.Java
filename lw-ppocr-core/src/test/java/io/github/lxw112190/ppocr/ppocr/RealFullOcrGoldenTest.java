@@ -9,16 +9,16 @@ import org.junit.Test;
 public final class RealFullOcrGoldenTest {
     @Test
     public void matchesPinnedCPipeline() throws Exception {
-        assertPipeline(PaddleOcrOptions.defaults());
+        assertPipeline(PaddleOcrOptions.defaults(), true);
     }
 
     @Test
     public void automaticParallelismPreservesPinnedPipelineOutput() throws Exception {
         assertPipeline(PaddleOcrOptions.builder()
-                .setParallelismMode(ParallelismPolicy.AUTO).build());
+                .setParallelismMode(ParallelismPolicy.AUTO).build(), false);
     }
 
-    private static void assertPipeline(PaddleOcrOptions options) throws Exception {
+    private static void assertPipeline(PaddleOcrOptions options, boolean verifyReuse) throws Exception {
         BgrImage image = FullOcrGoldenFixture.loadImage(RealFullOcrGoldenTest.class);
         try (LwmModel detectorModel = FullOcrGoldenFixture.loadModel(
                     RealFullOcrGoldenTest.class, FullOcrGoldenFixture.ROOT + "det/det.lwm");
@@ -31,7 +31,12 @@ public final class RealFullOcrGoldenTest {
              PaddleOcrDictionary dictionary = FullOcrGoldenFixture.loadDictionary(RealFullOcrGoldenTest.class);
              PaddleOcrRecognizer recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary);
              PaddleOcr ocr = new PaddleOcr(detector, classifier, recognizer, options)) {
-            FullOcrGoldenFixture.assertMatches(ocr.recognize(image));
+            OcrResult first = ocr.recognize(image);
+            FullOcrGoldenFixture.assertMatches(first);
+            if (verifyReuse) {
+                FullOcrGoldenFixture.assertMatches(ocr.recognize(image));
+                FullOcrGoldenFixture.assertMatches(first);
+            }
         }
     }
 }

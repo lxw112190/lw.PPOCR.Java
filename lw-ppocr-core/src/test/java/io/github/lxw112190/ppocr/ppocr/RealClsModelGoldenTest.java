@@ -49,6 +49,13 @@ public final class RealClsModelGoldenTest {
                         parallel.get(i).getResizedWidth());
                 Assert.assertEquals(expected.get(i).getScore(), parallel.get(i).getScore(), 0.0f);
             }
+
+            ClsClassificationResult[] reusable = new ClsClassificationResult[inputs.size()];
+            classifier.classifyAllInto(inputs, 4, reusable);
+            ClsClassificationResult firstResult = reusable[0];
+            classifier.classifyAllInto(inputs, 2, reusable);
+            Assert.assertEquals(firstResult.getLabel(), reusable[0].getLabel());
+            Assert.assertEquals(firstResult.getScore(), reusable[0].getScore(), 0.0f);
         }
     }
 

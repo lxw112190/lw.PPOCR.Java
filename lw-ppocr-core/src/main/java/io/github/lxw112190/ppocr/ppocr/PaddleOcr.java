@@ -8,6 +8,7 @@ import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 /** Pure-Java DET/CLS/REC OCR pipeline over decoded BGR images. */
@@ -17,6 +18,11 @@ public final class PaddleOcr implements AutoCloseable {
     private final PaddleOcrRecognizer recognizer;
     private final PerspectiveCrop.Workspace cropper;
     private final PaddleOcrOptions options;
+    private final ArrayList<OcrLineResult> lineStaging;
+    private final ArrayList<BgrImage> cropStaging;
+    private ClsClassificationResult[] classificationStaging;
+    private RecRecognitionResult[] recognitionStaging;
+    private boolean[] rotationStaging;
     private boolean closed;
 
     /** Takes ownership of all supplied components; classifier may be null to disable CLS. */
@@ -44,6 +50,11 @@ public final class PaddleOcr implements AutoCloseable {
         this.recognizer = recognizer;
         this.cropper = new PerspectiveCrop.Workspace();
         this.options = options;
+        this.lineStaging = new ArrayList<OcrLineResult>();
+        this.cropStaging = new ArrayList<BgrImage>();
+        this.classificationStaging = new ClsClassificationResult[0];
+        this.recognitionStaging = new RecRecognitionResult[0];
+        this.rotationStaging = new boolean[0];
     }
 
     public static PaddleOcr load(Path detectorPath, Path classifierPath,
@@ -89,44 +100,64 @@ public final class PaddleOcr implements AutoCloseable {
                 options.getDetectionBitmapThreshold(), options.getDetectionBoxThreshold(),
                 options.getDetectionUnclipRatio(), options.isDetectionDilation(),
                 options.getMaxDetectionCandidates());
-        List<OcrLineResult> lines = new ArrayList<OcrLineResult>(boxes.size());
         ParallelismPlan parallelism = options.parallelismPlan(boxes.size());
-        List<BgrImage> crops = new ArrayList<BgrImage>(boxes.size());
-        List<Boolean> rotations = new ArrayList<Boolean>(boxes.size());
-        for (int i = 0; i < boxes.size(); i++) {
-            crops.add(cropper.crop(source, boxes.get(i), i));
-        }
-        List<ClsClassificationResult> classifications;
-        if (classifier == null) {
-            classifications = new ArrayList<ClsClassificationResult>(boxes.size());
-            for (int i = 0; i < boxes.size(); i++) classifications.add(null);
-        } else {
-            classifications = classifier.classifyAll(crops,
-                    parallelism.getClassifierWorkers());
-        }
-        for (int i = 0; i < boxes.size(); i++) {
-            BgrImage crop = crops.get(i);
-            ClsClassificationResult classification = classifications.get(i);
-            boolean rotated = false;
-            if (classification != null &&
-                    classification.requiresRotation(options.getClassifierThreshold())) {
-                crop = BgrTransforms.rotate180(crop);
-                crops.set(i, crop);
-                rotated = true;
+        prepareStaging(boxes.size());
+        try {
+            for (int i = 0; i < boxes.size(); i++) {
+                cropStaging.add(cropper.crop(source, boxes.get(i), i));
             }
-            rotations.add(rotated);
+            if (classifier == null) {
+                Arrays.fill(classificationStaging, 0, boxes.size(), null);
+            } else {
+                classifier.classifyAllInto(cropStaging,
+                        parallelism.getClassifierWorkers(), classificationStaging);
+            }
+            for (int i = 0; i < boxes.size(); i++) {
+                BgrImage crop = cropStaging.get(i);
+                ClsClassificationResult classification = classificationStaging[i];
+                boolean rotated = false;
+                if (classification != null &&
+                        classification.requiresRotation(options.getClassifierThreshold())) {
+                    crop = BgrTransforms.rotate180(crop);
+                    cropStaging.set(i, crop);
+                    rotated = true;
+                }
+                rotationStaging[i] = rotated;
+            }
+            recognizer.recognizeAllInto(cropStaging,
+                    parallelism.getRecognizerWorkers(), recognitionStaging);
+            for (int i = 0; i < boxes.size(); i++) {
+                RecRecognitionResult recognition = recognitionStaging[i];
+                ClsClassificationResult classification = classificationStaging[i];
+                DetectionBox box = boxes.get(i);
+                lineStaging.add(new OcrLineResult(box, recognition.getText(), recognition.getScore(),
+                        classification, rotationStaging[i]));
+            }
+            return new OcrResult(lineStaging).sorted(options.getReadingOrder());
+        } finally {
+            clearStaging(boxes.size());
         }
-        List<RecRecognitionResult> recognitions = recognizer.recognizeAll(
-                crops, parallelism.getRecognizerWorkers());
-        for (int i = 0; i < boxes.size(); i++) {
-            RecRecognitionResult recognition = recognitions.get(i);
-            ClsClassificationResult classification = classifications.get(i);
-            boolean rotated = rotations.get(i);
-            DetectionBox box = boxes.get(i);
-            lines.add(new OcrLineResult(box, recognition.getText(), recognition.getScore(),
-                    classification, rotated));
+    }
+
+    private void prepareStaging(int size) {
+        lineStaging.clear();
+        cropStaging.clear();
+        lineStaging.ensureCapacity(size);
+        cropStaging.ensureCapacity(size);
+        if (classificationStaging.length < size) {
+            classificationStaging = new ClsClassificationResult[size];
         }
-        return new OcrResult(lines).sorted(options.getReadingOrder());
+        if (recognitionStaging.length < size) {
+            recognitionStaging = new RecRecognitionResult[size];
+        }
+        if (rotationStaging.length < size) rotationStaging = new boolean[size];
+    }
+
+    private void clearStaging(int size) {
+        lineStaging.clear();
+        cropStaging.clear();
+        Arrays.fill(classificationStaging, 0, size, null);
+        Arrays.fill(recognitionStaging, 0, size, null);
     }
 
     @Override
