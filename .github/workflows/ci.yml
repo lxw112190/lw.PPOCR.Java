@@ -210,6 +210,8 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build-and-test, performance]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Check out source
         uses: actions/checkout@v4
@@ -311,3 +313,36 @@ jobs:
           path: |
             dist/lw.PPOCR.Java-${{ github.ref_name }}.zip
             dist/lw.PPOCR.Java-${{ github.ref_name }}.zip.sha256
+      - name: Publish GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          version="${tag#v}"
+          package="lw.PPOCR.Java-$tag"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists; refusing to overwrite it."
+            exit 1
+          fi
+          python - "$version" <<'PY'
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1]
+          changelog = Path("CHANGELOG.md").read_text("utf-8")
+          heading = f"## [{version}]"
+          start = changelog.find(heading)
+          if start < 0:
+              raise SystemExit(f"missing changelog section: {heading}")
+          end = changelog.find("\n## [", start + len(heading))
+          notes = changelog[start:] if end < 0 else changelog[start:end]
+          Path("dist/release-notes.md").write_text(notes.strip() + "\n", "utf-8")
+          PY
+          gh release create "$tag" \
+            "dist/$package.zip" \
+            "dist/$package.zip.sha256" \
+            --verify-tag \
+            --title "lw.PPOCR.Java $tag" \
+            --notes-file dist/release-notes.md

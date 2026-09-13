@@ -27,11 +27,12 @@ git push origin v0.1.0
 
 Tag CI 会拒绝与 POM 版本不一致的 Tag。它会重新运行测试，生成
 `lw.PPOCR.Java-v0.1.0.zip` 和 `lw.PPOCR.Java-v0.1.0.zip.sha256`，解压后使用包内
-JAR、模型、字典和示例图片运行一次 16 行完整 OCR，再上传 GitHub Actions Artifact。
+JAR、模型、字典和示例图片运行一次 16 行完整 OCR。全部验证成功后，CI 会创建同名
+GitHub Release、上传 ZIP 与 `.sha256`，并保留相同文件作为 Actions Artifact。
 
 ## 3. 验证候选包
 
-从 Tag 对应的 Actions 运行下载 Artifact，在新的空目录中校验：
+从 Tag 对应的 GitHub Release 下载 ZIP 与 `.sha256`，在新的空目录中校验：
 
 Linux/macOS：
 
@@ -63,11 +64,11 @@ Get-Content .\SHA256SUMS.txt | ForEach-Object {
 Windows 内部文件清单使用 GNU `sha256sum` 格式，上述 PowerShell 会逐项核对其中的
 全部文件，并同时检查外层 ZIP 的 SHA-256。
 
-## 4. 创建 GitHub Release
+## 4. 确认 GitHub Release
 
-候选包验证通过后，从不可变 Tag `v0.1.0` 创建 GitHub Release，发布说明使用
-`CHANGELOG.md` 对应章节，并附加 ZIP 与 `.sha256`。不要把 Actions Artifact 未经下载
-复验就直接描述为已验证发布包。
+确认不可变 Tag `v0.1.0` 对应的 GitHub Release 已发布，说明来自 `CHANGELOG.md`
+对应章节，并包含 ZIP 与 `.sha256`。CI 遇到已经存在的同名 Release 会失败，不会覆盖
+已发布资产；如需修复，应提升版本号并重新发布。
 
 ## 5. 发布后的开发版本
 

@@ -57,10 +57,11 @@ mvn verify
 
 `0.1.0` 是首个 1.0 之前的正式版本。Tag 构建会生成发布候选包，其中包含三个运行时
 JAR、PP-OCRv6 Tiny LWM 模型、字典、示例图片、文档和许可证声明。每个 ZIP 都附带
-SHA-256 文件；CI 会先解压候选包并运行一次完整 OCR，再上传构建产物。
+SHA-256 文件；CI 会先解压候选包并运行一次完整 OCR，再发布到 GitHub Releases，
+同时保留相同文件作为 Actions Artifact。
 
 当前产物尚未发布到 Maven Central。可以执行 `mvn clean install` 安装到本机 Maven
-仓库，或使用 Tag 对应的 GitHub Actions Artifact 中的 JAR。维护者发布步骤参阅
+仓库，或使用 Tag 对应的 GitHub Release 中的 JAR。维护者发布步骤参阅
 [发布清单](docs/releasing.md)，版本变化参阅 [CHANGELOG.md](CHANGELOG.md)。
 
 ## 项目结构

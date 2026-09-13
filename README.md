@@ -67,11 +67,12 @@ mvn verify
 `0.1.0` is the first pre-1.0 release. Tagged builds produce a release-candidate
 bundle containing the three runtime JARs, PP-OCRv6 Tiny LWM models, dictionary,
 sample image, documentation, and license notices. Each ZIP has a SHA-256
-sidecar, and CI runs full OCR from the extracted bundle before uploading it.
+sidecar, and CI runs full OCR from the extracted bundle before publishing it
+to GitHub Releases and retaining the same files as an Actions artifact.
 
 The artifacts are not published to Maven Central yet. Install them into the
-local Maven repository with `mvn clean install`, or use the JARs from the tagged
-GitHub Actions artifact. See [docs/releasing.md](docs/releasing.md) for the
+local Maven repository with `mvn clean install`, or use the JARs from the
+tagged GitHub Release. See [docs/releasing.md](docs/releasing.md) for the
 maintainer checklist and [CHANGELOG.md](CHANGELOG.md) for release notes.
 
 ## Project layout

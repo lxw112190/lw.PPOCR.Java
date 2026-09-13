@@ -17,8 +17,8 @@ GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windo
 mvn --batch-mode --no-transfer-progress clean install
 ```
 
-完整 Reactor（包括可选 Vector 模块）需要 JDK 25。Tag 构建生成的 GitHub Actions
-Artifact 也会提供 `lw-ppocr-core-0.1.0.jar`、`lw-ppocr-imageio-0.1.0.jar` 和
+完整 Reactor（包括可选 Vector 模块）需要 JDK 25。Tag 构建生成的 GitHub Release
+会提供 `lw-ppocr-core-0.1.0.jar`、`lw-ppocr-imageio-0.1.0.jar` 和
 `lw-ppocr-vector-0.1.0.jar`，以及 Tiny 模型、字典、示例图片和许可证文件。
 
 ## Maven 模块
