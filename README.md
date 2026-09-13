@@ -85,7 +85,8 @@ full-pipeline scheduling noise. `[1,64,80,80]` and `[1,64,128,128]` to
 and 960. A `[1,16,160,160]` same-size benchmark tracks its 2x2 stride-one
 MaxPool under the same policy. The DET
 stride-two benchmark covers both the `[1,3,320,320]` stem and the
-`[1,32,160,160]` downsample layer, each with 16 output channels. Two additional
+`[1,32,160,160]` and `[1,32,256,256]` downsample layers, each with 16 output
+channels, including detector limits 320 and 960. Two additional
 benchmarks cover the same-size 2x2 DET layers with `16 -> 8` and `8 -> 16`
 channels. A same-run Scalar and Vector benchmark also covers the repeated 5x5
 depthwise CLS layer (`[1,64,5,80]`), so runner-wide load changes can be

@@ -5,7 +5,7 @@ import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import java.util.Arrays;
 import java.util.Locale;
 
-/** Focused benchmark for the two largest stride-two convolutions in Tiny DET. */
+/** Focused benchmark for hot stride-two convolutions in Tiny DET. */
 public final class DetStrideTwoConvPerformanceMain {
     private static final int OUTPUT_CHANNELS = 16;
     private static volatile float sink;
@@ -67,7 +67,9 @@ public final class DetStrideTwoConvPerformanceMain {
     private static Workload workload(String name) {
         if ("stem".equals(name)) return new Workload(3, 320, 320);
         if ("downsample".equals(name)) return new Workload(32, 160, 160);
-        throw new IllegalArgumentException("workload must be stem or downsample");
+        if ("downsample960".equals(name)) return new Workload(32, 256, 256);
+        throw new IllegalArgumentException(
+                "workload must be stem, downsample, or downsample960");
     }
 
     private static KernelBackend createBackend(String name) throws Exception {

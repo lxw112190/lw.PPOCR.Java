@@ -369,6 +369,42 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarHighChannelStrideTwoConvolutionWithOffsetsAndSpatialTails() {
+        int batch = 2;
+        int channels = 17;
+        int height = 7;
+        int width = 37;
+        int outputChannels = 16;
+        int outputHeight = (height + 1) / 2;
+        int outputWidth = (width + 1) / 2;
+        int inputOffset = 5;
+        int weightOffset = 7;
+        int biasOffset = 3;
+        int outputOffset = 11;
+        float[] input = values(inputOffset + batch * channels * height * width + 3,
+                0.001953125f, -0.375f);
+        float[] weights = values(weightOffset + outputChannels * channels * 9 + 3,
+                0.0078125f, -0.25f);
+        float[] bias = values(biasOffset + outputChannels + 3, 0.03125f, -0.0625f);
+        float[] expected = new float[outputOffset
+                + batch * outputChannels * outputHeight * outputWidth + 3];
+        float[] actual = new float[expected.length];
+        Arrays.fill(expected, -17.0f);
+        Arrays.fill(actual, -17.0f);
+
+        scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                expected, outputOffset, batch, channels, height, width, outputChannels,
+                3, 3, 2, 2, 1, 1, 1, 1, 1, 1,
+                1, outputHeight, outputWidth);
+        vector.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                actual, outputOffset, batch, channels, height, width, outputChannels,
+                3, 3, 2, 2, 1, 1, 1, 1, 1, 1,
+                1, outputHeight, outputWidth);
+
+        Assert.assertArrayEquals(expected, actual, 0.0f);
+    }
+
+    @Test
     public void matchesScalarTwoByTwoStrideOneMaxPoolWithOffsetsAndTails() {
         int batch = 2;
         int channels = 3;

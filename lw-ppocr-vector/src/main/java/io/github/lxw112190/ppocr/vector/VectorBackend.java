@@ -553,14 +553,15 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
             return;
         }
         if (strideWidth == 2) {
-            if (groups == 1 && channels <= 4 && outputChannels >= 16
+            if (groups == 1 && outputChannels >= 16
                     && outputChannels % 8 == 0
                     && kernelHeight == 3 && kernelWidth == 3
                     && strideHeight == 2 && dilationHeight == 1 && dilationWidth == 1
                     && padTop == 1 && padLeft == 1 && padBottom == 1 && padRight == 1
                     && outputHeight == (height + 1) / 2
                     && outputWidth == (width + 1) / 2) {
-                lowChannelStrideTwo(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                threeByThreeStrideTwo(input, inputOffset, weights, weightOffset,
+                        bias, biasOffset,
                         output, outputOffset, batch, channels, height, width, outputChannels,
                         outputHeight, outputWidth);
                 return;
@@ -941,12 +942,12 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
         }
     }
 
-    private static void lowChannelStrideTwo(float[] input, int inputOffset, float[] weights,
-                                             int weightOffset, float[] bias, int biasOffset,
-                                             float[] output, int outputOffset, int batch,
-                                             int channels, int height, int width,
-                                             int outputChannels, int outputHeight,
-                                             int outputWidth) {
+    private static void threeByThreeStrideTwo(float[] input, int inputOffset, float[] weights,
+                                               int weightOffset, float[] bias, int biasOffset,
+                                               float[] output, int outputOffset, int batch,
+                                               int channels, int height, int width,
+                                               int outputChannels, int outputHeight,
+                                               int outputWidth) {
         int inputPlane = height * width;
         int outputPlane = outputHeight * outputWidth;
         int fullColumnEnd = width / 2;
@@ -1034,11 +1035,11 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
                         if (ow == lastVectorStart) break;
                         ow = Math.min(ow + SPECIES.length(), lastVectorStart);
                     }
-                    lowChannelStrideTwoScalar(input, inputOffset, weights, weightOffset,
+                    threeByThreeStrideTwoScalar(input, inputOffset, weights, weightOffset,
                             bias, biasOffset, output, outputOffset, n, channels, height, width,
                             outputChannels, outputHeight,
                             outputWidth, outputChannel, oh, 0, vectorStart);
-                    lowChannelStrideTwoScalar(input, inputOffset, weights, weightOffset,
+                    threeByThreeStrideTwoScalar(input, inputOffset, weights, weightOffset,
                             bias, biasOffset, output, outputOffset, n, channels, height, width,
                             outputChannels, outputHeight, outputWidth, outputChannel, oh,
                             fullColumnEnd, outputWidth);
@@ -1047,15 +1048,15 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
         }
     }
 
-    private static void lowChannelStrideTwoScalar(float[] input, int inputOffset,
-                                                   float[] weights, int weightOffset,
-                                                   float[] bias, int biasOffset,
-                                                   float[] output, int outputOffset,
-                                                   int n, int channels,
-                                                   int height, int width, int outputChannels,
-                                                   int outputHeight, int outputWidth,
-                                                   int firstOutputChannel, int oh,
-                                                   int firstColumn, int lastColumn) {
+    private static void threeByThreeStrideTwoScalar(float[] input, int inputOffset,
+                                                     float[] weights, int weightOffset,
+                                                     float[] bias, int biasOffset,
+                                                     float[] output, int outputOffset,
+                                                     int n, int channels,
+                                                     int height, int width, int outputChannels,
+                                                     int outputHeight, int outputWidth,
+                                                     int firstOutputChannel, int oh,
+                                                     int firstColumn, int lastColumn) {
         int inputPlane = height * width;
         int outputPlane = outputHeight * outputWidth;
         for (int oc = 0; oc < 8; oc++) {
