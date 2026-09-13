@@ -36,6 +36,8 @@ public final class InferenceSession implements AutoCloseable {
     private final IdentityHashMap<NodeInfo, BinaryPlan> binaryPlans;
     private final InferenceProfiler.NodeDescriptor[] profileDescriptors;
     private final GeluPlan[] geluPlans;
+    private final int inputIndex;
+    private final int outputIndex;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -47,16 +49,36 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     public InferenceSession(LwmModel model, List<TensorShape> inputShapes, KernelBackend backend) {
+        this(model, inputShapes, backend, model == null ? null : model.getNodes(),
+                model == null || model.getGraphOutputs().isEmpty() ? -1 : model.getGraphOutputs().get(0), false);
+    }
+
+    InferenceSession(LwmModel model, List<TensorShape> inputShapes, KernelBackend backend,
+                     int nodeLimit, int outputIndex) {
+        this(model, inputShapes, backend,
+                model == null ? null : model.getNodes().subList(0, nodeLimit), outputIndex, true);
+    }
+
+    private InferenceSession(LwmModel model, List<TensorShape> inputShapes, KernelBackend backend,
+                             List<NodeInfo> sessionNodes, int outputIndex, boolean partial) {
         if (model == null || inputShapes == null || backend == null) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "model, input shapes, and backend are required");
         }
-        this.execution = new PreparedExecution(model, inputShapes);
+        if (model.getGraphInputs().size() != 1 || outputIndex < 0 ||
+                sessionNodes == null || sessionNodes.size() > model.getNodes().size()) {
+            throw new OcrException(OcrErrorCode.INVALID_MODEL,
+                    "session requires one input and a valid execution output");
+        }
+        this.inputIndex = model.getGraphInputs().get(0);
+        this.outputIndex = outputIndex;
+        this.execution = partial
+                ? new PreparedExecution(model, inputShapes, sessionNodes, outputIndex)
+                : new PreparedExecution(model, inputShapes);
         this.workspace = new Workspace(execution.workspacePlan());
         this.backend = backend;
         this.fusedGeluBackend = backend instanceof FusedGeluBackend
                 ? (FusedGeluBackend) backend : null;
-        List<NodeInfo> modelNodes = model.getNodes();
-        this.nodes = modelNodes.toArray(new NodeInfo[modelNodes.size()]);
+        this.nodes = sessionNodes.toArray(new NodeInfo[sessionNodes.size()]);
         this.parameters = new ByteBuffer[nodes.length];
         this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.length);
         this.nodeInputs = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
@@ -90,11 +112,9 @@ public final class InferenceSession implements AutoCloseable {
 
     public void run(float[] input, float[] output) {
         ensureOpen();
-        if (execution.model().getGraphInputs().size() != 1 || execution.model().getGraphOutputs().size() != 1) {
+        if (execution.model().getGraphInputs().size() != 1) {
             throw new OcrException(OcrErrorCode.INVALID_MODEL, "session currently requires one input and one output");
         }
-        int inputIndex = execution.model().getGraphInputs().get(0);
-        int outputIndex = execution.model().getGraphOutputs().get(0);
         requireLength(input, execution.length(inputIndex), "input");
         requireLength(output, execution.length(outputIndex), "output");
         float[] storage = workspace.fp32();
@@ -264,7 +284,7 @@ public final class InferenceSession implements AutoCloseable {
         for (NodeInfo node : nodes) {
             for (int input : nodeInputs.get(node)) uses[input]++;
         }
-        for (int output : execution.model().getGraphOutputs()) uses[output]++;
+        uses[outputIndex]++;
         return uses;
     }
 

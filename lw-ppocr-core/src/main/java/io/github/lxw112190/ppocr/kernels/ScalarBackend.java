@@ -5,7 +5,7 @@ import io.github.lxw112190.ppocr.runtime.BinaryVariant;
 import java.util.Arrays;
 
 /** Readable reference kernels; optimized backends must preserve their semantics. */
-public final class ScalarBackend implements KernelBackend {
+public final class ScalarBackend implements KernelBackend, ProjectionArgMaxBackend {
     @Override
     public void add(float[] left, int leftOffset, float[] right, int rightOffset,
                     float[] output, int outputOffset, int length) {
@@ -246,6 +246,70 @@ public final class ScalarBackend implements KernelBackend {
                     output[outputRow + column] += value * right[rightRow + column];
                 }
             }
+        }
+    }
+
+    @Override
+    public boolean supportsProjectionArgMax(int rows, int inner, int columns) {
+        return rows > 0 && inner > 0 && columns > 0;
+    }
+
+    @Override
+    public void projectionArgMax(float[] activations, int activationOffset,
+                                 float[] weights, int weightOffset,
+                                 float[] bias, int biasOffset,
+                                 int rows, int inner, int columns,
+                                 int[] bestIndices, float[] bestLogits,
+                                 float[] bestProbabilities, float[] rowScratch) {
+        requireProjectionBuffers(activations, activationOffset, weights, weightOffset,
+                bias, biasOffset, rows, inner, columns, bestIndices, bestLogits,
+                bestProbabilities, rowScratch);
+        for (int rowBase = 0; rowBase < rows; rowBase += 4) {
+            int blockRows = Math.min(4, rows - rowBase);
+            matMul(activations, activationOffset + rowBase * inner, weights, weightOffset,
+                    rowScratch, 0, blockRows, inner, columns);
+            for (int localRow = 0; localRow < blockRows; localRow++) {
+                int row = rowBase + localRow;
+                int scratchBase = localRow * columns;
+                int best = 0;
+                for (int column = 0; column < columns; column++) {
+                    float value = rowScratch[scratchBase + column] + bias[biasOffset + column];
+                    if (!Float.isFinite(value)) {
+                        throw new IllegalArgumentException("projection contains non-finite values");
+                    }
+                    rowScratch[scratchBase + column] = value;
+                    if (column != 0 && value > rowScratch[scratchBase + best]) best = column;
+                }
+                float maximum = rowScratch[scratchBase + best];
+                float sum = 0.0f;
+                for (int column = 0; column < columns; column++) {
+                    float value = (float) Math.exp(rowScratch[scratchBase + column] - maximum);
+                    rowScratch[scratchBase + column] = value;
+                    sum += value;
+                }
+                bestIndices[row] = best;
+                bestLogits[row] = maximum;
+                bestProbabilities[row] = rowScratch[scratchBase + best] / sum;
+            }
+        }
+    }
+
+    private static void requireProjectionBuffers(float[] activations, int activationOffset,
+                                                 float[] weights, int weightOffset,
+                                                 float[] bias, int biasOffset,
+                                                 int rows, int inner, int columns,
+                                                 int[] bestIndices, float[] bestLogits,
+                                                 float[] bestProbabilities, float[] rowScratch) {
+        if (activations == null || weights == null || bias == null || bestIndices == null ||
+                bestLogits == null || bestProbabilities == null || rowScratch == null ||
+                rows <= 0 || inner <= 0 || columns <= 0 || activationOffset < 0 ||
+                weightOffset < 0 || biasOffset < 0 ||
+                (long) rows * inner > activations.length - activationOffset ||
+                (long) inner * columns > weights.length - weightOffset ||
+                columns > bias.length - biasOffset || bestIndices.length < rows ||
+                bestLogits.length < rows || bestProbabilities.length < rows ||
+                rowScratch.length < (long) Math.min(rows, 4) * columns) {
+            throw new IllegalArgumentException("projection buffers or dimensions are invalid");
         }
     }
 

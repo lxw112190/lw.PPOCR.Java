@@ -85,6 +85,9 @@ Schema 3 的墙钟时间测量不启用算子分析器，之后再单独运行�
 专项性能基准覆盖以下关键工作负载：
 
 - REC 投影 MatMul：`60 × 80` 乘以 `80 × 6906`；
+- REC 末端融合：`MatMul + bias + Softmax + ArgMax`。受支持的 REC 图默认只保留
+  一行类别临时数据及紧凑 CTC 类别/分数，不再保留完整 `[T,C]` 输出；可通过
+  `-Dlwppocr.disableProjectionFusion=true` 强制回退兼容路径；
 - REC stride-2 Conv：`[1,24,24,480]` 到 `[1,48,12,240]`；
 - DET stride-1 Conv：检测边长限制 320 和 960 下的 `[1,64,80,80]`、
   `[1,64,128,128]` 到 16 通道；

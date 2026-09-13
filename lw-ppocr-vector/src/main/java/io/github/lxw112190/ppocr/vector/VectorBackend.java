@@ -3,6 +3,7 @@ package io.github.lxw112190.ppocr.vector;
 import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.ProjectionArgMaxBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.runtime.BinaryPlan;
 import io.github.lxw112190.ppocr.runtime.BinaryVariant;
@@ -14,7 +15,7 @@ import jdk.incubator.vector.VectorShuffle;
 import jdk.incubator.vector.VectorSpecies;
 
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
-public final class VectorBackend implements KernelBackend, FusedGeluBackend {
+public final class VectorBackend implements KernelBackend, FusedGeluBackend, ProjectionArgMaxBackend {
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
     private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.makeZip(SPECIES, 0);
@@ -478,6 +479,85 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend {
                     rightIndex += columns;
                 }
                 output[outputRow + column] = sum;
+            }
+        }
+    }
+
+    @Override
+    public boolean supportsProjectionArgMax(int rows, int inner, int columns) {
+        return rows > 0 && inner > 0 && columns > 0;
+    }
+
+    @Override
+    public void projectionArgMax(float[] activations, int activationOffset,
+                                 float[] weights, int weightOffset,
+                                 float[] bias, int biasOffset,
+                                 int rows, int inner, int columns,
+                                 int[] bestIndices, float[] bestLogits,
+                                 float[] bestProbabilities, float[] rowScratch) {
+        if (activations == null || weights == null || bias == null || bestIndices == null ||
+                bestLogits == null || bestProbabilities == null || rowScratch == null ||
+                rows <= 0 || inner <= 0 || columns <= 0 || activationOffset < 0 ||
+                weightOffset < 0 || biasOffset < 0 ||
+                (long) rows * inner > activations.length - activationOffset ||
+                (long) inner * columns > weights.length - weightOffset ||
+                columns > bias.length - biasOffset || bestIndices.length < rows ||
+                bestLogits.length < rows || bestProbabilities.length < rows ||
+                rowScratch.length < (long) Math.min(rows, 4) * columns) {
+            throw new IllegalArgumentException("projection buffers or dimensions are invalid");
+        }
+        int bound = SPECIES.loopBound(columns);
+        for (int rowBase = 0; rowBase < rows; rowBase += 4) {
+            int blockRows = Math.min(4, rows - rowBase);
+            matMul(activations, activationOffset + rowBase * inner, weights, weightOffset,
+                    rowScratch, 0, blockRows, inner, columns);
+            for (int localRow = 0; localRow < blockRows; localRow++) {
+                int row = rowBase + localRow;
+                int scratchBase = localRow * columns;
+                int column = 0;
+                for (; column < bound; column += SPECIES.length()) {
+                    FloatVector.fromArray(SPECIES, rowScratch, scratchBase + column)
+                            .add(FloatVector.fromArray(SPECIES, bias, biasOffset + column))
+                            .intoArray(rowScratch, scratchBase + column);
+                }
+                for (; column < columns; column++) {
+                    rowScratch[scratchBase + column] += bias[biasOffset + column];
+                }
+
+                int best = 0;
+                float maximum = rowScratch[scratchBase];
+                if (!Float.isFinite(maximum)) {
+                    throw new IllegalArgumentException("projection contains non-finite values");
+                }
+                for (column = 1; column < columns; column++) {
+                    float value = rowScratch[scratchBase + column];
+                    if (!Float.isFinite(value)) {
+                        throw new IllegalArgumentException("projection contains non-finite values");
+                    }
+                    if (value > maximum) {
+                        maximum = value;
+                        best = column;
+                    }
+                }
+
+                FloatVector vectorSum = FloatVector.zero(SPECIES);
+                column = 0;
+                for (; column < bound; column += SPECIES.length()) {
+                    FloatVector values = FloatVector.fromArray(SPECIES, rowScratch,
+                                    scratchBase + column)
+                            .sub(maximum).lanewise(VectorOperators.EXP);
+                    values.intoArray(rowScratch, scratchBase + column);
+                    vectorSum = vectorSum.add(values);
+                }
+                float sum = vectorSum.reduceLanes(VectorOperators.ADD);
+                for (; column < columns; column++) {
+                    float value = (float) Math.exp(rowScratch[scratchBase + column] - maximum);
+                    rowScratch[scratchBase + column] = value;
+                    sum += value;
+                }
+                bestIndices[row] = best;
+                bestLogits[row] = maximum;
+                bestProbabilities[row] = rowScratch[scratchBase + best] / sum;
             }
         }
     }

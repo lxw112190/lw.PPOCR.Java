@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- REC terminal pattern detection and fused projection, bias, winning Softmax
+  probability, ArgMax, and compact CTC decoding for Scalar and Vector backends.
+- Dense compatibility fallback controlled by
+  `-Dlwppocr.disableProjectionFusion=true`.
+- Dynamic-width parity coverage at widths 192, 320, 480, 640, and 960, plus a
+  focused dense-versus-fused CI benchmark.
+
+### Changed
+
+- REC sessions no longer retain the dense `[T,C]` probability matrix when the
+  supported terminal pattern is active.
+
 ## [0.1.0] - 2026-09-13
 
 ### Added

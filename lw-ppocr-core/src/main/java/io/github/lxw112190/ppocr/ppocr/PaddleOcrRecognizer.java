@@ -90,6 +90,15 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         return recognize(source, context(targetWidth));
     }
 
+    /** Reports whether at least one prepared dynamic-width session uses terminal fusion. */
+    public boolean isProjectionFusionActive() {
+        ensureOpen();
+        for (RecSessionContext context : sessions.values()) {
+            if (context.usesProjectionFusion()) return true;
+        }
+        return false;
+    }
+
     /** Recognizes images in input order while evaluating independent width groups concurrently. */
     public List<RecRecognitionResult> recognizeAll(List<BgrImage> sources, int parallelism) {
         ensureOpen();
@@ -168,9 +177,7 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
 
     private RecRecognitionResult recognize(BgrImage source, RecSessionContext context) {
         context.preprocess.resizeNormalize(source);
-        context.session.run(context.preprocess.getChw(), context.logits);
-        CtcDecodeResult decoded = CtcDecoder.decodeGreedy(context.logits, context.timeSteps,
-                dictionary.classCount(), dictionary);
+        CtcDecodeResult decoded = context.run(context.preprocess.getChw(), dictionary);
         return new RecRecognitionResult(decoded.getText(), decoded.getScore(),
                 decoded.getEmittedCount(), context.preprocess.getResizedWidth());
     }

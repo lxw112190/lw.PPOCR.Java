@@ -483,6 +483,37 @@ public final class VectorBackendTest {
         assertBroadcast(BinaryOp.SUB, new int[] {2, 3, 1}, new int[] {1, 1, 5}, new int[] {2, 3, 5});
     }
 
+    @Test
+    public void matchesDenseVectorProjectionArgMax() {
+        int rows = 3;
+        int inner = 7;
+        int columns = 37;
+        float[] activations = values(rows * inner, 0.03125f, -0.25f);
+        float[] weights = values(inner * columns, 0.001953125f, -0.2f);
+        float[] bias = values(columns, 0.0078125f, -0.1f);
+        float[] dense = new float[rows * columns];
+        vector.matMul(activations, 0, weights, 0, dense, 0, rows, inner, columns);
+        for (int row = 0; row < rows; row++) {
+            for (int column = 0; column < columns; column++) dense[row * columns + column] += bias[column];
+        }
+        vector.softmax(dense, 0, dense, 0, rows, columns, 1);
+
+        int[] ids = new int[rows];
+        float[] logits = new float[rows];
+        float[] probabilities = new float[rows];
+        vector.projectionArgMax(activations, 0, weights, 0, bias, 0,
+                rows, inner, columns, ids, logits, probabilities,
+                new float[Math.min(rows, 4) * columns]);
+        for (int row = 0; row < rows; row++) {
+            int expected = 0;
+            for (int column = 1; column < columns; column++) {
+                if (dense[row * columns + column] > dense[row * columns + expected]) expected = column;
+            }
+            Assert.assertEquals(expected, ids[row]);
+            Assert.assertEquals(dense[row * columns + expected], probabilities[row], 0.0f);
+        }
+    }
+
     private void assertBroadcast(BinaryOp operation, int[] leftShape, int[] rightShape,
                                  int[] outputShape) {
         float[] left = values(length(leftShape), 0.17f, 0.5f);

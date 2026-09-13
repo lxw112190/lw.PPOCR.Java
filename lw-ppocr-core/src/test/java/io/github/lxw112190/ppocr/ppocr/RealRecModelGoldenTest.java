@@ -3,6 +3,8 @@ package io.github.lxw112190.ppocr.ppocr;
 import io.github.lxw112190.ppocr.golden.GoldenTestSupport;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
+import io.github.lxw112190.ppocr.kernels.ScalarBackend;
+import io.github.lxw112190.ppocr.runtime.CtcProjectionSession;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
 import java.io.IOException;
@@ -54,6 +56,67 @@ public final class RealRecModelGoldenTest {
             Assert.assertEquals(1, result.getEmittedCount());
             Assert.assertEquals(68, result.getResizedWidth());
             Assert.assertEquals(0.217422441f, result.getScore(), 1.0e-4f);
+        }
+    }
+
+    @Test
+    public void terminalFusionMatchesDenseOutputAcrossWidthPolicy() throws Exception {
+        int[] widths = {192, 320, 480, 640, 960};
+        try (LwmModel model = LwmLoader.load(GoldenTestSupport.resource(
+                RealRecModelGoldenTest.class, RESOURCE_ROOT + "rec.lwm"))) {
+            for (int width : widths) {
+                TensorShape inputShape = new TensorShape(1, 3, 48, width);
+                java.util.List<TensorShape> shapes = Collections.singletonList(inputShape);
+                try (InferenceSession dense = new InferenceSession(model, shapes, new ScalarBackend());
+                     CtcProjectionSession compact = CtcProjectionSession.tryCreate(
+                             model, shapes, new ScalarBackend(), CLASS_COUNT)) {
+                    Assert.assertNotNull("fusion must support width=" + width, compact);
+                    int timeSteps = compact.getTimeSteps();
+                    float[] input = new float[3 * 48 * width];
+                    for (int i = 0; i < input.length; i++) {
+                        input[i] = ((i * 29 + width) % 509 - 254) / 253.0f;
+                    }
+                    float[] probabilities = new float[timeSteps * CLASS_COUNT];
+                    dense.run(input, probabilities);
+                    int[] classIds = new int[timeSteps];
+                    float[] logits = new float[timeSteps];
+                    float[] bestProbabilities = new float[timeSteps];
+                    compact.run(input, classIds, logits, bestProbabilities);
+                    for (int step = 0; step < timeSteps; step++) {
+                        int row = step * CLASS_COUNT;
+                        int expected = 0;
+                        for (int column = 1; column < CLASS_COUNT; column++) {
+                            if (probabilities[row + column] > probabilities[row + expected]) {
+                                expected = column;
+                            }
+                        }
+                        Assert.assertEquals("class id at width=" + width + ", step=" + step,
+                                expected, classIds[step]);
+                        Assert.assertEquals("score at width=" + width + ", step=" + step,
+                                probabilities[row + expected], bestProbabilities[step], 1.0e-7f);
+                    }
+                    Assert.assertTrue("compact workspace must be smaller at width=" + width,
+                            compact.getWorkspaceBytes() < dense.execution().workspacePlan().getTotalBytes());
+                    Assert.assertEquals((long) timeSteps * CLASS_COUNT * 4L,
+                            compact.getDenseOutputBytesAvoided());
+                }
+            }
+        }
+    }
+
+    @Test
+    public void terminalFusionCanBeDisabledForFallback() throws Exception {
+        String previous = System.getProperty(CtcProjectionSession.DISABLE_PROPERTY);
+        System.setProperty(CtcProjectionSession.DISABLE_PROPERTY, "true");
+        try (LwmModel model = LwmLoader.load(GoldenTestSupport.resource(
+                RealRecModelGoldenTest.class, RESOURCE_ROOT + "rec.lwm"))) {
+            CtcProjectionSession compact = CtcProjectionSession.tryCreate(model,
+                    Collections.singletonList(new TensorShape(1, 3, 48, 320)),
+                    new ScalarBackend(), CLASS_COUNT);
+            Assert.assertNull(compact);
+        } finally {
+            if (previous == null) System.clearProperty(CtcProjectionSession.DISABLE_PROPERTY);
+            else System.setProperty(CtcProjectionSession.DISABLE_PROPERTY, previous);
         }
     }
 

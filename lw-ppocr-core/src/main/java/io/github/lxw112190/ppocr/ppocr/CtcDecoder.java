@@ -39,4 +39,34 @@ public final class CtcDecoder {
         }
         return new CtcDecodeResult(text.toString(), emitted == 0 ? 0.0f : (float) (scoreSum / emitted), emitted);
     }
+
+    public static CtcDecodeResult decodeGreedy(CompactCtcOutput compact,
+                                               PaddleOcrDictionary dictionary) {
+        if (compact == null || dictionary == null || compact.getTimeSteps() <= 0) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "compact CTC output or dictionary is invalid");
+        }
+        StringBuilder text = new StringBuilder();
+        int previous = 0;
+        int emitted = 0;
+        double scoreSum = 0.0;
+        int[] classIds = compact.classIds();
+        float[] probabilities = compact.probabilities();
+        for (int step = 0; step < classIds.length; step++) {
+            int best = classIds[step];
+            float probability = probabilities[step];
+            if (best < 0 || best >= dictionary.classCount() || !Float.isFinite(probability)) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "compact CTC output contains invalid values");
+            }
+            if (best != 0 && best != previous) {
+                text.append(dictionary.labelForClass(best));
+                scoreSum += probability;
+                emitted++;
+            }
+            previous = best;
+        }
+        return new CtcDecodeResult(text.toString(), emitted == 0 ? 0.0f :
+                (float) (scoreSum / emitted), emitted);
+    }
 }

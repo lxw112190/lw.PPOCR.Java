@@ -119,6 +119,7 @@ public final class FullOcrPerformanceMain {
             String profileScope = "all-threads";
             System.out.printf(Locale.ROOT,
                     "{\"schema\":3,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                            + "\"features\":{\"rec_projection_fusion\":%s},"
                             + "\"classification_parallelism\":%d,"
                             + "\"recognition_parallelism\":%d,"
                             + "\"operator_profile_scope\":\"%s\","
@@ -141,7 +142,8 @@ public final class FullOcrPerformanceMain {
                             + "\"heap_peak_method\":\"mxbean-pool-sum\",\"gc_count_delta\":%d,"
                             + "\"gc_time_ms_delta\":%d,\"operators\":%s,"
                             + "\"stage_operators\":%s,\"stage_hot_nodes\":%s}%n",
-                    benchmark, backendName, classificationParallelism,
+                    benchmark, backendName,
+                    Boolean.toString(pipeline.isProjectionFusionActive()), classificationParallelism,
                     recognitionParallelism, profileScope,
                     milliseconds(profiledSample.totalNanos),
                     image.width(), image.height(), detectorLimit, lineCount,
@@ -407,6 +409,10 @@ public final class FullOcrPerformanceMain {
 
         private StageSample profile(BgrImage source) {
             return recognize(source, true);
+        }
+
+        private boolean isProjectionFusionActive() {
+            return recognizer.isProjectionFusionActive();
         }
 
         private StageSample recognize(BgrImage source, boolean profileOperators) {

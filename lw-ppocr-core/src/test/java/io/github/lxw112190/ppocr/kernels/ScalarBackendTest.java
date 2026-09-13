@@ -61,6 +61,41 @@ public final class ScalarBackendTest {
     }
 
     @Test
+    public void fusesProjectionArgMaxAndWinningSoftmaxProbability() {
+        int rows = 2;
+        int inner = 3;
+        int columns = 4;
+        float[] activations = {1, 2, -1, -2, 1, 3};
+        float[] weights = {
+                0.5f, -1.0f, 0.25f, 2.0f,
+                1.5f, 0.5f, -0.5f, 0.25f,
+                -0.5f, 1.0f, 0.75f, -1.0f
+        };
+        float[] bias = {0.1f, -0.2f, 0.3f, 0.4f};
+        float[] dense = new float[rows * columns];
+        backend.matMul(activations, 0, weights, 0, dense, 0, rows, inner, columns);
+        for (int row = 0; row < rows; row++) {
+            for (int column = 0; column < columns; column++) dense[row * columns + column] += bias[column];
+        }
+        backend.softmax(dense, 0, dense, 0, rows, columns, 1);
+
+        int[] ids = new int[rows];
+        float[] logits = new float[rows];
+        float[] probabilities = new float[rows];
+        backend.projectionArgMax(activations, 0, weights, 0, bias, 0,
+                rows, inner, columns, ids, logits, probabilities,
+                new float[Math.min(rows, 4) * columns]);
+        for (int row = 0; row < rows; row++) {
+            int expected = 0;
+            for (int column = 1; column < columns; column++) {
+                if (dense[row * columns + column] > dense[row * columns + expected]) expected = column;
+            }
+            Assert.assertEquals(expected, ids[row]);
+            Assert.assertEquals(dense[row * columns + expected], probabilities[row], 0.0f);
+        }
+    }
+
+    @Test
     public void computesLeftAndRightScalarBroadcasts() {
         TensorShape vector = new TensorShape(4);
         TensorShape scalar = new TensorShape(1);

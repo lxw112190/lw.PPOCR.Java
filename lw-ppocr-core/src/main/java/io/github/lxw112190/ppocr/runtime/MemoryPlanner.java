@@ -18,6 +18,18 @@ public final class MemoryPlanner {
     public static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes) {
+        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, true);
+    }
+
+    static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                                     List<Integer> graphInputs, List<Integer> graphOutputs,
+                                     List<TensorShape> shapes) {
+        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, false);
+    }
+
+    private static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                                      List<Integer> graphInputs, List<Integer> graphOutputs,
+                                      List<TensorShape> shapes, boolean requireEveryRuntimeTensor) {
         if (tensors == null || nodes == null || graphInputs == null || graphOutputs == null || shapes == null ||
                 tensors.size() != shapes.size()) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "planner inputs are inconsistent");
@@ -59,7 +71,8 @@ public final class MemoryPlanner {
             deaths[output] = Math.max(deaths[output], nodes.size());
         }
         for (int i = 0; i < tensorCount; i++) {
-            if (!tensors.get(i).isConstant() && births[i] == Integer.MAX_VALUE) {
+            if (requireEveryRuntimeTensor && !tensors.get(i).isConstant() &&
+                    births[i] == Integer.MAX_VALUE) {
                 throw new OcrException(OcrErrorCode.INVALID_MODEL, "runtime tensor has no producer or graph input: " + i);
             }
             if (!tensors.get(i).isConstant() && deaths[i] < births[i]) {
@@ -69,7 +82,7 @@ public final class MemoryPlanner {
 
         List<Integer> order = new ArrayList<Integer>();
         for (int i = 0; i < tensorCount; i++) {
-            if (!tensors.get(i).isConstant()) {
+            if (!tensors.get(i).isConstant() && births[i] != Integer.MAX_VALUE) {
                 order.add(i);
             }
         }

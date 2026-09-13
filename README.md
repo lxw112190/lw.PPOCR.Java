@@ -95,6 +95,11 @@ available, while `stage_operators` separates DET, CLS, and REC; parallel operato
 time is the sum across participating threads. `stage_hot_nodes` reports the
 slowest resolved graph nodes and their tensor shapes for targeted tuning.
 Focused benchmarks track the `60 x 80` by `80 x 6906` REC projection MatMul and
+the fused REC terminal path (`MatMul + bias + Softmax + ArgMax`). Supported REC
+graphs use the fused path by default, retaining one class row plus compact CTC
+ids/scores instead of the dense `[T,C]` output. Set
+`-Dlwppocr.disableProjectionFusion=true` to force the compatibility path.
+Focused benchmarks also track
 the `[1,24,24,480]` to `[1,48,12,240]` REC stride-two Conv without
 full-pipeline scheduling noise. `[1,64,80,80]` and `[1,64,128,128]` to
 16-channel benchmarks track the hot DET stride-one Conv at detector limits 320

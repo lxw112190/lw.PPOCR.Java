@@ -2,6 +2,7 @@ package io.github.lxw112190.ppocr.runtime;
 
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.TensorInfo;
+import java.util.Collections;
 import java.util.List;
 
 /** Immutable graph metadata prepared once before a session enters its run loop. */
@@ -14,10 +15,23 @@ public final class PreparedExecution {
     private final int[] lengths;
 
     public PreparedExecution(LwmModel model, List<TensorShape> inputShapes) {
+        this(model, inputShapes, model.getNodes(), model.getGraphOutputs(), false);
+    }
+
+    PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
+                      List<io.github.lxw112190.ppocr.model.NodeInfo> nodes,
+                      int outputIndex) {
+        this(model, inputShapes, nodes, Collections.singletonList(outputIndex), true);
+    }
+
+    private PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
+                              List<io.github.lxw112190.ppocr.model.NodeInfo> nodes,
+                              List<Integer> outputs, boolean partial) {
         this.model = model;
         this.shapes = ShapeResolver.resolve(model, inputShapes);
-        this.workspacePlan = MemoryPlanner.plan(model.getTensors(), model.getNodes(),
-                model.getGraphInputs(), model.getGraphOutputs(), shapes);
+        this.workspacePlan = partial
+                ? MemoryPlanner.planPartial(model.getTensors(), nodes, model.getGraphInputs(), outputs, shapes)
+                : MemoryPlanner.plan(model.getTensors(), nodes, model.getGraphInputs(), outputs, shapes);
         this.offsets = new int[model.getTensors().size()];
         this.lengths = new int[model.getTensors().size()];
         for (int i = 0; i < model.getTensors().size(); i++) {
@@ -29,12 +43,14 @@ public final class PreparedExecution {
             lengths[i] = (int) elements;
             if (tensor.isConstant()) {
                 continue;
-            } else {
+            } else if (workspacePlan.isAllocated(i)) {
                 long byteOffset = workspacePlan.getOffset(i);
                 if (byteOffset < 0 || byteOffset % 4 != 0 || byteOffset / 4 > Integer.MAX_VALUE) {
                     throw new IllegalArgumentException("tensor has no usable workspace allocation: " + i);
                 }
                 offsets[i] = (int) (byteOffset / 4);
+            } else {
+                offsets[i] = -1;
             }
         }
         this.constants = SharedConstantPool.acquire(model, lengths);
