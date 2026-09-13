@@ -70,6 +70,10 @@ Windows 内部文件清单使用 GNU `sha256sum` 格式，上述 PowerShell 会�
 对应章节，并包含 ZIP 与 `.sha256`。CI 遇到已经存在的同名 Release 会失败，不会覆盖
 已发布资产；如需修复，应提升版本号并重新发布。
 
+如果标签构建成功但发布步骤未运行，可在 GitHub Actions 的 `Java CI` 页面选择
+`Run workflow`，将已经存在的标签（例如 `v0.1.0`）填入 `release_tag`。发布任务会检出
+该标签并重新完成构建、校验和与完整 OCR 测试，不会使用 `main` 的未发布源码。
+
 ## 5. 发布后的开发版本
 
 Release 发布后，将 Maven 版本提升到下一个开发版本，例如 `0.1.1-SNAPSHOT`，并在

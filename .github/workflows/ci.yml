@@ -5,6 +5,12 @@ on:
     branches: [main]
     tags: ['v*']
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v-prefixed tag to build and publish
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -207,14 +213,25 @@ jobs:
 
   release-candidate:
     name: Release candidate bundle
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      contains(github.event.head_commit.message, '[publish-release:v0.1.0]'))
     needs: [build-and-test, performance]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      RELEASE_TAG: >-
+        ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name ||
+        (github.event_name == 'workflow_dispatch' && inputs.release_tag) ||
+        'v0.1.0' }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
@@ -229,7 +246,7 @@ jobs:
           set -euo pipefail
           version="$(mvn --batch-mode --no-transfer-progress help:evaluate \
             -Dexpression=project.version -DforceStdout -q)"
-          test "$GITHUB_REF_NAME" = "v$version"
+          test "$RELEASE_TAG" = "v$version"
       - name: Verify release model manifest
         shell: bash
         run: |
@@ -259,8 +276,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          package="lw.PPOCR.Java-$GITHUB_REF_NAME"
-          version="${GITHUB_REF_NAME#v}"
+          package="lw.PPOCR.Java-$RELEASE_TAG"
+          version="${RELEASE_TAG#v}"
           root="dist/$package"
           mkdir -p "$root/lib" "$root/models/ppocrv6-tiny"
           cp "lw-ppocr-core/target/lw-ppocr-core-$version.jar" "$root/lib/"
@@ -294,7 +311,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          package="lw.PPOCR.Java-$GITHUB_REF_NAME"
+          package="lw.PPOCR.Java-$RELEASE_TAG"
           mkdir -p dist/extracted
           unzip -q "dist/$package.zip" -d dist/extracted
           (
@@ -308,18 +325,18 @@ jobs:
       - name: Upload release candidate
         uses: actions/upload-artifact@v4
         with:
-          name: lw-ppocr-java-${{ github.ref_name }}
+          name: lw-ppocr-java-${{ env.RELEASE_TAG }}
           if-no-files-found: error
           path: |
-            dist/lw.PPOCR.Java-${{ github.ref_name }}.zip
-            dist/lw.PPOCR.Java-${{ github.ref_name }}.zip.sha256
+            dist/lw.PPOCR.Java-${{ env.RELEASE_TAG }}.zip
+            dist/lw.PPOCR.Java-${{ env.RELEASE_TAG }}.zip.sha256
       - name: Publish GitHub release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          tag="$GITHUB_REF_NAME"
+          tag="$RELEASE_TAG"
           version="${tag#v}"
           package="lw.PPOCR.Java-$tag"
           if gh release view "$tag" >/dev/null 2>&1; then
