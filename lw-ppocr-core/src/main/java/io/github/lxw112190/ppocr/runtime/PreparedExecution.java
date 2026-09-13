@@ -8,6 +8,7 @@ import java.util.List;
 /** Immutable graph metadata prepared once before a session enters its run loop. */
 public final class PreparedExecution {
     private final LwmModel model;
+    private final CompiledModel compiledModel;
     private final List<TensorShape> shapes;
     private final WorkspacePlan workspacePlan;
     private final float[][] constants;
@@ -27,7 +28,8 @@ public final class PreparedExecution {
     private PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
                               List<io.github.lxw112190.ppocr.model.NodeInfo> nodes,
                               List<Integer> outputs, boolean partial) {
-        this.model = model;
+        this.compiledModel = CompiledModel.acquire(model);
+        this.model = compiledModel.model();
         this.shapes = ShapeResolver.resolve(model, inputShapes);
         this.workspacePlan = partial
                 ? MemoryPlanner.planPartial(model.getTensors(), nodes, model.getGraphInputs(), outputs, shapes)
@@ -53,7 +55,7 @@ public final class PreparedExecution {
                 offsets[i] = -1;
             }
         }
-        this.constants = SharedConstantPool.acquire(model, lengths);
+        this.constants = compiledModel.constants();
     }
 
     public LwmModel model() { return model; }
@@ -62,5 +64,7 @@ public final class PreparedExecution {
     public float[] constant(int tensorIndex) { return constants[tensorIndex]; }
     public int offset(int tensorIndex) { return offsets[tensorIndex]; }
     public int length(int tensorIndex) { return lengths[tensorIndex]; }
+
+    CompiledModel compiledModel() { return compiledModel; }
 
 }

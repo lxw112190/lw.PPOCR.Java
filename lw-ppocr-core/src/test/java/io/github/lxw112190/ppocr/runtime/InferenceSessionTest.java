@@ -64,6 +64,21 @@ public final class InferenceSessionTest {
         model.close();
     }
 
+    @Test
+    public void sharesCompiledModelAcrossDynamicSessions() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
+        InferenceSession first = new InferenceSession(model);
+        InferenceSession second = new InferenceSession(model);
+        Assert.assertSame(first.execution().compiledModel(), second.execution().compiledModel());
+        Assert.assertSame(first.execution().compiledModel().parameterData(0),
+                second.execution().compiledModel().parameterData(0));
+        Assert.assertSame(first.execution().compiledModel().nodeInputs(0),
+                second.execution().compiledModel().nodeInputs(0));
+        first.close();
+        second.close();
+        model.close();
+    }
+
     private static byte[] addModel() {
         final int inputOffset = 160;
         final int outputOffset = 168;

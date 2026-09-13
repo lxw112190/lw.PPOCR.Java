@@ -78,7 +78,8 @@ public final class InferenceSession implements AutoCloseable {
         this.backend = backend;
         this.fusedGeluBackend = backend instanceof FusedGeluBackend
                 ? (FusedGeluBackend) backend : null;
-        this.nodes = sessionNodes.toArray(new NodeInfo[sessionNodes.size()]);
+        CompiledModel compiledModel = execution.compiledModel();
+        this.nodes = new NodeInfo[sessionNodes.size()];
         this.parameters = new ByteBuffer[nodes.length];
         this.nodeIndexes = new IdentityHashMap<NodeInfo, Integer>(nodes.length);
         this.nodeInputs = new IdentityHashMap<NodeInfo, int[]>(nodes.length);
@@ -95,11 +96,12 @@ public final class InferenceSession implements AutoCloseable {
         this.profileDescriptors = new InferenceProfiler.NodeDescriptor[nodes.length];
         this.geluPlans = new GeluPlan[nodes.length];
         for (int i = 0; i < nodes.length; i++) {
-            NodeInfo node = nodes[i];
+            NodeInfo node = compiledModel.node(i);
+            this.nodes[i] = node;
             this.nodeIndexes.put(node, i);
-            this.nodeInputs.put(node, node.getInputs());
-            this.nodeOutputs.put(node, node.getOutputs());
-            this.parameters[i] = model.parameterData(i);
+            this.nodeInputs.put(node, compiledModel.nodeInputs(i));
+            this.nodeOutputs.put(node, compiledModel.nodeOutputs(i));
+            this.parameters[i] = compiledModel.parameterData(i);
             prepareBinary(node);
             prepareTranspose(node);
             prepareReduceMean(node);

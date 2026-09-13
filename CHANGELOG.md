@@ -18,6 +18,8 @@ All notable changes to this project are documented in this file.
   uploaded JFR recording and top allocation-class summary in Linux CI.
 - A ten-iteration allocation warmup that separates steady-state allocation
   from Vector API C2 compilation and escape-analysis startup behavior.
+- An immutable compiled-model cache that shares decoded constants, node index
+  arrays, and read-only parameter views across shape-specialized sessions.
 
 ### Changed
 
