@@ -215,9 +215,7 @@ jobs:
     name: Release candidate bundle
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
-      github.event_name == 'workflow_dispatch' ||
-      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      contains(github.event.head_commit.message, '[publish-release:v0.1.0]'))
+      github.event_name == 'workflow_dispatch'
     needs: [build-and-test, performance]
     runs-on: ubuntu-latest
     permissions:
@@ -225,8 +223,7 @@ jobs:
     env:
       RELEASE_TAG: >-
         ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name ||
-        (github.event_name == 'workflow_dispatch' && inputs.release_tag) ||
-        'v0.1.0' }}
+        inputs.release_tag }}
     steps:
       - name: Check out source
         uses: actions/checkout@v4
