@@ -20,6 +20,8 @@ All notable changes to this project are documented in this file.
   from Vector API C2 compilation and escape-analysis startup behavior.
 - An immutable compiled-model cache that shares decoded constants, node index
   arrays, and read-only parameter views across shape-specialized sessions.
+- Model-wide tensor consumer counts and last-use indexes for fusion-safety and
+  future workspace-alias planning, reused by REC terminal-fusion detection.
 - Cross-platform Vector projection parity now uses a numerical tolerance for
   softmax probabilities while retaining exact class-ID comparison.
 

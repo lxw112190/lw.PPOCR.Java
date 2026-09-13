@@ -6,6 +6,7 @@ import io.github.lxw112190.ppocr.model.NodeInfo;
 import io.github.lxw112190.ppocr.model.TensorInfo;
 import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.WeakHashMap;
@@ -21,6 +22,8 @@ final class CompiledModel {
     private final int[][] nodeOutputs;
     private final ByteBuffer[] parameters;
     private final float[][] constants;
+    private final int[] tensorConsumerCounts;
+    private final int[] tensorLastUses;
 
     private CompiledModel(LwmModel model) {
         this.model = model;
@@ -35,6 +38,18 @@ final class CompiledModel {
             parameters[i] = model.parameterData(i);
         }
         this.constants = decodeConstants(model);
+        this.tensorConsumerCounts = new int[model.getTensors().size()];
+        this.tensorLastUses = new int[tensorConsumerCounts.length];
+        Arrays.fill(tensorLastUses, -1);
+        for (int nodeIndex = 0; nodeIndex < nodes.length; nodeIndex++) {
+            for (int input : nodeInputs[nodeIndex]) {
+                tensorConsumerCounts[input]++;
+                tensorLastUses[input] = nodeIndex;
+            }
+        }
+        for (int output : model.getGraphOutputs()) {
+            tensorLastUses[output] = nodes.length;
+        }
     }
 
     static CompiledModel acquire(LwmModel model) {
@@ -58,6 +73,8 @@ final class CompiledModel {
     ByteBuffer parameterData(int index) { return parameters[index]; }
     float[] constant(int tensorIndex) { return constants[tensorIndex]; }
     float[][] constants() { return constants; }
+    int tensorConsumerCount(int tensorIndex) { return tensorConsumerCounts[tensorIndex]; }
+    int tensorLastUse(int tensorIndex) { return tensorLastUses[tensorIndex]; }
 
     private static float[][] decodeConstants(LwmModel model) {
         List<TensorInfo> tensors = model.getTensors();

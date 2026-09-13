@@ -74,6 +74,13 @@ public final class InferenceSessionTest {
                 second.execution().compiledModel().parameterData(0));
         Assert.assertSame(first.execution().compiledModel().nodeInputs(0),
                 second.execution().compiledModel().nodeInputs(0));
+        CompiledModel compiled = first.execution().compiledModel();
+        Assert.assertEquals(1, compiled.tensorConsumerCount(0));
+        Assert.assertEquals(0, compiled.tensorLastUse(0));
+        Assert.assertEquals(1, compiled.tensorConsumerCount(1));
+        Assert.assertEquals(0, compiled.tensorLastUse(1));
+        Assert.assertEquals(0, compiled.tensorConsumerCount(2));
+        Assert.assertEquals(1, compiled.tensorLastUse(2));
         first.close();
         second.close();
         model.close();

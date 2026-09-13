@@ -122,23 +122,23 @@ public final class CtcProjectionSession implements AutoCloseable {
         static Tail detect(LwmModel model, List<TensorShape> inputShapes, int classCount) {
             if (model == null || inputShapes == null || classCount <= 0 ||
                     model.getGraphInputs().size() != 1 || model.getGraphOutputs().size() != 1) return null;
-            List<NodeInfo> nodes = model.getNodes();
-            if (nodes.size() < 3) return null;
-            int projectionIndex = nodes.size() - 3;
-            int addIndex = nodes.size() - 2;
-            int softmaxIndex = nodes.size() - 1;
-            NodeInfo projection = nodes.get(projectionIndex);
-            NodeInfo add = nodes.get(addIndex);
-            NodeInfo softmax = nodes.get(softmaxIndex);
+            CompiledModel compiled = CompiledModel.acquire(model);
+            if (compiled.nodeCount() < 3) return null;
+            int projectionIndex = compiled.nodeCount() - 3;
+            int addIndex = compiled.nodeCount() - 2;
+            int softmaxIndex = compiled.nodeCount() - 1;
+            NodeInfo projection = compiled.node(projectionIndex);
+            NodeInfo add = compiled.node(addIndex);
+            NodeInfo softmax = compiled.node(softmaxIndex);
             if (projection.getOperator() != OperatorType.MAT_MUL ||
                     add.getOperator() != OperatorType.ADD ||
                     softmax.getOperator() != OperatorType.SOFTMAX) return null;
-            int[] projectionInputs = projection.getInputs();
-            int[] projectionOutputs = projection.getOutputs();
-            int[] addInputs = add.getInputs();
-            int[] addOutputs = add.getOutputs();
-            int[] softmaxInputs = softmax.getInputs();
-            int[] softmaxOutputs = softmax.getOutputs();
+            int[] projectionInputs = compiled.nodeInputs(projectionIndex);
+            int[] projectionOutputs = compiled.nodeOutputs(projectionIndex);
+            int[] addInputs = compiled.nodeInputs(addIndex);
+            int[] addOutputs = compiled.nodeOutputs(addIndex);
+            int[] softmaxInputs = compiled.nodeInputs(softmaxIndex);
+            int[] softmaxOutputs = compiled.nodeOutputs(softmaxIndex);
             if (projectionInputs.length != 2 || projectionOutputs.length != 1 ||
                     addInputs.length != 2 || addOutputs.length != 1 ||
                     softmaxInputs.length != 1 || softmaxOutputs.length != 1 ||
@@ -154,11 +154,12 @@ public final class CtcProjectionSession implements AutoCloseable {
             int activationTensor = projectionInputs[0];
             int weightTensor = projectionInputs[1];
             if (!tensors.get(weightTensor).isConstant() || !tensors.get(biasTensor).isConstant()) return null;
-            int[] uses = new int[tensors.size()];
-            for (NodeInfo node : nodes) for (int input : node.getInputs()) uses[input]++;
-            for (int output : model.getGraphOutputs()) uses[output]++;
-            if (uses[projectionOutput] != 1 || uses[addOutputs[0]] != 1 ||
-                    uses[softmaxOutputs[0]] != 1) return null;
+            if (compiled.tensorConsumerCount(projectionOutput) != 1 ||
+                    compiled.tensorLastUse(projectionOutput) != addIndex ||
+                    compiled.tensorConsumerCount(addOutputs[0]) != 1 ||
+                    compiled.tensorLastUse(addOutputs[0]) != softmaxIndex ||
+                    compiled.tensorConsumerCount(softmaxOutputs[0]) != 0 ||
+                    compiled.tensorLastUse(softmaxOutputs[0]) != compiled.nodeCount()) return null;
 
             List<TensorShape> shapes = ShapeResolver.resolve(model, inputShapes);
             TensorShape activation = shapes.get(activationTensor);
@@ -177,7 +178,7 @@ public final class CtcProjectionSession implements AutoCloseable {
             if (weights.get(0) != inner || bias.get(0) != columns ||
                     columns != classCount || projected.get(projected.getRank() - 2) != rows ||
                     projected.get(projected.getRank() - 1) != columns) return null;
-            ByteBuffer parameters = model.parameterData(softmaxIndex);
+            ByteBuffer parameters = compiled.parameterData(softmaxIndex);
             int axis = parameters.getInt(4);
             if (axis < 0) axis += projected.getRank();
             if (axis != projected.getRank() - 1) return null;
