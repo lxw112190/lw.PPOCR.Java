@@ -1,5 +1,7 @@
 # lw.PPOCR.Java
 
+[中文说明](README.zh-CN.md)
+
 A lightweight pure-Java PP-OCR inference runtime.
 
 - No Python
@@ -113,3 +115,14 @@ compatibility, automatic model discovery, GPU, or Android support. The Vector
 API backend is optional and keeps Scalar fallbacks for shapes outside its
 optimized paths. Image decoding is available separately through the optional
 `lw-ppocr-imageio` module.
+
+## 联系与支持
+
+- 作者：天天代码码天天
+- QQ：819069052
+- QQ Group: 天天代码码天天 | 群号: 264292622
+- 项目地址：<https://github.com/lxw112190/lw.PPOCR.Java>
+
+如果项目对你有帮助，可以扫码支持维护：
+
+<img src="docs/assets/sponsor.jpg" alt="捐赠二维码" width="240">
