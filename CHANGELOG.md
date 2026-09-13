@@ -16,6 +16,8 @@ All notable changes to this project are documented in this file.
   retained MANUAL controls for advanced callers.
 - Full OCR allocation reporting through HotSpot thread counters, with an
   uploaded JFR recording and top allocation-class summary in Linux CI.
+- A ten-iteration allocation warmup that separates steady-state allocation
+  from Vector API C2 compilation and escape-analysis startup behavior.
 
 ### Changed
 

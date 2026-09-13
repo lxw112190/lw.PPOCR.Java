@@ -104,7 +104,9 @@ time is the sum across participating threads. `stage_hot_nodes` reports the
 slowest resolved graph nodes and their tensor shapes for targeted tuning.
 The allocation run reports both Scalar and Vector backends, uploads the complete
 Vector JFR recording, and publishes its top allocation classes, so object churn
-can be traced separately from retained heap.
+can be traced separately from retained heap. Allocation counters start after ten
+unmeasured OCR warmups; the whole-process JFR intentionally also captures JIT
+startup behavior.
 Focused benchmarks track the `60 x 80` by `80 x 6906` REC projection MatMul and
 the fused REC terminal path (`MatMul + bias + Softmax + ArgMax`). Supported REC
 graphs use the fused path by default, retaining one class row plus compact CTC

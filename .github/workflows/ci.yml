@@ -145,12 +145,12 @@ jobs:
             | tee benchmark-results/full-ocr-vector-auto-cpu8.json
           java -Xms64m -Xmx512m \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
-            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 2 5 320 scalar auto \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 10 5 320 scalar auto \
             | tee benchmark-results/full-ocr-allocation-scalar.json
           java -XX:StartFlightRecording=filename=benchmark-results/full-ocr-allocation-vector.jfr,settings=profile,dumponexit=true \
             -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
-            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 2 5 320 vector auto \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 10 5 320 vector auto \
             | tee benchmark-results/full-ocr-allocation-vector.json
           jfr view --width 160 allocation-by-class benchmark-results/full-ocr-allocation-vector.jfr \
             | tee benchmark-results/full-ocr-allocation-vector-by-class.txt
