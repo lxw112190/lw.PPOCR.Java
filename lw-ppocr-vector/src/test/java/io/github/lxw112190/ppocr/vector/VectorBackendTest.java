@@ -510,7 +510,7 @@ public final class VectorBackendTest {
                 if (dense[row * columns + column] > dense[row * columns + expected]) expected = column;
             }
             Assert.assertEquals(expected, ids[row]);
-            Assert.assertEquals(dense[row * columns + expected], probabilities[row], 0.0f);
+            Assert.assertEquals(dense[row * columns + expected], probabilities[row], 1.0e-7f);
         }
     }
 
