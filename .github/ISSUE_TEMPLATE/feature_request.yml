@@ -1,0 +1,42 @@
+name: Feature request / 功能建议
+description: Propose a focused improvement to the runtime, API, tooling, or documentation.
+title: "[Feature] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user problem before proposing an implementation.
+
+        Current model support: https://github.com/lxw112190/lw.PPOCR.Java/blob/main/docs/models.md
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / 问题
+      description: What cannot be done today, or what is unnecessarily difficult?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior / 期望行为
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered / 已考虑的替代方案
+  - type: dropdown
+    id: compatibility
+    attributes:
+      label: Compatibility impact / 兼容性影响
+      options:
+        - No public API change
+        - Backward-compatible API addition
+        - Breaking API or model-format change
+        - Unknown
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context / 补充信息

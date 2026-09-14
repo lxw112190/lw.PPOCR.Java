@@ -363,8 +363,10 @@ jobs:
             "$root/models/ppocrv6-tiny/"
           cp release/ppocrv6-tiny-manifest.json \
             "$root/models/ppocrv6-tiny/manifest.json"
-          cp README.md README.zh-CN.md CHANGELOG.md LICENSE THIRD-PARTY-NOTICES.md "$root/"
+          cp README.md README.zh-CN.md QUICKSTART.md CHANGELOG.md LICENSE \
+            THIRD-PARTY-NOTICES.md "$root/"
           cp -R docs licenses "$root/"
+          python scripts/verify-release-layout.py "$root"
           (
             cd "$root"
             find . -type f ! -name SHA256SUMS.txt -print0 \

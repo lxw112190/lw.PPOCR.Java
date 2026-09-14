@@ -5,6 +5,16 @@
 A lightweight pure-Java PP-OCRv6 inference runtime with no native
 dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 
+<p align="center">
+  <a href="https://github.com/lxw112190/lw.PPOCR.Java/releases/latest">📦 Download Release</a>
+  ·
+  <a href="docs/installation.md">🚀 Quick Start</a>
+  ·
+  <a href="docs/models.md">🤖 Models</a>
+</p>
+
+## Core features
+
 - No Python
 - No Paddle Inference
 - No ONNX Runtime
@@ -12,6 +22,80 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - No JNI
 - Shared LWM v0.1 model format with `lw.PPOCR.C`
 - Scalar correctness path plus an optional JDK 25 Vector API backend
+
+## 🚀 Quick start
+
+### 1. Download a Release
+
+The official PP-OCRv6 Tiny FP32 models are included in every tagged Release.
+You do not need to download PaddleOCR models separately or run a converter.
+
+➡️ [Download the latest Release](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
+
+Download and extract `lw.PPOCR.Java-vX.Y.Z.zip`. Its layout is:
+
+```text
+lw.PPOCR.Java-vX.Y.Z/
+├── QUICKSTART.md
+├── lib/
+│   ├── lw-ppocr-core-*.jar
+│   ├── lw-ppocr-imageio-*.jar
+│   └── lw-ppocr-vector-*.jar
+├── models/
+│   └── ppocrv6-tiny/
+│       ├── det.lwm
+│       ├── cls.lwm
+│       ├── rec.lwm
+│       ├── ppocr_keys.txt
+│       ├── sample.jpg
+│       └── manifest.json
+├── docs/
+└── licenses/
+```
+
+### 2. Run the minimal Java example
+
+```java
+Path modelRoot = Paths.get("models", "ppocrv6-tiny");
+
+try (PaddleOcr ocr = PaddleOcr.load(
+        modelRoot.resolve("det.lwm"),
+        modelRoot.resolve("cls.lwm"),
+        modelRoot.resolve("rec.lwm"),
+        modelRoot.resolve("ppocr_keys.txt"))) {
+    OcrResult result = PaddleOcrImageIo.recognize(
+            ocr, modelRoot.resolve("sample.jpg"));
+    System.out.println(result.getText());
+}
+```
+
+The extracted package contains a complete copy-and-run example in
+[`QUICKSTART.md`](QUICKSTART.md). More installation and lifecycle guidance is
+available in [`docs/installation.md`](docs/installation.md).
+
+## 📦 Model download
+
+The officially verified model set is **PP-OCRv6 Tiny / FP32 / LWM v0.1**. It is
+already present in the [GitHub Release ZIP](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
+under `models/ppocrv6-tiny/`; there is no separate model download.
+
+`lw.PPOCR.Java` does not parse ONNX. Only custom or additional PP-OCR models
+need offline conversion to LWM with the tools from
+[`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C). See the
+[model guide](docs/models.md) for provenance, checksums, licensing, and the
+compatibility policy.
+
+## ⚡ Vector API acceleration
+
+Start with the Scalar example above to verify the installation. For faster CPU
+inference on JDK 25, add `lw-ppocr-vector` to the class path, create a
+`VectorBackend`, and launch Java with:
+
+```text
+java --add-modules jdk.incubator.vector ...
+```
+
+The Vector module is optional; unsupported shapes retain the Scalar fallback.
 
 ## Current milestone
 
@@ -55,8 +139,9 @@ activations, and binary broadcasting. It also fuses the exact five-node
 validating tensor connections, shapes, constants, and exclusive intermediate
 uses. Unsupported generic shapes continue to fall back to Scalar correctness.
 
-The runtime intentionally does not parse ONNX. Model conversion remains an
-offline responsibility of `lw.PPOCR.C` and its converter.
+The runtime intentionally does not parse ONNX. Official Tiny models are ready
+to use in the Release ZIP; conversion with `lw.PPOCR.C` is needed only for
+custom models.
 
 ## Build
 
@@ -73,7 +158,8 @@ mvn verify
 
 `0.1.0` is the first pre-1.0 release. Tagged builds produce a release-candidate
 bundle containing the three runtime JARs, PP-OCRv6 Tiny LWM models, dictionary,
-sample image, documentation, and license notices. Each ZIP has a SHA-256
+sample image, root-level `QUICKSTART.md`, documentation, and license notices.
+Each ZIP has a SHA-256
 sidecar, and CI runs full OCR from the extracted bundle before publishing it
 to GitHub Releases and retaining the same files as an Actions artifact.
 

@@ -5,6 +5,16 @@
 A lightweight pure-Java PP-OCRv6 inference runtime with no native
 dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 
+<p align="center">
+  <a href="https://github.com/lxw112190/lw.PPOCR.Java/releases/latest">📦 下载 Release</a>
+  ·
+  <a href="docs/installation.md">🚀 快速开始</a>
+  ·
+  <a href="docs/models.md">🤖 模型说明</a>
+</p>
+
+## 核心特点
+
 - 不依赖 Python
 - 不依赖 Paddle Inference
 - 不依赖 ONNX Runtime
@@ -12,6 +22,78 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - 不使用 JNI
 - 与 `lw.PPOCR.C` 共用 LWM v0.1 模型格式
 - 提供 Scalar 正确性路径，以及可选的 JDK 25 Vector API 后端
+
+## 🚀 快速开始
+
+### 1. 下载 Release
+
+官方验证的 PP-OCRv6 Tiny FP32 模型已经包含在每个正式 Release 中。普通用户
+不需要另外下载 PaddleOCR 模型，也不需要自行运行转换工具。
+
+➡️ [下载最新版本](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
+
+下载并解压 `lw.PPOCR.Java-vX.Y.Z.zip`，实际目录结构如下：
+
+```text
+lw.PPOCR.Java-vX.Y.Z/
+├── QUICKSTART.md
+├── lib/
+│   ├── lw-ppocr-core-*.jar
+│   ├── lw-ppocr-imageio-*.jar
+│   └── lw-ppocr-vector-*.jar
+├── models/
+│   └── ppocrv6-tiny/
+│       ├── det.lwm
+│       ├── cls.lwm
+│       ├── rec.lwm
+│       ├── ppocr_keys.txt
+│       ├── sample.jpg
+│       └── manifest.json
+├── docs/
+└── licenses/
+```
+
+### 2. 运行最小 Java 示例
+
+```java
+Path modelRoot = Paths.get("models", "ppocrv6-tiny");
+
+try (PaddleOcr ocr = PaddleOcr.load(
+        modelRoot.resolve("det.lwm"),
+        modelRoot.resolve("cls.lwm"),
+        modelRoot.resolve("rec.lwm"),
+        modelRoot.resolve("ppocr_keys.txt"))) {
+    OcrResult result = PaddleOcrImageIo.recognize(
+            ocr, modelRoot.resolve("sample.jpg"));
+    System.out.println(result.getText());
+}
+```
+
+Release 解压目录中的 [`QUICKSTART.md`](QUICKSTART.md) 提供了包含 import 和启动
+命令的完整单文件示例。依赖配置、生命周期及并发说明参阅
+[`docs/installation.md`](docs/installation.md)。
+
+## 📦 模型下载
+
+当前官方验证模型是 **PP-OCRv6 Tiny / FP32 / LWM v0.1**，已直接包含在
+[GitHub Release ZIP](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
+的 `models/ppocrv6-tiny/` 中，不需要单独下载模型包。
+
+`lw.PPOCR.Java` Runtime 本身不解析 ONNX。只有使用其他或自定义 PP-OCR 模型时，
+才需要通过 [`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C) 提供的离线
+工具转换为 LWM。模型来源、校验和、许可证和兼容策略参阅
+[模型说明](docs/models.md)。
+
+## ⚡ Vector API 加速
+
+建议先使用上面的 Scalar 示例确认安装正确。需要更快的 CPU 推理时，可以在 JDK 25
+下加入 `lw-ppocr-vector`，创建 `VectorBackend`，并使用以下参数启动：
+
+```text
+java --add-modules jdk.incubator.vector ...
+```
+
+Vector 模块完全可选；未专门优化的形状仍会回退到 Scalar 正确性路径。
 
 ## 当前里程碑
 
@@ -47,7 +129,8 @@ MANUAL；调用任一独立 Worker 设置方法也会切回 MANUAL。
 `DIV -> ERF -> ADD -> MUL -> MUL` GELU 表达式。通用但未专门优化的形状会继续
 回退到 Scalar 正确性实现。
 
-运行时刻意不解析 ONNX。模型转换仍然是 `lw.PPOCR.C` 及其转换器负责的离线工作。
+运行时刻意不解析 ONNX。官方 Tiny 模型可直接使用 Release ZIP 中的文件；只有自定义
+模型才需要通过 `lw.PPOCR.C` 离线转换。
 
 ## 构建
 
@@ -62,7 +145,8 @@ mvn verify
 ## 发布版本
 
 `0.1.0` 是首个 1.0 之前的正式版本。Tag 构建会生成发布候选包，其中包含三个运行时
-JAR、PP-OCRv6 Tiny LWM 模型、字典、示例图片、文档和许可证声明。每个 ZIP 都附带
+JAR、PP-OCRv6 Tiny LWM 模型、字典、示例图片、根目录 `QUICKSTART.md`、文档和
+许可证声明。每个 ZIP 都附带
 SHA-256 文件；CI 会先解压候选包并运行一次完整 OCR，再发布到 GitHub Releases，
 同时保留相同文件作为 Actions Artifact。
 

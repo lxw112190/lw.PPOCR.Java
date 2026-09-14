@@ -5,7 +5,7 @@
 - JDK 25；
 - CPU；
 - 不需要 Python、Paddle Inference、ONNX Runtime、OpenCV、JNI 或本地动态库；
-- 模型由 `lw.PPOCR.C` 离线转换为 LWM v0.1，Java Runtime 不解析 ONNX。
+- 官方 Tiny 模型已包含在 Release ZIP 中；只有自定义模型才需要离线转换。
 
 GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windows 和 macOS。
 
@@ -64,6 +64,7 @@ Vector 后端会在连接关系、形状、标量常量和中间张量使用次�
 原始节点逐个执行，不影响 Scalar 正确性路径。性能诊断将整段融合耗时归入 ERF。
 
 ```java
+Path modelRoot = Paths.get("models", "ppocrv6-tiny");
 PaddleOcrOptions options = PaddleOcrOptions.builder()
         .setDetectionMaximumSideLength(320)
         .setClassificationParallelism(4)
@@ -71,13 +72,14 @@ PaddleOcrOptions options = PaddleOcrOptions.builder()
         .build();
 
 try (PaddleOcr ocr = PaddleOcr.load(
-        Paths.get("models/det.lwm"),
-        Paths.get("models/cls.lwm"),
-        Paths.get("models/rec.lwm"),
-        Paths.get("models/ppocr_keys.txt"),
+        modelRoot.resolve("det.lwm"),
+        modelRoot.resolve("cls.lwm"),
+        modelRoot.resolve("rec.lwm"),
+        modelRoot.resolve("ppocr_keys.txt"),
         options,
         new VectorBackend())) {
-    OcrResult result = PaddleOcrImageIo.recognize(ocr, Paths.get("sample.jpg"));
+    OcrResult result = PaddleOcrImageIo.recognize(
+            ocr, modelRoot.resolve("sample.jpg"));
 }
 ```
 
@@ -102,28 +104,58 @@ java --add-modules jdk.incubator.vector ...
 
 ## 模型准备
 
-准备同一套 LWM v0.1 模型和字典文件：
+### 使用官方模型
+
+官方验证的 **PP-OCRv6 Tiny / FP32 / LWM v0.1** 模型已经随
+`lw.PPOCR.Java` GitHub Release 一起发布。普通用户不需要自行下载 PaddleOCR
+原始模型，也不需要执行 ONNX → LWM 转换。
+
+下载地址：
+
+<https://github.com/lxw112190/lw.PPOCR.Java/releases/latest>
+
+解压后模型位于固定目录：
 
 ```text
 models/
-├─ det.lwm
-├─ cls.lwm             # 可选；不使用方向分类时省略
-├─ rec.lwm
-└─ ppocr_keys.txt
+└── ppocrv6-tiny/
+    ├── det.lwm
+    ├── cls.lwm
+    ├── rec.lwm
+    ├── ppocr_keys.txt
+    ├── sample.jpg
+    └── manifest.json
 ```
 
-模型转换和模型下载属于 `lw.PPOCR.C` 的离线职责。Java 加载器会在发布模型前校验完整文件、校验和、张量、节点、参数和图索引。
+Release 布局是公开契约，应用示例统一从
+`Paths.get("models", "ppocrv6-tiny")` 解析模型。CI 会在发布前校验模型 SHA-256、
+解压完整候选包，并从这个目录实际执行一次 OCR。
+
+### 使用其他模型
+
+`lw.PPOCR.Java` Runtime 本身不解析 ONNX。如果需要使用其他 PP-OCR 模型，需通过
+[`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C) 提供的离线转换工具生成
+LWM 模型：
+
+```text
+官方 PP-OCRv6 Tiny：Release → 直接使用
+
+其他兼容模型：ONNX → lw.PPOCR.C Converter → LWM → lw.PPOCR.Java
+```
+
+模型来源、许可证、校验和及兼容策略详见[模型说明](models.md)。
 
 ## 纯 BGR API
 
 核心模块接收 BGR8 图像视图，不拥有调用方的像素数组：
 
 ```java
+Path modelRoot = Paths.get("models", "ppocrv6-tiny");
 try (PaddleOcr ocr = PaddleOcr.load(
-        Paths.get("models/det.lwm"),
-        Paths.get("models/cls.lwm"),
-        Paths.get("models/rec.lwm"),
-        Paths.get("models/ppocr_keys.txt"))) {
+        modelRoot.resolve("det.lwm"),
+        modelRoot.resolve("cls.lwm"),
+        modelRoot.resolve("rec.lwm"),
+        modelRoot.resolve("ppocr_keys.txt"))) {
     BgrImage image = new BgrImage(pixels, width, height, stride);
     OcrResult result = ocr.recognize(image);
 }
@@ -147,7 +179,8 @@ PaddleOcr ocr = PaddleOcr.load(detectorPath, null, recognizerPath, dictionaryPat
 
 ```java
 try (PaddleOcr ocr = PaddleOcr.load(detector, classifier, recognizer, dictionary)) {
-    OcrResult result = PaddleOcrImageIo.recognize(ocr, Paths.get("sample.png"));
+    OcrResult result = PaddleOcrImageIo.recognize(
+            ocr, Paths.get("models", "ppocrv6-tiny", "sample.jpg"));
 }
 ```
 
@@ -187,9 +220,10 @@ CLS 会把固定形状的文字行分配到独立 Session worker，所有 worker
 
 仓库中的 `sample.jpg` 位于
 `lw-ppocr-core/src/test/resources/golden/ocr/sample.jpg`，CI 使用它验证 16 行完整
-OCR。性能摘要明确区分 Scalar、Vector 和 Vector CLS×4/REC×4，并报告 DET/CLS/REC
+OCR。Release ZIP 中的同一图片位于 `models/ppocrv6-tiny/sample.jpg`。性能摘要明确
+区分 Scalar、Vector 和 Vector CLS×4/REC×4，并报告 DET/CLS/REC
 阶段耗时、模型常驻堆、GC 后存活堆、峰值堆和 GC 次数。不同 GitHub Runner
-之间波动较大，应只比较同一环境、同一参数和相同提交附近的结果。schema 3
+之间波动较大，应只比较同一环境、同一参数和相同提交附近的结果。schema 4
 在关闭算子探针时采集计时与内存数据，再额外运行一次已预热 OCR 生成全线程算子
 诊断。`operators` 保留整条流水线汇总，`stage_operators` 分别报告 DET、CLS、REC；
 `stage_hot_nodes` 进一步列出最慢节点及其已解析张量形状。`summed_thread_ms_per_ocr`

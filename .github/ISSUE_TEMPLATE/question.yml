@@ -1,0 +1,49 @@
+name: Question / 使用问题
+description: Ask for help after checking the model and installation guides.
+title: "[Question] "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before asking / 提问前请先查看：
+
+        - Models / 模型下载：https://github.com/lxw112190/lw.PPOCR.Java/releases/latest
+        - Installation / 安装说明：https://github.com/lxw112190/lw.PPOCR.Java/blob/main/docs/installation.md
+        - Supported models / 模型支持：https://github.com/lxw112190/lw.PPOCR.Java/blob/main/docs/models.md
+
+        The official PP-OCRv6 Tiny models are already included in the Release ZIP.
+        官方 PP-OCRv6 Tiny 模型已包含在 Release ZIP 中。
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do? / 你想完成什么？
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried? / 已尝试哪些操作？
+      description: Include relevant code, commands, errors, and documentation you followed.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / 版本
+      placeholder: Release tag or commit SHA
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment / 环境
+      placeholder: Windows 11, JDK 25, Vector API
+    validations:
+      required: true
+  - type: checkboxes
+    id: read-guides
+    attributes:
+      label: Documentation check / 文档确认
+      options:
+        - label: I checked the installation and model guides above. / 我已查看上面的安装和模型说明。
+          required: true

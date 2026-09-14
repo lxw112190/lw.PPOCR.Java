@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Download
+
+- Tagged Release ZIPs contain the runtime JARs, PP-OCRv6 Tiny DET/CLS/REC LWM
+  models, recognition dictionary, sample image, documentation, license notices,
+  and SHA-256 manifests. No separate model download is required.
+
 ### Added
 
 - REC terminal pattern detection and fused projection, bias, winning Softmax
@@ -26,6 +32,12 @@ All notable changes to this project are documented in this file.
   plans, removing `IdentityHashMap` lookups from the inference hot loop.
 - Cross-platform Vector projection parity now uses a numerical tolerance for
   softmax probabilities while retaining exact class-ID comparison.
+- A first-page Quick Start, dedicated model guide, and direct model-download
+  links in both English and Chinese project home pages.
+- Structured bug, feature, and question Issue forms with model and installation
+  guidance shown before a question is submitted.
+- A Release-layout verifier that checks the documented model path, required
+  files, model manifest, and SHA-256 values before packaging.
 
 ### Changed
 
@@ -33,6 +45,7 @@ All notable changes to this project are documented in this file.
   supported terminal pattern is active.
 - Synchronous OCR calls reuse line, crop, classification, recognition, rotation,
   REC width-group, and task-future staging storage at their high-water sizes.
+- Release bundles now include `QUICKSTART.md` at the archive root.
 
 ## [0.1.0] - 2026-09-13
 
