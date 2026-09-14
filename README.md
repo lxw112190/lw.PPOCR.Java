@@ -213,6 +213,21 @@ depthwise CLS layer (`[1,64,5,80]`), so runner-wide load changes can be
 separated from backend speedups.
 Performance output is a development signal only; v0.x does not use it as a release gate.
 
+For a local comparison against the metadata-backed corpus from `lw.PPOCR.C`,
+build the benchmark module and run `DatasetOcrPerformanceMain` with the three
+LWM model paths and dictionary path. It writes one JSON record per image;
+`scripts/evaluate-java-dataset.py` then reports the same greedy IoU matching
+and matched-line CER metrics as the C evaluator. The corpus and generated
+reports stay outside the repository.
+
+```text
+java -cp "lw-ppocr-core/target/classes;lw-ppocr-imageio/target/classes;lw-ppocr-benchmark/target/classes" \
+  io.github.lxw112190.ppocr.benchmark.DatasetOcrPerformanceMain \
+  <dataset> <det.lwm> <cls.lwm> <rec.lwm> <ppocr_keys.txt> <predictions.jsonl>
+python scripts/evaluate-java-dataset.py \
+  --dataset <dataset> --predictions <predictions.jsonl> --output <report.json>
+```
+
 Prepared inference sessions, preprocessing arrays, DB geometry scratch space,
 per-line perspective-crop pixel buffers, width groups, and task staging arrays
 are reused across synchronous OCR calls. A `PaddleOcr` instance is therefore intended for one caller at a time;

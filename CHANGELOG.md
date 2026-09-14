@@ -24,6 +24,8 @@ All notable changes to this project are documented in this file.
   uploaded JFR recording and top allocation-class summary in Linux CI.
 - A ten-iteration allocation warmup that separates steady-state allocation
   from Vector API C2 compilation and escape-analysis startup behavior.
+- A reproducible DET graph/input dump and standalone DB postprocess dump for
+  direct comparison with reference runtimes.
 - An immutable compiled-model cache that shares decoded constants, node index
   arrays, and read-only parameter views across shape-specialized sessions.
 - Model-wide tensor consumer counts and last-use indexes for fusion-safety and
@@ -38,9 +40,16 @@ All notable changes to this project are documented in this file.
   guidance shown before a question is submitted.
 - A Release-layout verifier that checks the documented model path, required
   files, model manifest, and SHA-256 values before packaging.
+- An external metadata-backed dataset runner and CER evaluator for comparing
+  the Java pipeline with the local `lw.PPOCR.C` reference corpus.
 
 ### Changed
 
+- DB postprocess now follows the C/Paddle minimum-side filtering stages before
+  scoring, after unclip, and after source-coordinate restoration, with float
+  geometry arithmetic for closer cross-runtime parity.
+- Fixed the dynamic DET cache's height/width argument inversion so non-square
+  images keep their declared `[1,3,height,width]` session shape.
 - REC sessions no longer retain the dense `[T,C]` probability matrix when the
   supported terminal pattern is active.
 - Synchronous OCR calls reuse line, crop, classification, recognition, rotation,

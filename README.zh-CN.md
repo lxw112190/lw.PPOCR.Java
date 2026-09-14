@@ -194,6 +194,20 @@ CI 摘要中列出主要分配类型，便于把对象抖动与保留堆占用�
 专项基准可以把内核加速与完整流水线的调度噪声分开。性能输出仅作为开发信号；
 v0.x 阶段不会将其作为发布门禁。
 
+如果要与 `lw.PPOCR.C` 的带元数据数据集做本地对比，可以先构建 benchmark 模块，
+再使用 `DatasetOcrPerformanceMain` 传入数据集目录、三个 LWM 模型和字典路径。
+程序会为每张图片写出一条 JSON 记录；随后使用
+`scripts/evaluate-java-dataset.py`，按照 C 评测器相同的贪心 IoU 匹配和已匹配行 CER
+算法生成报告。数据集和生成的报告不会提交到仓库。
+
+```text
+java -cp "lw-ppocr-core/target/classes;lw-ppocr-imageio/target/classes;lw-ppocr-benchmark/target/classes" \
+  io.github.lxw112190.ppocr.benchmark.DatasetOcrPerformanceMain \
+  <dataset> <det.lwm> <cls.lwm> <rec.lwm> <ppocr_keys.txt> <predictions.jsonl>
+python scripts/evaluate-java-dataset.py \
+  --dataset <dataset> --predictions <predictions.jsonl> --output <report.json>
+```
+
 同步 OCR 调用之间会复用已准备好的推理 Session、预处理数组、DB 几何临时空间、
 逐行透视裁剪像素缓冲区、REC 宽度分组和任务编排数组。因此一个 `PaddleOcr` 实例设计为同一时刻只由一个
 调用方使用；需要并发时，请使用独立实例或 `OcrWorkerPool`。

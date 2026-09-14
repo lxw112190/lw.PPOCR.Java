@@ -1,6 +1,7 @@
 target/
 .maven-repository/
 benchmark-results/
+build-local-data/
 dist/
 *.rar
 *.class

@@ -9,6 +9,10 @@ import java.util.List;
 
 /** Bounded first-stage DB postprocess for probability maps. */
 public final class DbPostprocess {
+    private static final float MIN_FITTED_SIDE = 3.0f;
+    private static final float MIN_UNCLIPPED_SIDE = 5.0f;
+    private static final float MIN_RESTORED_SIDE = 4.0f;
+
     private DbPostprocess() { }
 
     /** Creates a reusable, single-threaded decoder for one probability-map shape. */
@@ -63,8 +67,8 @@ public final class DbPostprocess {
         int[] queue = scratch.queue;
         long[] componentPoints = scratch.componentPoints;
         long[] hull = scratch.hull;
-        double[] corners = scratch.corners;
-        double[] sortedCorners = scratch.sortedCorners;
+        float[] corners = scratch.corners;
+        float[] sortedCorners = scratch.sortedCorners;
         List<DetectionBox> boxes = new ArrayList<DetectionBox>();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -93,33 +97,42 @@ public final class DbPostprocess {
                     }
                 }
                 int pointCount = boundaryPoints(bitmap, width, height, queue, tail, componentPoints);
+                if (pointCount <= 2) continue;
                 int hullCount = convexHull(componentPoints, pointCount, hull);
                 Rectangle rectangle = minimumRectangle(hull, hullCount);
-                if (rectangle == null) rectangle = axisAlignedRectangle(componentPoints, pointCount);
+                if (rectangle == null) continue;
+                float rectangleWidth = rectangle.maxU - rectangle.minU;
+                float rectangleHeight = rectangle.maxV - rectangle.minV;
+                float shortestSide = Math.min(rectangleWidth, rectangleHeight);
+                if (shortestSide < MIN_FITTED_SIDE) continue;
                 float score = rectangleScore(probabilities, width, height, rectangle, corners);
-                if (score >= boxThreshold) {
-                    if (boxes.size() == maxCandidates) {
-                        throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB candidate limit exceeded");
+                if (!Float.isFinite(score) || score < boxThreshold) continue;
+                float expansion = expansion(rectangle, unclipRatio);
+                if (shortestSide + 2.0f * expansion < MIN_UNCLIPPED_SIDE) continue;
+                rectanglePoints(rectangle, expansion, corners);
+                orderClockwise(corners, sortedCorners);
+                float[] restored = new float[8];
+                for (int point = 0; point < 4; point++) {
+                    float restoredX = corners[point * 2] / widthRatio;
+                    float restoredY = corners[point * 2 + 1] / heightRatio;
+                    if (sourceWidth > 0 && sourceHeight > 0) {
+                        restoredX = clamp(restoredX, sourceWidth - 1.0f);
+                        restoredY = clamp(restoredY, sourceHeight - 1.0f);
+                    } else {
+                        restoredX = clamp(corners[point * 2], width - 1.0f) / widthRatio;
+                        restoredY = clamp(corners[point * 2 + 1], height - 1.0f) / heightRatio;
                     }
-                    float expansion = expansion(rectangle, unclipRatio);
-                    rectanglePoints(rectangle, expansion, corners);
-                    orderClockwise(corners, sortedCorners);
-                    float[] restored = new float[8];
-                    for (int point = 0; point < 4; point++) {
-                        double restoredX = corners[point * 2] / widthRatio;
-                        double restoredY = corners[point * 2 + 1] / heightRatio;
-                        if (sourceWidth > 0 && sourceHeight > 0) {
-                            restoredX = clamp(restoredX, sourceWidth - 1.0);
-                            restoredY = clamp(restoredY, sourceHeight - 1.0);
-                        } else {
-                            restoredX = clamp(corners[point * 2], width - 1.0) / widthRatio;
-                            restoredY = clamp(corners[point * 2 + 1], height - 1.0) / heightRatio;
-                        }
-                        restored[point * 2] = (float) restoredX;
-                        restored[point * 2 + 1] = (float) restoredY;
-                    }
-                    boxes.add(new DetectionBox(restored, score));
+                    restored[point * 2] = restoredX;
+                    restored[point * 2 + 1] = restoredY;
                 }
+                if (sideLength(restored, 0, 2) <= MIN_RESTORED_SIDE ||
+                        sideLength(restored, 0, 6) <= MIN_RESTORED_SIDE) {
+                    continue;
+                }
+                if (boxes.size() == maxCandidates) {
+                    throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB candidate limit exceeded");
+                }
+                boxes.add(new DetectionBox(restored, score));
             }
         }
         return Collections.unmodifiableList(boxes);
@@ -168,34 +181,34 @@ public final class DbPostprocess {
     private static Rectangle minimumRectangle(long[] hull, int hullCount) {
         if (hullCount < 3) return null;
         Rectangle best = null;
-        double bestArea = Double.POSITIVE_INFINITY;
+        float bestArea = Float.POSITIVE_INFINITY;
         for (int edge = 0; edge < hullCount; edge++) {
             long current = hull[edge];
             long next = hull[(edge + 1) % hullCount];
-            double dx = pointX(next) - pointX(current);
-            double dy = pointY(next) - pointY(current);
-            double length = Math.hypot(dx, dy);
-            if (length <= 0.0) continue;
-            double ux = dx / length;
-            double uy = dy / length;
-            double vx = -uy;
-            double vy = ux;
-            double minU = Double.POSITIVE_INFINITY;
-            double maxU = Double.NEGATIVE_INFINITY;
-            double minV = Double.POSITIVE_INFINITY;
-            double maxV = Double.NEGATIVE_INFINITY;
+            float dx = pointX(next) - pointX(current);
+            float dy = pointY(next) - pointY(current);
+            float length = (float) Math.sqrt(dx * dx + dy * dy);
+            if (length <= 0.0f) continue;
+            float ux = dx / length;
+            float uy = dy / length;
+            float vx = -uy;
+            float vy = ux;
+            float minU = Float.POSITIVE_INFINITY;
+            float maxU = Float.NEGATIVE_INFINITY;
+            float minV = Float.POSITIVE_INFINITY;
+            float maxV = Float.NEGATIVE_INFINITY;
             for (int point = 0; point < hullCount; point++) {
-                double x = pointX(hull[point]);
-                double y = pointY(hull[point]);
-                double projectionU = x * ux + y * uy;
-                double projectionV = x * vx + y * vy;
+                float x = pointX(hull[point]);
+                float y = pointY(hull[point]);
+                float projectionU = x * ux + y * uy;
+                float projectionV = x * vx + y * vy;
                 minU = Math.min(minU, projectionU);
                 maxU = Math.max(maxU, projectionU);
                 minV = Math.min(minV, projectionV);
                 maxV = Math.max(maxV, projectionV);
             }
-            double area = (maxU - minU) * (maxV - minV);
-            if (area > 0.0 && area < bestArea) {
+            float area = (maxU - minU) * (maxV - minV);
+            if (area < bestArea) {
                 bestArea = area;
                 best = new Rectangle(ux, uy, vx, vy, minU, maxU, minV, maxV);
             }
@@ -203,27 +216,13 @@ public final class DbPostprocess {
         return best;
     }
 
-    private static Rectangle axisAlignedRectangle(long[] points, int pointCount) {
-        double minX = pointX(points[0]);
-        double maxX = minX;
-        double minY = pointY(points[0]);
-        double maxY = minY;
-        for (int i = 1; i < pointCount; i++) {
-            minX = Math.min(minX, pointX(points[i]));
-            maxX = Math.max(maxX, pointX(points[i]));
-            minY = Math.min(minY, pointY(points[i]));
-            maxY = Math.max(maxY, pointY(points[i]));
-        }
-        return new Rectangle(1.0, 0.0, 0.0, 1.0, minX, maxX, minY, maxY);
-    }
-
     private static float rectangleScore(float[] probabilities, int width, int height,
-                                        Rectangle rectangle, double[] corners) {
+                                        Rectangle rectangle, float[] corners) {
         rectanglePoints(rectangle, 0.0f, corners);
-        double minX = corners[0];
-        double maxX = corners[0];
-        double minY = corners[1];
-        double maxY = corners[1];
+        float minX = corners[0];
+        float maxX = corners[0];
+        float minY = corners[1];
+        float maxY = corners[1];
         for (int point = 1; point < 4; point++) {
             minX = Math.min(minX, corners[point * 2]);
             maxX = Math.max(maxX, corners[point * 2]);
@@ -238,8 +237,8 @@ public final class DbPostprocess {
         int count = 0;
         for (int y = top; y <= bottom; y++) {
             for (int x = left; x <= right; x++) {
-                double projectionU = x * rectangle.ux + y * rectangle.uy;
-                double projectionV = x * rectangle.vx + y * rectangle.vy;
+                float projectionU = x * rectangle.ux + y * rectangle.uy;
+                float projectionV = x * rectangle.vx + y * rectangle.vy;
                 if (projectionU >= rectangle.minU && projectionU <= rectangle.maxU &&
                         projectionV >= rectangle.minV && projectionV <= rectangle.maxV) {
                     sum += probabilities[y * width + x];
@@ -254,29 +253,34 @@ public final class DbPostprocess {
         // Keep the same interpretation as the C reference implementation:
         // the unclip ratio scales the area/perimeter offset directly.
         if (unclipRatio <= 0.0f) return 0.0f;
-        double rectangleWidth = rectangle.maxU - rectangle.minU;
-        double rectangleHeight = rectangle.maxV - rectangle.minV;
-        double perimeter = 2.0 * (rectangleWidth + rectangleHeight);
-        return perimeter <= 0.0 ? 0.0f : (float) (rectangleWidth * rectangleHeight
-                * unclipRatio / perimeter);
+        float rectangleWidth = rectangle.maxU - rectangle.minU;
+        float rectangleHeight = rectangle.maxV - rectangle.minV;
+        float perimeter = 2.0f * (rectangleWidth + rectangleHeight);
+        return perimeter <= 0.0f ? 0.0f : rectangleWidth * rectangleHeight
+                * unclipRatio / perimeter;
     }
 
-    private static void rectanglePoints(Rectangle rectangle, float expansion, double[] points) {
+    private static void rectanglePoints(Rectangle rectangle, float expansion, float[] points) {
         fromProjection(rectangle, rectangle.minU - expansion, rectangle.minV - expansion, points, 0);
         fromProjection(rectangle, rectangle.maxU + expansion, rectangle.minV - expansion, points, 2);
         fromProjection(rectangle, rectangle.maxU + expansion, rectangle.maxV + expansion, points, 4);
         fromProjection(rectangle, rectangle.minU - expansion, rectangle.maxV + expansion, points, 6);
     }
 
-    private static void fromProjection(Rectangle rectangle, double projectionU, double projectionV,
-                                       double[] points, int offset) {
+    private static void fromProjection(Rectangle rectangle, float projectionU, float projectionV,
+                                       float[] points, int offset) {
         points[offset] = projectionU * rectangle.ux + projectionV * rectangle.vx;
         points[offset + 1] = projectionU * rectangle.uy + projectionV * rectangle.vy;
     }
 
-    private static double clamp(double value, double maximum) {
-        if (value < 0.0) return 0.0;
+    private static float clamp(float value, float maximum) {
+        if (value < 0.0f) return 0.0f;
         return value > maximum ? maximum : value;
+    }
+
+    private static double sideLength(float[] points, int firstOffset, int secondOffset) {
+        return Math.hypot(points[firstOffset] - points[secondOffset],
+                points[firstOffset + 1] - points[secondOffset + 1]);
     }
 
     /** Reusable decoder; callers must not invoke it concurrently. */
@@ -326,8 +330,8 @@ public final class DbPostprocess {
         private final int[] queue;
         private final long[] componentPoints;
         private final long[] hull;
-        private final double[] corners;
-        private final double[] sortedCorners;
+        private final float[] corners;
+        private final float[] sortedCorners;
 
         private Scratch(int width, int height) {
             if (width <= 0 || height <= 0) {
@@ -343,16 +347,16 @@ public final class DbPostprocess {
             this.queue = new int[count];
             this.componentPoints = new long[count];
             this.hull = new long[count * 2];
-            this.corners = new double[8];
-            this.sortedCorners = new double[8];
+            this.corners = new float[8];
+            this.sortedCorners = new float[8];
         }
     }
 
-    private static void orderClockwise(double[] points, double[] sorted) {
+    private static void orderClockwise(float[] points, float[] sorted) {
         System.arraycopy(points, 0, sorted, 0, points.length);
         for (int i = 1; i < 4; i++) {
-            double x = sorted[i * 2];
-            double y = sorted[i * 2 + 1];
+            float x = sorted[i * 2];
+            float y = sorted[i * 2 + 1];
             int j = i - 1;
             while (j >= 0 && (x < sorted[j * 2] ||
                     (x == sorted[j * 2] && y < sorted[j * 2 + 1]))) {
@@ -381,26 +385,26 @@ public final class DbPostprocess {
         return ((long) x << 32) | (y & 0xffffffffL);
     }
 
-    private static double pointX(long point) { return (double) (point >> 32); }
-    private static double pointY(long point) { return (double) (point & 0xffffffffL); }
+    private static float pointX(long point) { return (float) (point >> 32); }
+    private static float pointY(long point) { return (float) (point & 0xffffffffL); }
 
-    private static double cross(long origin, long first, long second) {
+    private static float cross(long origin, long first, long second) {
         return (pointX(first) - pointX(origin)) * (pointY(second) - pointY(origin)) -
                 (pointY(first) - pointY(origin)) * (pointX(second) - pointX(origin));
     }
 
     private static final class Rectangle {
-        private final double ux;
-        private final double uy;
-        private final double vx;
-        private final double vy;
-        private final double minU;
-        private final double maxU;
-        private final double minV;
-        private final double maxV;
+        private final float ux;
+        private final float uy;
+        private final float vx;
+        private final float vy;
+        private final float minU;
+        private final float maxU;
+        private final float minV;
+        private final float maxV;
 
-        private Rectangle(double ux, double uy, double vx, double vy,
-                          double minU, double maxU, double minV, double maxV) {
+        private Rectangle(float ux, float uy, float vx, float vy,
+                          float minU, float maxU, float minV, float maxV) {
             this.ux = ux;
             this.uy = uy;
             this.vx = vx;

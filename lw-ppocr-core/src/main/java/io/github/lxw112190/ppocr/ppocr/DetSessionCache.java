@@ -21,7 +21,9 @@ final class DetSessionCache implements AutoCloseable {
     DetSessionContext getOrCreate(DetShapeKey key, LwmModel model, KernelBackend backend) {
         DetSessionContext existing = entries.get(key);
         if (existing != null) return existing;
-        DetSessionContext created = new DetSessionContext(model, key.height(), key.width(), backend);
+        // DetShapeKey stores height first for cache identity, while the context
+        // constructor follows the public image convention (width, height).
+        DetSessionContext created = new DetSessionContext(model, key.width(), key.height(), backend);
         entries.put(key, created);
         if (entries.size() > capacity) {
             Map.Entry<DetShapeKey, DetSessionContext> eldest = entries.entrySet().iterator().next();
