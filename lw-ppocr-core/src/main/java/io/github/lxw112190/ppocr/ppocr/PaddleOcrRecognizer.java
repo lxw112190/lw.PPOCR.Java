@@ -215,10 +215,10 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     }
 
     private RecRecognitionResult recognize(BgrImage source, RecSessionContext context) {
-        context.preprocess.resizeNormalize(source);
-        CtcDecodeResult decoded = context.run(context.preprocess.getChw(), dictionary);
+        context.preprocess(source);
+        CtcDecodeResult decoded = context.run(dictionary);
         return new RecRecognitionResult(decoded.getText(), decoded.getScore(),
-                decoded.getEmittedCount(), context.preprocess.getResizedWidth());
+                decoded.getEmittedCount(), context.resizedWidth());
     }
 
     private void recognize(RecognitionGroup group, RecRecognitionResult[] results) {

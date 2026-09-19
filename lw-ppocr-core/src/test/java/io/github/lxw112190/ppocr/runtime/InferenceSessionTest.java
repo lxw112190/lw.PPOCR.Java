@@ -21,6 +21,24 @@ public final class InferenceSessionTest {
     }
 
     @Test
+    public void runsDirectlyThroughBoundTensorViews() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
+        InferenceSession session = new InferenceSession(model);
+        FloatTensorView input = session.inputView();
+        FloatTensorView output = session.outputView();
+        Assert.assertSame(input.array(), session.inputView().array());
+        Assert.assertSame(output.array(), session.outputView().array());
+        System.arraycopy(new float[] {1, 2, 3, 4}, 0,
+                input.array(), input.offset(), input.length());
+        session.runBound();
+        float[] actual = new float[output.length()];
+        System.arraycopy(output.array(), output.offset(), actual, 0, output.length());
+        Assert.assertArrayEquals(new float[] {2, 4, 6, 8}, actual, 0.0f);
+        session.close();
+        model.close();
+    }
+
+    @Test
     public void reportsZeroInputNodeAsUnsupportedModel() {
         byte[] bytes = addModel();
         ByteBuffer buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);

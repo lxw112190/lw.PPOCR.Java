@@ -23,8 +23,30 @@ public final class RecPreprocess {
         int resizedWidth = (int) Math.min(targetWidth,
                 (scaledWidth + source.height() - 1L) / source.height());
         float[] output = new float[(int) outputElements];
+        resizeNormalizeInto(source, targetWidth, output, 0);
+        return new RecPreprocessResult(output, resizedWidth);
+    }
+
+    /** Resizes and normalizes directly into an existing CHW FP32 tensor. */
+    public static void resizeNormalizeInto(BgrImage source, int targetWidth,
+                                           float[] output, int outputOffset) {
+        if (source == null || targetWidth <= 0 || output == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "REC preprocess inputs are required");
+        }
+        long outputElements = 3L * INPUT_HEIGHT * targetWidth;
+        if (outputElements > Integer.MAX_VALUE || outputOffset < 0
+                || outputOffset > output.length
+                || outputElements > output.length - (long) outputOffset) {
+            throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
+                    "REC destination is too small");
+        }
+        long scaledWidth = (long) INPUT_HEIGHT * source.width();
+        int resizedWidth = (int) Math.min(targetWidth,
+                (scaledWidth + source.height() - 1L) / source.height());
         float padding = (float) (128.0 * NORMALIZE_SCALE - 1.0);
-        java.util.Arrays.fill(output, padding);
+        java.util.Arrays.fill(output, outputOffset,
+                outputOffset + (int) outputElements, padding);
         long plane = (long) INPUT_HEIGHT * targetWidth;
         byte[] pixels = source.pixels();
         for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {
@@ -49,12 +71,12 @@ public final class RecPreprocess {
                     double top = topLeft + (topRight - topLeft) * weightX;
                     double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
                     double value = top + (bottom - top) * weightY;
-                    int index = (int) (channel * plane + (long) outputY * targetWidth + outputX);
+                    int index = outputOffset
+                            + (int) (channel * plane + (long) outputY * targetWidth + outputX);
                     output[index] = (float) (value * NORMALIZE_SCALE - 1.0);
                 }
             }
         }
-        return new RecPreprocessResult(output, resizedWidth);
     }
 
     /** Reusable REC preprocessing buffer; callers must not invoke it concurrently. */
@@ -84,37 +106,7 @@ public final class RecPreprocess {
             long scaledWidth = (long) INPUT_HEIGHT * source.width();
             resizedWidth = (int) Math.min(targetWidth,
                     (scaledWidth + source.height() - 1L) / source.height());
-            long plane = (long) INPUT_HEIGHT * targetWidth;
-            float padding = (float) (128.0 * NORMALIZE_SCALE - 1.0);
-            java.util.Arrays.fill(output, padding);
-            byte[] pixels = source.pixels();
-            for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {
-                double sourceY = ((double) outputY + 0.5) * source.height() / INPUT_HEIGHT - 0.5;
-                int sourceY0Raw = (int) Math.floor(sourceY);
-                int sourceY1Raw = sourceY0Raw + 1;
-                int sourceY0 = clamp(sourceY0Raw, source.height());
-                int sourceY1 = clamp(sourceY1Raw, source.height());
-                double weightY = sourceY - sourceY0Raw;
-                for (int outputX = 0; outputX < resizedWidth; outputX++) {
-                    double sourceX = ((double) outputX + 0.5) * source.width() / resizedWidth - 0.5;
-                    int sourceX0Raw = (int) Math.floor(sourceX);
-                    int sourceX1Raw = sourceX0Raw + 1;
-                    int sourceX0 = clamp(sourceX0Raw, source.width());
-                    int sourceX1 = clamp(sourceX1Raw, source.width());
-                    double weightX = sourceX - sourceX0Raw;
-                    for (int channel = 0; channel < 3; channel++) {
-                        double topLeft = pixels[sourceY0 * source.stride() + sourceX0 * 3 + channel] & 0xff;
-                        double topRight = pixels[sourceY0 * source.stride() + sourceX1 * 3 + channel] & 0xff;
-                        double bottomLeft = pixels[sourceY1 * source.stride() + sourceX0 * 3 + channel] & 0xff;
-                        double bottomRight = pixels[sourceY1 * source.stride() + sourceX1 * 3 + channel] & 0xff;
-                        double top = topLeft + (topRight - topLeft) * weightX;
-                        double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
-                        double value = top + (bottom - top) * weightY;
-                        int index = (int) (channel * plane + (long) outputY * targetWidth + outputX);
-                        output[index] = (float) (value * NORMALIZE_SCALE - 1.0);
-                    }
-                }
-            }
+            RecPreprocess.resizeNormalizeInto(source, targetWidth, output, 0);
         }
 
         public float[] getChw() { return output; }

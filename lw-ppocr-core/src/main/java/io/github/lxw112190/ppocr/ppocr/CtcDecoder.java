@@ -9,8 +9,17 @@ public final class CtcDecoder {
 
     public static CtcDecodeResult decodeGreedy(float[] probabilities, int timeSteps,
                                                int classCount, PaddleOcrDictionary dictionary) {
-        if (probabilities == null || dictionary == null || timeSteps <= 0 || classCount <= 0 ||
-                (long) timeSteps * classCount != probabilities.length || classCount != dictionary.classCount()) {
+        return decodeGreedy(probabilities, 0, timeSteps, classCount, dictionary);
+    }
+
+    public static CtcDecodeResult decodeGreedy(float[] probabilities, int probabilityOffset,
+                                               int timeSteps, int classCount,
+                                               PaddleOcrDictionary dictionary) {
+        long elements = (long) timeSteps * classCount;
+        if (probabilities == null || dictionary == null || probabilityOffset < 0
+                || timeSteps <= 0 || classCount <= 0 || probabilityOffset > probabilities.length
+                || elements > probabilities.length - (long) probabilityOffset
+                || classCount != dictionary.classCount()) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "CTC probability shape or dictionary is invalid");
         }
         StringBuilder text = new StringBuilder();
@@ -18,7 +27,7 @@ public final class CtcDecoder {
         int emitted = 0;
         double scoreSum = 0.0;
         for (int step = 0; step < timeSteps; step++) {
-            int row = step * classCount;
+            int row = probabilityOffset + step * classCount;
             int best = 0;
             float bestValue = probabilities[row];
             if (!Float.isFinite(bestValue)) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "CTC probabilities contain non-finite values");

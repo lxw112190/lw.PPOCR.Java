@@ -49,18 +49,22 @@ public final class DbPostprocess {
         validate(probabilities, width, height, bitmapThreshold, boxThreshold,
                 widthRatio, heightRatio, maxCandidates, unclipRatio);
         return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
-                widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
+                0, widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
                 -1, -1, new Scratch(width, height));
     }
 
     private static List<DetectionBox> decodeInternal(float[] probabilities, int width, int height,
                                                      float bitmapThreshold, float boxThreshold,
+                                                     int probabilityOffset,
                                                      float widthRatio, float heightRatio,
                                                      int maxCandidates, float unclipRatio,
                                                      boolean useDilation, int sourceWidth,
                                                      int sourceHeight, Scratch scratch) {
         boolean[] bitmap = scratch.bitmap;
-        for (int i = 0; i < probabilities.length; i++) bitmap[i] = probabilities[i] > bitmapThreshold;
+        int pixelCount = width * height;
+        for (int i = 0; i < pixelCount; i++) {
+            bitmap[i] = probabilities[probabilityOffset + i] > bitmapThreshold;
+        }
         if (useDilation) dilate2x2(bitmap, width, height);
         boolean[] visited = scratch.visited;
         Arrays.fill(visited, false);
@@ -105,7 +109,8 @@ public final class DbPostprocess {
                 float rectangleHeight = rectangle.maxV - rectangle.minV;
                 float shortestSide = Math.min(rectangleWidth, rectangleHeight);
                 if (shortestSide < MIN_FITTED_SIDE) continue;
-                float score = rectangleScore(probabilities, width, height, rectangle, corners);
+                float score = rectangleScore(probabilities, probabilityOffset, width, height,
+                        rectangle, corners);
                 if (!Float.isFinite(score) || score < boxThreshold) continue;
                 float expansion = expansion(rectangle, unclipRatio);
                 if (shortestSide + 2.0f * expansion < MIN_UNCLIPPED_SIDE) continue;
@@ -216,7 +221,8 @@ public final class DbPostprocess {
         return best;
     }
 
-    private static float rectangleScore(float[] probabilities, int width, int height,
+    private static float rectangleScore(float[] probabilities, int probabilityOffset,
+                                        int width, int height,
                                         Rectangle rectangle, float[] corners) {
         rectanglePoints(rectangle, 0.0f, corners);
         float minX = corners[0];
@@ -241,7 +247,7 @@ public final class DbPostprocess {
                 float projectionV = x * rectangle.vx + y * rectangle.vy;
                 if (projectionU >= rectangle.minU && projectionU <= rectangle.maxU &&
                         projectionV >= rectangle.minV && projectionV <= rectangle.maxV) {
-                    sum += probabilities[y * width + x];
+                    sum += probabilities[probabilityOffset + y * width + x];
                     count++;
                 }
             }
@@ -302,7 +308,7 @@ public final class DbPostprocess {
             validate(probabilities, width, height, bitmapThreshold, boxThreshold,
                     widthRatio, heightRatio, maxCandidates, unclipRatio);
             return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
-                    widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
+                    0, widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
                     -1, -1, scratch);
         }
 
@@ -319,8 +325,26 @@ public final class DbPostprocess {
             validate(probabilities, width, height, bitmapThreshold, boxThreshold,
                     widthRatio, heightRatio, maxCandidates, unclipRatio);
             return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
-                    widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
+                    0, widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
                     sourceWidth, sourceHeight, scratch);
+        }
+
+        /** Decodes a map stored in a reusable array at the given element offset. */
+        public List<DetectionBox> decodeToSource(float[] probabilities, int probabilityOffset,
+                                                 float bitmapThreshold, float boxThreshold,
+                                                 float widthRatio, float heightRatio,
+                                                 int maxCandidates, float unclipRatio,
+                                                 boolean useDilation, int sourceWidth,
+                                                 int sourceHeight) {
+            if (sourceWidth <= 0 || sourceHeight <= 0) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "Source image dimensions are invalid");
+            }
+            validate(probabilities, probabilityOffset, width, height, bitmapThreshold,
+                    boxThreshold, widthRatio, heightRatio, maxCandidates, unclipRatio);
+            return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
+                    probabilityOffset, widthRatio, heightRatio, maxCandidates, unclipRatio,
+                    useDilation, sourceWidth, sourceHeight, scratch);
         }
     }
 
@@ -435,8 +459,18 @@ public final class DbPostprocess {
                                  float bitmapThreshold, float boxThreshold,
                                  float widthRatio, float heightRatio, int maxCandidates,
                                  float unclipRatio) {
-        if (probabilities == null || width <= 0 || height <= 0 ||
-                (long) width * height != probabilities.length ||
+        validate(probabilities, 0, width, height, bitmapThreshold, boxThreshold,
+                widthRatio, heightRatio, maxCandidates, unclipRatio);
+    }
+
+    private static void validate(float[] probabilities, int probabilityOffset,
+                                 int width, int height, float bitmapThreshold,
+                                 float boxThreshold, float widthRatio, float heightRatio,
+                                 int maxCandidates, float unclipRatio) {
+        long pixels = (long) width * height;
+        if (probabilities == null || width <= 0 || height <= 0 || probabilityOffset < 0 ||
+                probabilityOffset > (probabilities == null ? 0 : probabilities.length) ||
+                pixels > (probabilities == null ? 0 : probabilities.length - (long) probabilityOffset) ||
                 !Float.isFinite(bitmapThreshold) || !Float.isFinite(boxThreshold) ||
                 bitmapThreshold < 0.0f || bitmapThreshold > 1.0f ||
                 boxThreshold < 0.0f || boxThreshold > 1.0f ||
@@ -445,8 +479,9 @@ public final class DbPostprocess {
                 !Float.isFinite(unclipRatio) || unclipRatio <= 0.0f || unclipRatio > 10.0f) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DB probability map or options are invalid");
         }
-        for (float probability : probabilities) {
-            if (!Float.isFinite(probability)) {
+        int count = (int) pixels;
+        for (int i = 0; i < count; i++) {
+            if (!Float.isFinite(probabilities[probabilityOffset + i])) {
                 throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "DB probability map contains non-finite values");
             }
         }

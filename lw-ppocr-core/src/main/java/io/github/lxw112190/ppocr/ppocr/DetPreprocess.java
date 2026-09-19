@@ -40,6 +40,27 @@ public final class DetPreprocess {
             throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DET tensor is too large");
         }
         float[] output = new float[(int) elements];
+        resizeNormalizeInto(source, width, height, output, 0);
+        return new DetPreprocessResult(output, width, height,
+                (float) ((double) width / source.width()),
+                (float) ((double) height / source.height()));
+    }
+
+    /** Resizes and normalizes directly into an existing CHW FP32 tensor. */
+    public static void resizeNormalizeInto(BgrImage source, int width, int height,
+                                           float[] output, int outputOffset) {
+        if (source == null || width <= 0 || height <= 0 || output == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "DET preprocess inputs are required");
+        }
+        long plane = (long) width * height;
+        long elements = plane * 3L;
+        if (elements > Integer.MAX_VALUE || outputOffset < 0
+                || outputOffset > output.length
+                || elements > output.length - (long) outputOffset) {
+            throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
+                    "DET destination is too small");
+        }
         byte[] pixels = source.pixels();
         for (int outputY = 0; outputY < height; outputY++) {
             double sourceY = ((double) outputY + 0.5) * source.height() / height - 0.5;
@@ -63,14 +84,12 @@ public final class DetPreprocess {
                     double top = topLeft + (topRight - topLeft) * weightX;
                     double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
                     double value = (top + (bottom - top) * weightY) / 255.0;
-                    int index = (int) (channel * plane + (long) outputY * width + outputX);
+                    int index = outputOffset
+                            + (int) (channel * plane + (long) outputY * width + outputX);
                     output[index] = (float) ((value - MEAN[channel]) * INVERSE_STD[channel]);
                 }
             }
         }
-        return new DetPreprocessResult(output, width, height,
-                (float) ((double) width / source.width()),
-                (float) ((double) height / source.height()));
     }
 
     /** Reusable fixed-size DET preprocessing buffer; callers must not invoke it concurrently. */
@@ -78,6 +97,7 @@ public final class DetPreprocess {
         private final int width;
         private final int height;
         private final float[] output;
+        private final int outputOffset;
         private float widthRatio;
         private float heightRatio;
 
@@ -93,6 +113,21 @@ public final class DetPreprocess {
             this.width = width;
             this.height = height;
             this.output = new float[(int) elements];
+            this.outputOffset = 0;
+        }
+
+        /** Package-private view constructor used by a bound DET session. */
+        Workspace(int width, int height, float[] output, int outputOffset) {
+            if (width <= 0 || height <= 0 || output == null || outputOffset < 0
+                    || outputOffset > output.length
+                    || 3L * width * height > output.length - (long) outputOffset) {
+                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
+                        "DET workspace destination is too small");
+            }
+            this.width = width;
+            this.height = height;
+            this.output = output;
+            this.outputOffset = outputOffset;
         }
 
         public void resizeNormalize(BgrImage source) {
@@ -102,35 +137,7 @@ public final class DetPreprocess {
             }
             widthRatio = (float) ((double) width / source.width());
             heightRatio = (float) ((double) height / source.height());
-            long plane = (long) width * height;
-            byte[] pixels = source.pixels();
-            for (int outputY = 0; outputY < height; outputY++) {
-                double sourceY = ((double) outputY + 0.5) * source.height() / height - 0.5;
-                int sourceY0Raw = (int) Math.floor(sourceY);
-                int sourceY1Raw = sourceY0Raw + 1;
-                int sourceY0 = clamp(sourceY0Raw, source.height());
-                int sourceY1 = clamp(sourceY1Raw, source.height());
-                double weightY = sourceY - sourceY0Raw;
-                for (int outputX = 0; outputX < width; outputX++) {
-                    double sourceX = ((double) outputX + 0.5) * source.width() / width - 0.5;
-                    int sourceX0Raw = (int) Math.floor(sourceX);
-                    int sourceX1Raw = sourceX0Raw + 1;
-                    int sourceX0 = clamp(sourceX0Raw, source.width());
-                    int sourceX1 = clamp(sourceX1Raw, source.width());
-                    double weightX = sourceX - sourceX0Raw;
-                    for (int channel = 0; channel < 3; channel++) {
-                        double topLeft = pixels[sourceY0 * source.stride() + sourceX0 * 3 + channel] & 0xff;
-                        double topRight = pixels[sourceY0 * source.stride() + sourceX1 * 3 + channel] & 0xff;
-                        double bottomLeft = pixels[sourceY1 * source.stride() + sourceX0 * 3 + channel] & 0xff;
-                        double bottomRight = pixels[sourceY1 * source.stride() + sourceX1 * 3 + channel] & 0xff;
-                        double top = topLeft + (topRight - topLeft) * weightX;
-                        double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
-                        double value = (top + (bottom - top) * weightY) / 255.0;
-                        int index = (int) (channel * plane + (long) outputY * width + outputX);
-                        output[index] = (float) ((value - MEAN[channel]) * INVERSE_STD[channel]);
-                    }
-                }
-            }
+            resizeNormalizeInto(source, width, height, output, outputOffset);
         }
 
         public float[] getChw() { return output; }

@@ -5,6 +5,7 @@ import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.CtcProjectionSession;
+import io.github.lxw112190.ppocr.runtime.FloatTensorView;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
 import java.util.Collections;
 
@@ -13,10 +14,9 @@ final class RecSessionContext implements AutoCloseable {
     final int width;
     final InferenceSession session;
     final CtcProjectionSession projectionSession;
-    final RecPreprocess.Workspace preprocess;
-    final float[] logits;
     final CompactCtcOutput compactOutput;
     final int timeSteps;
+    private int resizedWidth;
 
     RecSessionContext(io.github.lxw112190.ppocr.model.LwmModel model, int width, int classCount,
                       KernelBackend backend) {
@@ -47,20 +47,31 @@ final class RecSessionContext implements AutoCloseable {
             throw new OcrException(OcrErrorCode.INVALID_MODEL, "REC output time dimension is invalid");
         }
         this.timeSteps = resolvedTimeSteps;
-        this.logits = compactSession == null ? new float[resolvedTimeSteps * classCount] : null;
         this.compactOutput = compactSession == null ? null : new CompactCtcOutput(resolvedTimeSteps);
-        this.preprocess = new RecPreprocess.Workspace(width);
     }
 
-    CtcDecodeResult run(float[] input, PaddleOcrDictionary dictionary) {
+    void preprocess(io.github.lxw112190.ppocr.image.BgrImage source) {
+        FloatTensorView input = projectionSession != null
+                ? projectionSession.inputView() : session.inputView();
+        RecPreprocess.resizeNormalizeInto(source, width, input.array(), input.offset());
+        long scaledWidth = (long) RecPreprocess.INPUT_HEIGHT * source.width();
+        resizedWidth = (int) Math.min(width,
+                (scaledWidth + source.height() - 1L) / source.height());
+    }
+
+    CtcDecodeResult run(PaddleOcrDictionary dictionary) {
         if (projectionSession != null) {
-            projectionSession.run(input, compactOutput.classIds(), compactOutput.logits(),
+            projectionSession.runBound(compactOutput.classIds(), compactOutput.logits(),
                     compactOutput.probabilities());
             return CtcDecoder.decodeGreedy(compactOutput, dictionary);
         }
-        session.run(input, logits);
-        return CtcDecoder.decodeGreedy(logits, timeSteps, dictionary.classCount(), dictionary);
+        session.runBound();
+        FloatTensorView output = session.outputView();
+        return CtcDecoder.decodeGreedy(output.array(), output.offset(), timeSteps,
+                dictionary.classCount(), dictionary);
     }
+
+    int resizedWidth() { return resizedWidth; }
 
     boolean usesProjectionFusion() { return projectionSession != null; }
 

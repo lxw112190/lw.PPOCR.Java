@@ -9,6 +9,7 @@ import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
+import io.github.lxw112190.ppocr.runtime.FloatTensorView;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -35,11 +36,12 @@ public final class PaddleOcrDetector implements AutoCloseable {
                                      float unclipRatio, boolean useDilation, int maxCandidates) {
         ensureOpen();
         DetSessionContext context = contextFor(source);
-        context.preprocess.resizeNormalize(source);
-        context.session.run(context.preprocess.getChw(), context.probabilityMap);
+        context.preprocess(source);
+        context.session.runBound();
+        FloatTensorView probabilityMap = context.session.outputView();
         return context.postprocessor.decodeToSource(
-                context.probabilityMap, bitmapThreshold, boxThreshold,
-                context.preprocess.getWidthRatio(), context.preprocess.getHeightRatio(),
+                probabilityMap.array(), probabilityMap.offset(), bitmapThreshold, boxThreshold,
+                context.widthRatio, context.heightRatio,
                 maxCandidates, unclipRatio, useDilation, source.width(), source.height());
     }
 

@@ -98,6 +98,18 @@ public final class DbPostprocessTest {
     }
 
     @Test
+    public void decodesProbabilityMapFromAnOffsetWithoutCopying() {
+        DbPostprocess.Decoder decoder = DbPostprocess.createDecoder(10, 10);
+        float[] storage = new float[7 + 100 + 5];
+        float[] map = rectangle(10, 10, 1, 1, 8, 8, 0.9f);
+        System.arraycopy(map, 0, storage, 7, map.length);
+        List<DetectionBox> boxes = decoder.decodeToSource(storage, 7,
+                0.5f, 0.7f, 1.5f, 1.5f, 4, 1.0f, false, 10, 10);
+        Assert.assertEquals(1, boxes.size());
+        Assert.assertEquals(0.9f, boxes.get(0).getScore(), 0.00001f);
+    }
+
+    @Test
     public void filtersCandidatesAtEachPaddleMinimumSideStage() {
         Assert.assertEquals(0, DbPostprocess.decode(
                 rectangle(12, 12, 2, 2, 9, 4, 0.9f),

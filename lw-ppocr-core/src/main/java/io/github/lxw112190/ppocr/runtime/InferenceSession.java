@@ -33,6 +33,8 @@ public final class InferenceSession implements AutoCloseable {
     private final GeluPlan[] geluPlans;
     private final int inputIndex;
     private final int outputIndex;
+    private final FloatTensorView inputView;
+    private final FloatTensorView outputView;
     private boolean closed;
 
     public InferenceSession(LwmModel model) {
@@ -70,6 +72,11 @@ public final class InferenceSession implements AutoCloseable {
                 ? new PreparedExecution(model, inputShapes, sessionNodes, outputIndex)
                 : new PreparedExecution(model, inputShapes);
         this.workspace = new Workspace(execution.workspacePlan());
+        float[] storage = workspace.fp32();
+        this.inputView = new FloatTensorView(storage, execution.offset(inputIndex),
+                execution.length(inputIndex));
+        this.outputView = new FloatTensorView(storage, execution.offset(outputIndex),
+                execution.length(outputIndex));
         this.backend = backend;
         this.fusedGeluBackend = backend instanceof FusedGeluBackend
                 ? (FusedGeluBackend) backend : null;
@@ -107,10 +114,29 @@ public final class InferenceSession implements AutoCloseable {
         if (execution.model().getGraphInputs().size() != 1) {
             throw new OcrException(OcrErrorCode.INVALID_MODEL, "session currently requires one input and one output");
         }
-        requireLength(input, execution.length(inputIndex), "input");
-        requireLength(output, execution.length(outputIndex), "output");
+        requireLength(input, inputView.length(), "input");
+        requireLength(output, outputView.length(), "output");
+        System.arraycopy(input, 0, inputView.array(), inputView.offset(), input.length);
+        runBound();
+        System.arraycopy(outputView.array(), outputView.offset(), output, 0, output.length);
+    }
+
+    /** Returns the reusable session input storage without copying it. */
+    public FloatTensorView inputView() {
+        ensureOpen();
+        return inputView;
+    }
+
+    /** Returns the reusable session output storage without copying it. */
+    public FloatTensorView outputView() {
+        ensureOpen();
+        return outputView;
+    }
+
+    /** Executes using data already written to {@link #inputView()}. */
+    public void runBound() {
+        ensureOpen();
         float[] storage = workspace.fp32();
-        System.arraycopy(input, 0, storage, execution.offset(inputIndex), input.length);
         for (int i = 0; i < nodes.length; i++) {
             GeluPlan gelu = geluPlans[i];
             if (gelu == null) {
@@ -120,7 +146,6 @@ public final class InferenceSession implements AutoCloseable {
                 i += 4;
             }
         }
-        System.arraycopy(storage, execution.offset(outputIndex), output, 0, output.length);
     }
 
     public PreparedExecution execution() { ensureOpen(); return execution; }

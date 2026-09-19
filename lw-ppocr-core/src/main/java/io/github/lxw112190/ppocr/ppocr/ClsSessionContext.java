@@ -4,6 +4,7 @@ import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
+import io.github.lxw112190.ppocr.runtime.FloatTensorView;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
 import java.util.Collections;
 
@@ -14,8 +15,6 @@ final class ClsSessionContext implements AutoCloseable {
     };
 
     private final InferenceSession session;
-    private final float[] probabilities = new float[2];
-    private final ClsPreprocess.Workspace preprocess = new ClsPreprocess.Workspace();
 
     ClsSessionContext(LwmModel model, KernelBackend backend) {
         this.session = new InferenceSession(model,
@@ -23,9 +22,14 @@ final class ClsSessionContext implements AutoCloseable {
     }
 
     ClsClassificationResult classify(BgrImage source) {
-        preprocess.resizeNormalize(source);
-        session.run(preprocess.getChw(), probabilities);
-        return ClsPostprocess.decode(probabilities, preprocess.getResizedWidth());
+        FloatTensorView input = session.inputView();
+        ClsPreprocess.resizeNormalizeInto(source, input.array(), input.offset());
+        session.runBound();
+        FloatTensorView output = session.outputView();
+        int resizedWidth = (int) Math.min(ClsPreprocess.INPUT_WIDTH,
+                ((long) ClsPreprocess.INPUT_HEIGHT * source.width()
+                        + source.height() - 1L) / source.height());
+        return ClsPostprocess.decode(output.array(), output.offset(), output.length(), resizedWidth);
     }
 
     @Override

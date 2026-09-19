@@ -19,19 +19,18 @@ public final class CtcProjectionSession implements AutoCloseable {
     private final ProjectionArgMaxBackend backend;
     private final PreparedMatMulWeights weights;
     private final float[] bias;
-    private final float[] activations;
     private final float[] rowScratch;
     private final int rows;
+    private float[] compatibilityOutput;
     private boolean closed;
 
     private CtcProjectionSession(InferenceSession prefix, ProjectionArgMaxBackend backend,
                                  PreparedMatMulWeights weights, float[] bias,
-                                 int activationLength, int rows) {
+                                 int rows) {
         this.prefix = prefix;
         this.backend = backend;
         this.weights = weights;
         this.bias = bias;
-        this.activations = new float[activationLength];
         this.rowScratch = new float[Math.min(rows, 4) * weights.getColumns()];
         this.rows = rows;
     }
@@ -59,7 +58,7 @@ public final class CtcProjectionSession implements AutoCloseable {
             PreparedMatMulWeights prepared = new PreparedMatMulWeights(canonicalWeights, 0,
                     tail.inner, tail.columns);
             return new CtcProjectionSession(prefix, projection, prepared, bias,
-                    execution.length(tail.activationTensor), tail.rows);
+                    tail.rows);
         } catch (RuntimeException e) {
             prefix.close();
             throw e;
@@ -69,16 +68,46 @@ public final class CtcProjectionSession implements AutoCloseable {
     public void run(float[] input, int[] bestIndices, float[] bestLogits,
                     float[] bestProbabilities) {
         ensureOpen();
+        validateOutputs(bestIndices, bestLogits, bestProbabilities);
+        if (compatibilityOutput == null) {
+            compatibilityOutput = new float[prefix.outputView().length()];
+        }
+        prefix.run(input, compatibilityOutput);
+        project(compatibilityOutput, 0, bestIndices, bestLogits, bestProbabilities);
+    }
+
+    /** Returns the input view of the prefix execution without allocating a copy. */
+    public FloatTensorView inputView() {
+        ensureOpen();
+        return prefix.inputView();
+    }
+
+    /** Executes the prefix and projects its bound output without materializing activations. */
+    public void runBound(int[] bestIndices, float[] bestLogits,
+                         float[] bestProbabilities) {
+        ensureOpen();
+        validateOutputs(bestIndices, bestLogits, bestProbabilities);
+        prefix.runBound();
+        FloatTensorView activation = prefix.outputView();
+        project(activation.array(), activation.offset(), bestIndices, bestLogits,
+                bestProbabilities);
+    }
+
+    private void project(float[] activation, int activationOffset, int[] bestIndices,
+                         float[] bestLogits, float[] bestProbabilities) {
+        backend.projectionArgMax(activation, activationOffset, weights.canonical(), weights.offset(),
+                bias, 0, rows, weights.getInner(), weights.getColumns(), bestIndices,
+                bestLogits, bestProbabilities, rowScratch);
+    }
+
+    private void validateOutputs(int[] bestIndices, float[] bestLogits,
+                                 float[] bestProbabilities) {
         if (bestIndices == null || bestLogits == null || bestProbabilities == null ||
                 bestIndices.length < rows || bestLogits.length < rows ||
                 bestProbabilities.length < rows) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
                     "compact CTC output is too small");
         }
-        prefix.run(input, activations);
-        backend.projectionArgMax(activations, 0, weights.canonical(), weights.offset(),
-                bias, 0, rows, weights.getInner(), weights.getColumns(), bestIndices,
-                bestLogits, bestProbabilities, rowScratch);
     }
 
     public int getTimeSteps() { return rows; }
