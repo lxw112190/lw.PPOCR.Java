@@ -677,13 +677,14 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                 float initial = bias == null ? 0.0f : bias[biasOffset + channel];
                 for (int oh = 0; oh < height; oh++) {
                     int outputRow = outputBase + oh * width;
+                    int firstKernelRow = Math.max(0, 2 - oh);
+                    int lastKernelRow = Math.min(5, height + 2 - oh);
                     int ow = vectorStart;
                     // Shift the final block left to avoid a scalar interior tail.
                     while (ow < fullColumnEnd) {
                         FloatVector sum = FloatVector.broadcast(SPECIES, initial);
-                        for (int kh = 0; kh < 5; kh++) {
+                        for (int kh = firstKernelRow; kh < lastKernelRow; kh++) {
                             int ih = oh - 2 + kh;
-                            if (ih < 0 || ih >= height) continue;
                             int inputRow = inputBase + ih * width + ow - 2;
                             int kernelRow = kernelBase + kh * 5;
                             for (int kw = 0; kw < 5; kw++) {
@@ -696,11 +697,11 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                         ow = Math.min(ow + SPECIES.length(), lastVectorStart);
                     }
                     depthwiseFiveByFiveScalar(input, inputBase, weights, kernelBase,
-                            output, outputRow, initial, height, width, oh,
-                            0, vectorStart);
+                            output, outputRow, initial, width, oh,
+                            firstKernelRow, lastKernelRow, 0, vectorStart);
                     depthwiseFiveByFiveScalar(input, inputBase, weights, kernelBase,
-                            output, outputRow, initial, height, width, oh,
-                            fullColumnEnd, width);
+                            output, outputRow, initial, width, oh,
+                            firstKernelRow, lastKernelRow, fullColumnEnd, width);
                 }
             }
         }
@@ -709,13 +710,13 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
     private static void depthwiseFiveByFiveScalar(float[] input, int inputBase,
                                                    float[] weights, int kernelBase,
                                                    float[] output, int outputRow,
-                                                   float initial, int height, int width,
-                                                   int oh, int firstColumn, int lastColumn) {
+                                                   float initial, int width,
+                                                   int oh, int firstKernelRow, int lastKernelRow,
+                                                   int firstColumn, int lastColumn) {
         for (int ow = firstColumn; ow < lastColumn; ow++) {
             float value = initial;
-            for (int kh = 0; kh < 5; kh++) {
+            for (int kh = firstKernelRow; kh < lastKernelRow; kh++) {
                 int ih = oh - 2 + kh;
-                if (ih < 0 || ih >= height) continue;
                 int kernelRow = kernelBase + kh * 5;
                 for (int kw = 0; kw < 5; kw++) {
                     int iw = ow - 2 + kw;
