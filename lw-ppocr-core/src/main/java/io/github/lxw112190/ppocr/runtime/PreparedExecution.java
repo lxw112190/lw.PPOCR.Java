@@ -16,24 +16,36 @@ public final class PreparedExecution {
     private final int[] lengths;
 
     public PreparedExecution(LwmModel model, List<TensorShape> inputShapes) {
-        this(model, inputShapes, model.getNodes(), model.getGraphOutputs(), false);
+        this(model, inputShapes, model.getNodes(), model.getGraphOutputs(), false, false);
+    }
+
+    PreparedExecution(LwmModel model, List<TensorShape> inputShapes, boolean fuseGelu) {
+        this(model, inputShapes, model.getNodes(), model.getGraphOutputs(), false, fuseGelu);
     }
 
     PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
                       List<io.github.lxw112190.ppocr.model.NodeInfo> nodes,
                       int outputIndex) {
-        this(model, inputShapes, nodes, Collections.singletonList(outputIndex), true);
+        this(model, inputShapes, nodes, Collections.singletonList(outputIndex), true, false);
+    }
+
+    PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
+                      List<io.github.lxw112190.ppocr.model.NodeInfo> nodes,
+                      int outputIndex, boolean fuseGelu) {
+        this(model, inputShapes, nodes, Collections.singletonList(outputIndex), true, fuseGelu);
     }
 
     private PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
                               List<io.github.lxw112190.ppocr.model.NodeInfo> nodes,
-                              List<Integer> outputs, boolean partial) {
+                              List<Integer> outputs, boolean partial, boolean fuseGelu) {
         this.compiledModel = CompiledModel.acquire(model);
         this.model = compiledModel.model();
         this.shapes = ShapeResolver.resolve(model, inputShapes);
         this.workspacePlan = partial
-                ? MemoryPlanner.planPartial(model.getTensors(), nodes, model.getGraphInputs(), outputs, shapes)
-                : MemoryPlanner.plan(model.getTensors(), nodes, model.getGraphInputs(), outputs, shapes);
+                ? MemoryPlanner.planPartial(model.getTensors(), nodes, model.getGraphInputs(),
+                        outputs, shapes, fuseGelu)
+                : MemoryPlanner.plan(model.getTensors(), nodes, model.getGraphInputs(),
+                        outputs, shapes, fuseGelu);
         this.offsets = new int[model.getTensors().size()];
         this.lengths = new int[model.getTensors().size()];
         for (int i = 0; i < model.getTensors().size(); i++) {

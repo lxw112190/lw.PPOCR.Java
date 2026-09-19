@@ -68,9 +68,11 @@ public final class InferenceSession implements AutoCloseable {
         }
         this.inputIndex = model.getGraphInputs().get(0);
         this.outputIndex = outputIndex;
+        boolean supportsFusedGelu = backend instanceof FusedGeluBackend;
         this.execution = partial
-                ? new PreparedExecution(model, inputShapes, sessionNodes, outputIndex)
-                : new PreparedExecution(model, inputShapes);
+                ? new PreparedExecution(model, inputShapes, sessionNodes, outputIndex,
+                        supportsFusedGelu)
+                : new PreparedExecution(model, inputShapes, supportsFusedGelu);
         this.workspace = new Workspace(execution.workspacePlan());
         float[] storage = workspace.fp32();
         this.inputView = new FloatTensorView(storage, execution.offset(inputIndex),
@@ -78,7 +80,7 @@ public final class InferenceSession implements AutoCloseable {
         this.outputView = new FloatTensorView(storage, execution.offset(outputIndex),
                 execution.length(outputIndex));
         this.backend = backend;
-        this.fusedGeluBackend = backend instanceof FusedGeluBackend
+        this.fusedGeluBackend = supportsFusedGelu
                 ? (FusedGeluBackend) backend : null;
         CompiledModel compiledModel = execution.compiledModel();
         this.nodes = new PreparedNode[sessionNodes.size()];

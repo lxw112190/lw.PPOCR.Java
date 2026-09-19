@@ -52,17 +52,56 @@ public final class MemoryPlannerTest {
         Assert.assertEquals(148L, plan.getDiagnostics().getLiveLowerBoundBytes());
     }
 
+    @Test
+    public void fusedGeluOutputIsReservedForTheWholeFusedSpan() {
+        List<TensorInfo> tensors = Arrays.asList(
+                tensor(TensorInfo.INPUT, 4), constant(1), runtime(4), constant(1),
+                runtime(4), runtime(4), runtime(4), constant(1), runtime(4));
+        List<NodeInfo> nodes = Arrays.asList(
+                new NodeInfo(OperatorType.DIV, new int[] {0, 1}, new int[] {2}, 0, 0),
+                new NodeInfo(OperatorType.ERF, new int[] {2}, new int[] {4}, 0, 0),
+                new NodeInfo(OperatorType.ADD, new int[] {4, 3}, new int[] {5}, 0, 0),
+                new NodeInfo(OperatorType.MUL, new int[] {0, 5}, new int[] {6}, 0, 0),
+                new NodeInfo(OperatorType.MUL, new int[] {6, 7}, new int[] {8}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(4), TensorShape.of(1), TensorShape.of(4), TensorShape.of(1),
+                TensorShape.of(4), TensorShape.of(4), TensorShape.of(4), TensorShape.of(1),
+                TensorShape.of(4));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Collections.singletonList(0), Collections.singletonList(8), shapes, true);
+
+        Assert.assertNotEquals("fused output must not alias its input: " + plan,
+                plan.getOffset(0), plan.getOffset(8));
+        Assert.assertEquals(plan.getOffset(8), plan.getOffset(2));
+        Assert.assertEquals(plan.getOffset(8), plan.getOffset(4));
+        Assert.assertEquals(plan.getOffset(8), plan.getOffset(5));
+        Assert.assertEquals(plan.getOffset(8), plan.getOffset(6));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void rejectsInvalidShape() {
         TensorShape.of(4, 0);
     }
 
     private static TensorInfo tensor(int flags) {
-        return new TensorInfo(DataType.F32, new int[] {4}, flags, 0, 0, -1, 0);
+        return tensor(flags, 4);
+    }
+
+    private static TensorInfo runtime(int elements) {
+        return tensor(0, elements);
+    }
+
+    private static TensorInfo tensor(int flags, int elements) {
+        return new TensorInfo(DataType.F32, new int[] {elements}, flags, 0, 0, -1, 0);
     }
 
     private static TensorInfo constant() {
-        return new TensorInfo(DataType.F32, new int[] {1}, TensorInfo.CONSTANT,
-                128, 4, -1, 0);
+        return constant(1);
+    }
+
+    private static TensorInfo constant(int elements) {
+        return new TensorInfo(DataType.F32, new int[] {elements}, TensorInfo.CONSTANT,
+                128, elements * 4L, -1, 0);
     }
 }

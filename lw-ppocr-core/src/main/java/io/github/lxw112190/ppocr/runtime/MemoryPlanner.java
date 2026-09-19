@@ -1,6 +1,7 @@
 package io.github.lxw112190.ppocr.runtime;
 
 import io.github.lxw112190.ppocr.model.NodeInfo;
+import io.github.lxw112190.ppocr.model.OperatorType;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
@@ -19,9 +20,17 @@ public final class MemoryPlanner {
     public static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes) {
+        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, false);
+    }
+
+    static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                              List<Integer> graphInputs, List<Integer> graphOutputs,
+                              List<TensorShape> shapes, boolean fuseGelu) {
         PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, true);
         Allocation old = allocateLegacy(data);
+        if (fuseGelu) markGeluPhantoms(data);
         Allocation current = allocateGreedy(data);
+        mapPhantomOffsets(data, current.offsets);
         return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
                 old.totalBytes, liveLowerBound(data));
     }
@@ -29,9 +38,17 @@ public final class MemoryPlanner {
     static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes) {
+        return planPartial(tensors, nodes, graphInputs, graphOutputs, shapes, false);
+    }
+
+    static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                                     List<Integer> graphInputs, List<Integer> graphOutputs,
+                                     List<TensorShape> shapes, boolean fuseGelu) {
         PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, false);
         Allocation old = allocateLegacy(data);
+        if (fuseGelu) markGeluPhantoms(data);
         Allocation current = allocateGreedy(data);
+        mapPhantomOffsets(data, current.offsets);
         return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
                 old.totalBytes, liveLowerBound(data));
     }
@@ -47,8 +64,11 @@ public final class MemoryPlanner {
         long[] sizes = new long[tensorCount];
         int[] births = new int[tensorCount];
         int[] deaths = new int[tensorCount];
+        int[] consumerCounts = new int[tensorCount];
+        int[] lastUses = new int[tensorCount];
         Arrays.fill(births, Integer.MAX_VALUE);
         Arrays.fill(deaths, -1);
+        Arrays.fill(lastUses, -1);
 
         for (int i = 0; i < tensorCount; i++) {
             TensorInfo tensor = tensors.get(i);
@@ -70,11 +90,14 @@ public final class MemoryPlanner {
             for (int input : node.getInputs()) {
                 requireIndex(input, tensorCount);
                 deaths[input] = Math.max(deaths[input], nodeIndex);
+                consumerCounts[input]++;
+                lastUses[input] = nodeIndex;
             }
         }
         for (int output : graphOutputs) {
             requireIndex(output, tensorCount);
             deaths[output] = Math.max(deaths[output], nodes.size());
+            lastUses[output] = nodes.size();
         }
         for (int i = 0; i < tensorCount; i++) {
             if (requireEveryRuntimeTensor && !tensors.get(i).isConstant()
@@ -86,7 +109,8 @@ public final class MemoryPlanner {
                 deaths[i] = births[i];
             }
         }
-        return new PlanningData(tensors, nodes.size(), sizes, births, deaths);
+        return new PlanningData(tensors, nodes, shapes, nodes.size(), sizes, births, deaths,
+                consumerCounts, lastUses);
     }
 
     private static Allocation allocateLegacy(PlanningData data) {
@@ -157,6 +181,106 @@ public final class MemoryPlanner {
                     data.births[tensorIndex], data.deaths[tensorIndex]));
         }
         return new Allocation(offsets, totalBytes);
+    }
+
+    private static void markGeluPhantoms(PlanningData data) {
+        for (int start = 0; start + 4 < data.nodes.size(); start++) {
+            NodeInfo divide = data.nodes.get(start);
+            NodeInfo erf = data.nodes.get(start + 1);
+            NodeInfo add = data.nodes.get(start + 2);
+            NodeInfo multiply = data.nodes.get(start + 3);
+            NodeInfo scale = data.nodes.get(start + 4);
+            if (divide.getOperator() != OperatorType.DIV
+                    || erf.getOperator() != OperatorType.ERF
+                    || add.getOperator() != OperatorType.ADD
+                    || multiply.getOperator() != OperatorType.MUL
+                    || scale.getOperator() != OperatorType.MUL) continue;
+
+            int[] divideInputs = divide.getInputs();
+            int[] divideOutputs = divide.getOutputs();
+            int[] erfInputs = erf.getInputs();
+            int[] erfOutputs = erf.getOutputs();
+            int[] addInputs = add.getInputs();
+            int[] addOutputs = add.getOutputs();
+            int[] multiplyInputs = multiply.getInputs();
+            int[] multiplyOutputs = multiply.getOutputs();
+            int[] scaleInputs = scale.getInputs();
+            int[] scaleOutputs = scale.getOutputs();
+            if (divideInputs.length != 2 || divideOutputs.length != 1
+                    || erfInputs.length != 1 || erfOutputs.length != 1
+                    || addInputs.length != 2 || addOutputs.length != 1
+                    || multiplyInputs.length != 2 || multiplyOutputs.length != 1
+                    || scaleInputs.length != 2 || scaleOutputs.length != 1) continue;
+
+            int input = divideInputs[0];
+            int divideOutput = divideOutputs[0];
+            int erfOutput = erfOutputs[0];
+            int addOutput = addOutputs[0];
+            int multiplyOutput = multiplyOutputs[0];
+            int output = scaleOutputs[0];
+            if (erfInputs[0] != divideOutput || addInputs[0] != erfOutput
+                    || !samePair(multiplyInputs, input, addOutput)
+                    || scaleInputs[0] != multiplyOutput
+                    || data.consumerCounts[divideOutput] != 1
+                    || data.consumerCounts[erfOutput] != 1
+                    || data.consumerCounts[addOutput] != 1
+                    || data.consumerCounts[multiplyOutput] != 1
+                    || data.lastUses[divideOutput] > start + 4
+                    || data.lastUses[erfOutput] > start + 4
+                    || data.lastUses[addOutput] > start + 4
+                    || data.lastUses[multiplyOutput] > start + 4
+                    || !sameShape(data, input, divideOutput, erfOutput, addOutput,
+                            multiplyOutput, output)
+                    || !isScalarConstant(data, divideInputs[1])
+                    || !isScalarConstant(data, addInputs[1])
+                    || !isScalarConstant(data, scaleInputs[1])) continue;
+
+            for (int node = start; node < start + 4; node++) {
+                for (int intermediate : data.nodes.get(node).getOutputs()) {
+                    if (data.lastUses[intermediate] <= start + 4) {
+                        data.phantomSink[intermediate] = output;
+                        data.sizes[intermediate] = 0;
+                    }
+                }
+            }
+            // The fused kernel writes the final output at the first node's
+            // execution time, not at the original scale node. Keep the sink
+            // reserved for the whole fused span so it cannot overlap with a
+            // tensor that is still read by the fused kernel.
+            data.births[output] = Math.min(data.births[output], start);
+            start += 4;
+        }
+    }
+
+    private static void mapPhantomOffsets(PlanningData data, long[] offsets) {
+        for (int tensor = 0; tensor < data.phantomSink.length; tensor++) {
+            int sink = data.phantomSink[tensor];
+            if (sink < 0) continue;
+            if (offsets[sink] < 0) {
+                throw new OcrException(OcrErrorCode.INVALID_MODEL,
+                        "GELU phantom sink has no workspace allocation: " + sink);
+            }
+            offsets[tensor] = offsets[sink];
+        }
+    }
+
+    private static boolean isScalarConstant(PlanningData data, int tensor) {
+        return tensor >= 0 && tensor < data.tensors.size()
+                && data.tensors.get(tensor).isConstant()
+                && data.shapes.get(tensor).getElementCount() == 1;
+    }
+
+    private static boolean sameShape(PlanningData data, int first, int... remaining) {
+        TensorShape shape = data.shapes.get(first);
+        for (int tensor : remaining) {
+            if (!shape.equals(data.shapes.get(tensor))) return false;
+        }
+        return true;
+    }
+
+    private static boolean samePair(int[] values, int first, int second) {
+        return values.length == 2 && ((values[0] == first && values[1] == second)
+                || (values[0] == second && values[1] == first));
     }
 
     private static List<Integer> runtimeOrder(final PlanningData data, final boolean bySize) {
@@ -280,18 +404,30 @@ public final class MemoryPlanner {
 
     private static final class PlanningData {
         final List<TensorInfo> tensors;
+        final List<NodeInfo> nodes;
+        final List<TensorShape> shapes;
         final int nodeCount;
         final long[] sizes;
         final int[] births;
         final int[] deaths;
+        final int[] consumerCounts;
+        final int[] lastUses;
+        final int[] phantomSink;
 
-        PlanningData(List<TensorInfo> tensors, int nodeCount, long[] sizes,
-                     int[] births, int[] deaths) {
+        PlanningData(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                     List<TensorShape> shapes, int nodeCount, long[] sizes,
+                     int[] births, int[] deaths, int[] consumerCounts, int[] lastUses) {
             this.tensors = tensors;
+            this.nodes = nodes;
+            this.shapes = shapes;
             this.nodeCount = nodeCount;
             this.sizes = sizes;
             this.births = births;
             this.deaths = deaths;
+            this.consumerCounts = consumerCounts;
+            this.lastUses = lastUses;
+            this.phantomSink = new int[tensors.size()];
+            Arrays.fill(this.phantomSink, -1);
         }
     }
 
