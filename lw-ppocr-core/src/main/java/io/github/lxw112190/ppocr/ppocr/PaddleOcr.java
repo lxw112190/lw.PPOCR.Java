@@ -21,7 +21,10 @@ public final class PaddleOcr implements AutoCloseable {
     private final ArrayList<OcrLineResult> lineStaging;
     private final ArrayList<BgrImage> cropStaging;
     private ClsClassificationResult[] classificationStaging;
-    private RecRecognitionResult[] recognitionStaging;
+    private String[] recognitionTexts;
+    private float[] recognitionScores;
+    private int[] recognitionEmittedCounts;
+    private int[] recognitionResizedWidths;
     private boolean[] rotationStaging;
     private boolean closed;
 
@@ -53,7 +56,10 @@ public final class PaddleOcr implements AutoCloseable {
         this.lineStaging = new ArrayList<OcrLineResult>();
         this.cropStaging = new ArrayList<BgrImage>();
         this.classificationStaging = new ClsClassificationResult[0];
-        this.recognitionStaging = new RecRecognitionResult[0];
+        this.recognitionTexts = new String[0];
+        this.recognitionScores = new float[0];
+        this.recognitionEmittedCounts = new int[0];
+        this.recognitionResizedWidths = new int[0];
         this.rotationStaging = new boolean[0];
     }
 
@@ -123,12 +129,12 @@ public final class PaddleOcr implements AutoCloseable {
                 rotationStaging[i] = rotated;
             }
             recognizer.recognizeAllInto(cropStaging,
-                    parallelism.getRecognizerWorkers(), recognitionStaging);
+                    parallelism.getRecognizerWorkers(), recognitionTexts,
+                    recognitionScores, recognitionEmittedCounts, recognitionResizedWidths);
             for (int i = 0; i < boxes.size(); i++) {
-                RecRecognitionResult recognition = recognitionStaging[i];
                 ClsClassificationResult classification = classificationStaging[i];
                 DetectionBox box = boxes.get(i);
-                lineStaging.add(new OcrLineResult(box, recognition.getText(), recognition.getScore(),
+                lineStaging.add(new OcrLineResult(box, recognitionTexts[i], recognitionScores[i],
                         classification, rotationStaging[i]));
             }
             return new OcrResult(lineStaging).sorted(options.getReadingOrder());
@@ -145,8 +151,11 @@ public final class PaddleOcr implements AutoCloseable {
         if (classificationStaging.length < size) {
             classificationStaging = new ClsClassificationResult[size];
         }
-        if (recognitionStaging.length < size) {
-            recognitionStaging = new RecRecognitionResult[size];
+        if (recognitionTexts.length < size) {
+            recognitionTexts = new String[size];
+            recognitionScores = new float[size];
+            recognitionEmittedCounts = new int[size];
+            recognitionResizedWidths = new int[size];
         }
         if (rotationStaging.length < size) rotationStaging = new boolean[size];
     }
@@ -155,7 +164,10 @@ public final class PaddleOcr implements AutoCloseable {
         lineStaging.clear();
         cropStaging.clear();
         Arrays.fill(classificationStaging, 0, size, null);
-        Arrays.fill(recognitionStaging, 0, size, null);
+        Arrays.fill(recognitionTexts, 0, size, null);
+        Arrays.fill(recognitionScores, 0, size, 0.0f);
+        Arrays.fill(recognitionEmittedCounts, 0, size, 0);
+        Arrays.fill(recognitionResizedWidths, 0, size, 0);
     }
 
     @Override

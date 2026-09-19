@@ -71,6 +71,21 @@ final class RecSessionContext implements AutoCloseable {
                 dictionary.classCount(), dictionary);
     }
 
+    String runInto(PaddleOcrDictionary dictionary, float[] scores, int scoreIndex,
+                   int[] emittedCounts, int emittedIndex) {
+        if (projectionSession != null) {
+            projectionSession.runBound(compactOutput.classIds(), compactOutput.logits(),
+                    compactOutput.probabilities());
+            return CtcDecoder.decodeGreedyInto(compactOutput, dictionary,
+                    scores, scoreIndex, emittedCounts, emittedIndex);
+        }
+        session.runBound();
+        FloatTensorView output = session.outputView();
+        return CtcDecoder.decodeGreedyInto(output.array(), output.offset(), timeSteps,
+                dictionary.classCount(), dictionary, scores, scoreIndex,
+                emittedCounts, emittedIndex);
+    }
+
     int resizedWidth() { return resizedWidth; }
 
     boolean usesProjectionFusion() { return projectionSession != null; }

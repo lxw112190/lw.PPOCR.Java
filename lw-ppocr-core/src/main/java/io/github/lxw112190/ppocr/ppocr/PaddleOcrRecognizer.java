@@ -9,13 +9,10 @@ import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
-import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -33,9 +30,12 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     private final int maximumWidth;
     private final boolean dynamicWidth;
     private final KernelBackend backend;
-    private final Map<Integer, RecSessionContext> sessions;
-    private final Map<Integer, RecognitionGroup> reusableGroups;
-    private final List<RecognitionGroup> activeGroups;
+    private final RecSessionContext[] sessions;
+    private RecSessionContext fallbackSession;
+    private final RecognitionGroup[] reusableGroups;
+    private RecognitionGroup fallbackGroup;
+    private final RecognitionGroup[] activeGroups;
+    private int activeGroupCount;
     private final List<Future<Void>> taskFutures;
     private ExecutorService parallelExecutor;
     private int parallelExecutorSize;
@@ -61,9 +61,9 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         this.dynamicWidth = declaredWidth == -1;
         this.maximumWidth = dynamicWidth ? DEFAULT_MAXIMUM_WIDTH : declaredWidth;
         this.backend = backend;
-        this.sessions = new HashMap<Integer, RecSessionContext>();
-        this.reusableGroups = new HashMap<Integer, RecognitionGroup>();
-        this.activeGroups = new ArrayList<RecognitionGroup>();
+        this.sessions = new RecSessionContext[RecWidthPolicy.bucketCount()];
+        this.reusableGroups = new RecognitionGroup[RecWidthPolicy.bucketCount()];
+        this.activeGroups = new RecognitionGroup[RecWidthPolicy.bucketCount()];
         this.taskFutures = new ArrayList<Future<Void>>();
     }
 
@@ -91,22 +91,26 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         if (source == null) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "REC source image is required");
         }
-        int targetWidth = dynamicWidth ? RecWidthPolicy.chooseTargetWidth(source, maximumWidth) : maximumWidth;
-        return recognize(source, context(targetWidth));
+        int slot = dynamicWidth
+                ? RecWidthPolicy.chooseBucketIndex(source, maximumWidth)
+                : RecWidthPolicy.bucketIndex(maximumWidth);
+        int targetWidth = RecWidthPolicy.widthForIndex(slot, maximumWidth);
+        return recognize(source, context(slot, targetWidth));
     }
 
     /** Reports whether at least one prepared dynamic-width session uses terminal fusion. */
     public boolean isProjectionFusionActive() {
         ensureOpen();
-        for (RecSessionContext context : sessions.values()) {
-            if (context.usesProjectionFusion()) return true;
+        for (RecSessionContext context : sessions) {
+            if (context != null && context.usesProjectionFusion()) return true;
         }
+        if (fallbackSession != null && fallbackSession.usesProjectionFusion()) return true;
         return false;
     }
 
     /** Recognizes images in input order while evaluating independent width groups concurrently. */
     public List<RecRecognitionResult> recognizeAll(List<BgrImage> sources, int parallelism) {
-        validateBatch(sources, parallelism, null);
+        validateBatch(sources, parallelism);
         if (sources.isEmpty()) return Collections.emptyList();
         RecRecognitionResult[] results = new RecRecognitionResult[sources.size()];
         recognizeAllInto(sources, parallelism, results);
@@ -116,59 +120,41 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     /** Internal low-allocation batch path used by the owning OCR pipeline. */
     void recognizeAllInto(List<BgrImage> sources, int parallelism,
                           RecRecognitionResult[] results) {
-        validateBatch(sources, parallelism, results);
+        validateBatch(sources, parallelism);
+        validateObjectResults(sources.size(), results);
         if (sources.isEmpty()) return;
 
-        resetGroups();
+        prepareGroups(sources);
         try {
-            for (int i = 0; i < sources.size(); i++) {
-                BgrImage source = sources.get(i);
-                int width = dynamicWidth
-                        ? RecWidthPolicy.chooseTargetWidth(source, maximumWidth) : maximumWidth;
-                RecognitionGroup group = reusableGroups.get(width);
-                if (group == null) {
-                    group = new RecognitionGroup(width, context(width));
-                    reusableGroups.put(width, group);
-                }
-                if (group.isEmpty()) activeGroups.add(group);
-                group.add(i, source);
-            }
-            int workers = Math.min(parallelism, activeGroups.size());
-            if (workers == 1) {
-                for (RecognitionGroup group : activeGroups) recognize(group, results);
-                return;
-            }
-
-            ExecutorService executor = executor(workers);
-            Collections.sort(activeGroups, RecognitionGroup.LARGEST_WORK_FIRST);
-            taskFutures.clear();
-            for (RecognitionGroup scheduled : activeGroups) {
-                final RecognitionGroup group = scheduled;
-                taskFutures.add(executor.submit(new Callable<Void>() {
-                    @Override
-                    public Void call() {
-                        recognize(group, results);
-                        return null;
-                    }
-                }));
-            }
-            await(taskFutures);
+            executeGroups(parallelism, results, null, null, null, null);
         } finally {
             taskFutures.clear();
             resetGroups();
         }
     }
 
-    private void validateBatch(List<BgrImage> sources, int parallelism,
-                               RecRecognitionResult[] results) {
+    /** Internal primitive staging path used by the owning OCR pipeline. */
+    void recognizeAllInto(List<BgrImage> sources, int parallelism,
+                          String[] texts, float[] scores, int[] emittedCounts,
+                          int[] resizedWidths) {
+        validateBatch(sources, parallelism);
+        validatePrimitiveResults(sources.size(), texts, scores, emittedCounts, resizedWidths);
+        if (sources.isEmpty()) return;
+
+        prepareGroups(sources);
+        try {
+            executeGroups(parallelism, null, texts, scores, emittedCounts, resizedWidths);
+        } finally {
+            taskFutures.clear();
+            resetGroups();
+        }
+    }
+
+    private void validateBatch(List<BgrImage> sources, int parallelism) {
         ensureOpen();
         if (sources == null || parallelism <= 0 || parallelism > 64) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
                     "REC sources and parallelism are invalid");
-        }
-        if (results != null && results.length < sources.size()) {
-            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
-                    "REC result buffer is smaller than the source batch");
         }
         for (BgrImage source : sources) {
             if (source == null) {
@@ -177,9 +163,71 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         }
     }
 
+    private static void validateObjectResults(int size, RecRecognitionResult[] results) {
+        if (results == null || results.length < size) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "REC result buffer is smaller than the source batch");
+        }
+    }
+
+    private static void validatePrimitiveResults(int size, String[] texts, float[] scores,
+                                                 int[] emittedCounts, int[] resizedWidths) {
+        if (texts == null || scores == null || emittedCounts == null || resizedWidths == null
+                || texts.length < size || scores.length < size
+                || emittedCounts.length < size || resizedWidths.length < size) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "REC primitive result buffers are smaller than the source batch");
+        }
+    }
+
+    private void prepareGroups(List<BgrImage> sources) {
+        resetGroups();
+        for (int i = 0; i < sources.size(); i++) {
+            BgrImage source = sources.get(i);
+            int slot = dynamicWidth
+                    ? RecWidthPolicy.chooseBucketIndex(source, maximumWidth)
+                    : RecWidthPolicy.bucketIndex(maximumWidth);
+            int width = RecWidthPolicy.widthForIndex(slot, maximumWidth);
+            RecognitionGroup group = group(slot, width);
+            if (group.isEmpty()) activeGroups[activeGroupCount++] = group;
+            group.add(i, source);
+        }
+    }
+
+    private void executeGroups(int parallelism, RecRecognitionResult[] objectResults,
+                               String[] texts, float[] scores, int[] emittedCounts,
+                               int[] resizedWidths) {
+        int workers = Math.min(parallelism, activeGroupCount);
+        if (workers == 1) {
+            for (int i = 0; i < activeGroupCount; i++) {
+                recognize(activeGroups[i], objectResults, texts, scores,
+                        emittedCounts, resizedWidths);
+            }
+            return;
+        }
+
+        ExecutorService executor = executor(workers);
+        sortGroupsLargestFirst();
+        taskFutures.clear();
+        for (int i = 0; i < activeGroupCount; i++) {
+            final RecognitionGroup group = activeGroups[i];
+            taskFutures.add(executor.submit(new Callable<Void>() {
+                @Override
+                public Void call() {
+                    recognize(group, objectResults, texts, scores, emittedCounts, resizedWidths);
+                    return null;
+                }
+            }));
+        }
+        await(taskFutures);
+    }
+
     private void resetGroups() {
-        for (RecognitionGroup group : activeGroups) group.clear();
-        activeGroups.clear();
+        for (int i = 0; i < activeGroupCount; i++) {
+            activeGroups[i].clear();
+            activeGroups[i] = null;
+        }
+        activeGroupCount = 0;
     }
 
     private static void await(List<Future<Void>> futures) {
@@ -205,13 +253,47 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         if (failure != null) throw failure;
     }
 
-    private RecSessionContext context(int targetWidth) {
-        RecSessionContext context = sessions.get(targetWidth);
-        if (context == null) {
-            context = new RecSessionContext(model, targetWidth, dictionary.classCount(), backend);
-            sessions.put(targetWidth, context);
+    private RecSessionContext context(int slot, int targetWidth) {
+        if (slot >= 0) {
+            RecSessionContext context = sessions[slot];
+            if (context == null) {
+                context = new RecSessionContext(model, targetWidth, dictionary.classCount(), backend);
+                sessions[slot] = context;
+            }
+            return context;
         }
-        return context;
+        if (fallbackSession == null) {
+            fallbackSession = new RecSessionContext(model, targetWidth, dictionary.classCount(), backend);
+        }
+        return fallbackSession;
+    }
+
+    private RecognitionGroup group(int slot, int targetWidth) {
+        if (slot >= 0) {
+            RecognitionGroup group = reusableGroups[slot];
+            if (group == null) {
+                group = new RecognitionGroup(targetWidth, context(slot, targetWidth));
+                reusableGroups[slot] = group;
+            }
+            return group;
+        }
+        if (fallbackGroup == null) {
+            fallbackGroup = new RecognitionGroup(targetWidth, context(slot, targetWidth));
+        }
+        return fallbackGroup;
+    }
+
+    private void sortGroupsLargestFirst() {
+        for (int i = 1; i < activeGroupCount; i++) {
+            RecognitionGroup value = activeGroups[i];
+            long work = value.estimatedWork();
+            int j = i - 1;
+            while (j >= 0 && activeGroups[j].estimatedWork() < work) {
+                activeGroups[j + 1] = activeGroups[j];
+                j--;
+            }
+            activeGroups[j + 1] = value;
+        }
     }
 
     private RecRecognitionResult recognize(BgrImage source, RecSessionContext context) {
@@ -221,10 +303,27 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
                 decoded.getEmittedCount(), context.resizedWidth());
     }
 
-    private void recognize(RecognitionGroup group, RecRecognitionResult[] results) {
+    private void recognize(RecognitionGroup group, RecRecognitionResult[] objectResults,
+                           String[] texts, float[] scores, int[] emittedCounts,
+                           int[] resizedWidths) {
         for (int i = 0; i < group.size; i++) {
-            results[group.indexes[i]] = recognize(group.sources[i], group.context);
+            int resultIndex = group.indexes[i];
+            if (objectResults != null) {
+                objectResults[resultIndex] = recognize(group.sources[i], group.context);
+            } else {
+                recognizeInto(group.sources[i], group.context, resultIndex,
+                        texts, scores, emittedCounts, resizedWidths);
+            }
         }
+    }
+
+    private void recognizeInto(BgrImage source, RecSessionContext context, int resultIndex,
+                                String[] texts, float[] scores, int[] emittedCounts,
+                                int[] resizedWidths) {
+        context.preprocess(source);
+        texts[resultIndex] = context.runInto(dictionary, scores, resultIndex,
+                emittedCounts, resultIndex);
+        resizedWidths[resultIndex] = context.resizedWidth();
     }
 
     private ExecutorService executor(int size) {
@@ -241,10 +340,19 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         if (!closed) {
             closed = true;
             if (parallelExecutor != null) parallelExecutor.shutdown();
-            for (RecSessionContext context : sessions.values()) context.close();
-            sessions.clear();
+            for (int i = 0; i < sessions.length; i++) {
+                if (sessions[i] != null) {
+                    sessions[i].close();
+                    sessions[i] = null;
+                }
+            }
+            if (fallbackSession != null) {
+                fallbackSession.close();
+                fallbackSession = null;
+            }
             resetGroups();
-            reusableGroups.clear();
+            Arrays.fill(reusableGroups, null);
+            fallbackGroup = null;
             taskFutures.clear();
             dictionary.close();
             model.close();
@@ -288,14 +396,6 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     }
 
     private static final class RecognitionGroup {
-        private static final Comparator<RecognitionGroup> LARGEST_WORK_FIRST =
-                new Comparator<RecognitionGroup>() {
-                    @Override
-                    public int compare(RecognitionGroup left, RecognitionGroup right) {
-                        return Long.compare(right.estimatedWork(), left.estimatedWork());
-                    }
-                };
-
         private final int targetWidth;
         private final RecSessionContext context;
         private int[] indexes = new int[0];

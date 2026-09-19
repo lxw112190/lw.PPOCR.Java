@@ -70,6 +70,18 @@ public final class RealRecModelGoldenTest {
                 Assert.assertEquals(firstResult.getScore(), item.getScore(), 0.0f);
                 Assert.assertEquals(firstResult.getResizedWidth(), item.getResizedWidth());
             }
+
+            String[] texts = new String[batch.size()];
+            float[] scores = new float[batch.size()];
+            int[] emittedCounts = new int[batch.size()];
+            int[] resizedWidths = new int[batch.size()];
+            recognizer.recognizeAllInto(batch, 2, texts, scores, emittedCounts, resizedWidths);
+            for (int i = 0; i < batch.size(); i++) {
+                Assert.assertEquals(firstResult.getText(), texts[i]);
+                Assert.assertEquals(firstResult.getScore(), scores[i], 0.0f);
+                Assert.assertEquals(firstResult.getEmittedCount(), emittedCounts[i]);
+                Assert.assertEquals(firstResult.getResizedWidth(), resizedWidths[i]);
+            }
         }
     }
 
