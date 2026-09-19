@@ -5,7 +5,8 @@ import io.github.lxw112190.ppocr.runtime.BinaryVariant;
 import java.util.Arrays;
 
 /** Readable reference kernels; optimized backends must preserve their semantics. */
-public final class ScalarBackend implements KernelBackend, ProjectionArgMaxBackend {
+public final class ScalarBackend implements KernelBackend, ProjectionArgMaxBackend,
+        InPlaceElementwiseBackend {
     @Override
     public void add(float[] left, int leftOffset, float[] right, int rightOffset,
                     float[] output, int outputOffset, int length) {

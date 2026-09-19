@@ -2,6 +2,7 @@ package io.github.lxw112190.ppocr.vector;
 
 import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
+import io.github.lxw112190.ppocr.kernels.InPlaceElementwiseBackend;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ProjectionArgMaxBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
@@ -15,7 +16,8 @@ import jdk.incubator.vector.VectorShuffle;
 import jdk.incubator.vector.VectorSpecies;
 
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
-public final class VectorBackend implements KernelBackend, FusedGeluBackend, ProjectionArgMaxBackend {
+public final class VectorBackend implements KernelBackend, FusedGeluBackend,
+        ProjectionArgMaxBackend, InPlaceElementwiseBackend {
     private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
     private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
     private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.makeZip(SPECIES, 0);

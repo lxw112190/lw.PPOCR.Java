@@ -3,6 +3,7 @@ package io.github.lxw112190.ppocr.runtime;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
+import io.github.lxw112190.ppocr.kernels.InPlaceElementwiseBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
@@ -69,10 +70,12 @@ public final class InferenceSession implements AutoCloseable {
         this.inputIndex = model.getGraphInputs().get(0);
         this.outputIndex = outputIndex;
         boolean supportsFusedGelu = backend instanceof FusedGeluBackend;
+        boolean supportsInPlaceElementwise = backend instanceof InPlaceElementwiseBackend;
         this.execution = partial
                 ? new PreparedExecution(model, inputShapes, sessionNodes, outputIndex,
-                        supportsFusedGelu)
-                : new PreparedExecution(model, inputShapes, supportsFusedGelu);
+                        supportsFusedGelu, supportsInPlaceElementwise)
+                : new PreparedExecution(model, inputShapes, supportsFusedGelu,
+                        supportsInPlaceElementwise);
         this.workspace = new Workspace(execution.workspacePlan());
         float[] storage = workspace.fp32();
         this.inputView = new FloatTensorView(storage, execution.offset(inputIndex),

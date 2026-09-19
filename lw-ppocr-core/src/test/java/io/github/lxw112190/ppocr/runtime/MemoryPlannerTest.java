@@ -79,6 +79,60 @@ public final class MemoryPlannerTest {
         Assert.assertEquals(plan.getOffset(8), plan.getOffset(6));
     }
 
+    @Test
+    public void aliasesSameShapeElementwiseOutputToSingleUseInput() {
+        List<TensorInfo> tensors = Arrays.asList(
+                tensor(TensorInfo.INPUT, 4), constant(1), runtime(4));
+        List<NodeInfo> nodes = Collections.singletonList(
+                new NodeInfo(OperatorType.ADD, new int[] {0, 1}, new int[] {2}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(4), TensorShape.of(1), TensorShape.of(4));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Collections.singletonList(0), Collections.singletonList(2), shapes,
+                false, true);
+
+        Assert.assertEquals(plan.getOffset(0), plan.getOffset(2));
+        Assert.assertEquals(0L, plan.getSize(2));
+        Assert.assertEquals(16L, plan.getTotalBytes());
+    }
+
+    @Test
+    public void doesNotAliasInputThatHasAnotherConsumer() {
+        List<TensorInfo> tensors = Arrays.asList(
+                tensor(TensorInfo.INPUT, 4), constant(1), runtime(4), runtime(4));
+        List<NodeInfo> nodes = Arrays.asList(
+                new NodeInfo(OperatorType.ADD, new int[] {0, 1}, new int[] {2}, 0, 0),
+                new NodeInfo(OperatorType.ADD, new int[] {0, 2}, new int[] {3}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(4), TensorShape.of(1), TensorShape.of(4), TensorShape.of(4));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Collections.singletonList(0), Collections.singletonList(3), shapes,
+                false, true);
+
+        Assert.assertNotEquals(plan.getOffset(0), plan.getOffset(2));
+    }
+
+    @Test
+    public void chainsElementwiseAliasesIntoOneStorageGroup() {
+        List<TensorInfo> tensors = Arrays.asList(
+                tensor(TensorInfo.INPUT, 4), constant(1), runtime(4), runtime(4));
+        List<NodeInfo> nodes = Arrays.asList(
+                new NodeInfo(OperatorType.ADD, new int[] {0, 1}, new int[] {2}, 0, 0),
+                new NodeInfo(OperatorType.MUL, new int[] {2, 1}, new int[] {3}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(4), TensorShape.of(1), TensorShape.of(4), TensorShape.of(4));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Collections.singletonList(0), Collections.singletonList(3), shapes,
+                false, true);
+
+        Assert.assertEquals(plan.getOffset(0), plan.getOffset(2));
+        Assert.assertEquals(plan.getOffset(0), plan.getOffset(3));
+        Assert.assertEquals(16L, plan.getTotalBytes());
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void rejectsInvalidShape() {
         TensorShape.of(4, 0);

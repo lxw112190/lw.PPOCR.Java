@@ -26,11 +26,20 @@ public final class MemoryPlanner {
     static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
                               List<Integer> graphInputs, List<Integer> graphOutputs,
                               List<TensorShape> shapes, boolean fuseGelu) {
+        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, fuseGelu, false);
+    }
+
+    static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                              List<Integer> graphInputs, List<Integer> graphOutputs,
+                              List<TensorShape> shapes, boolean fuseGelu,
+                              boolean aliasElementwise) {
         PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, true);
         Allocation old = allocateLegacy(data);
         if (fuseGelu) markGeluPhantoms(data);
+        if (aliasElementwise) markElementwiseAliases(data);
         Allocation current = allocateGreedy(data);
         mapPhantomOffsets(data, current.offsets);
+        mapAliasOffsets(data, current.offsets);
         return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
                 old.totalBytes, liveLowerBound(data));
     }
@@ -44,11 +53,20 @@ public final class MemoryPlanner {
     static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes, boolean fuseGelu) {
+        return planPartial(tensors, nodes, graphInputs, graphOutputs, shapes, fuseGelu, false);
+    }
+
+    static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                                     List<Integer> graphInputs, List<Integer> graphOutputs,
+                                     List<TensorShape> shapes, boolean fuseGelu,
+                                     boolean aliasElementwise) {
         PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, false);
         Allocation old = allocateLegacy(data);
         if (fuseGelu) markGeluPhantoms(data);
+        if (aliasElementwise) markElementwiseAliases(data);
         Allocation current = allocateGreedy(data);
         mapPhantomOffsets(data, current.offsets);
+        mapAliasOffsets(data, current.offsets);
         return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
                 old.totalBytes, liveLowerBound(data));
     }
@@ -236,6 +254,7 @@ public final class MemoryPlanner {
                     || !isScalarConstant(data, scaleInputs[1])) continue;
 
             for (int node = start; node < start + 4; node++) {
+                data.fusedNodes[node] = true;
                 for (int intermediate : data.nodes.get(node).getOutputs()) {
                     if (data.lastUses[intermediate] <= start + 4) {
                         data.phantomSink[intermediate] = output;
@@ -243,6 +262,7 @@ public final class MemoryPlanner {
                     }
                 }
             }
+            data.fusedNodes[start + 4] = true;
             // The fused kernel writes the final output at the first node's
             // execution time, not at the original scale node. Keep the sink
             // reserved for the whole fused span so it cannot overlap with a
@@ -250,6 +270,56 @@ public final class MemoryPlanner {
             data.births[output] = Math.min(data.births[output], start);
             start += 4;
         }
+    }
+
+    private static void markElementwiseAliases(PlanningData data) {
+        for (int nodeIndex = 0; nodeIndex < data.nodes.size(); nodeIndex++) {
+            if (data.fusedNodes[nodeIndex]) continue;
+            NodeInfo node = data.nodes.get(nodeIndex);
+            if (!isAliasableBinary(node.getOperator())) continue;
+            int[] inputs = node.getInputs();
+            int[] outputs = node.getOutputs();
+            if (inputs.length != 2 || outputs.length != 1) continue;
+            int output = outputs[0];
+            if (!isRuntimeTensor(data, output) || data.sizes[output] == 0
+                    || data.aliasSink[output] >= 0) continue;
+            for (int input : inputs) {
+                if (!isAliasableInput(data, input, output, nodeIndex)) continue;
+                int root = aliasRoot(data, input);
+                data.aliasSink[output] = root;
+                data.sizes[output] = 0;
+                data.deaths[root] = Math.max(data.deaths[root], data.deaths[output]);
+                break;
+            }
+        }
+    }
+
+    private static boolean isAliasableBinary(OperatorType operator) {
+        return operator == OperatorType.ADD || operator == OperatorType.MUL
+                || operator == OperatorType.DIV || operator == OperatorType.SUB
+                || operator == OperatorType.POW;
+    }
+
+    private static boolean isAliasableInput(PlanningData data, int input, int output,
+                                            int nodeIndex) {
+        return input != output
+                && isRuntimeTensor(data, input)
+                && data.phantomSink[input] < 0
+                && data.consumerCounts[input] == 1
+                && data.lastUses[input] == nodeIndex
+                && data.shapes.get(input).equals(data.shapes.get(output));
+    }
+
+    private static boolean isRuntimeTensor(PlanningData data, int tensor) {
+        return tensor >= 0 && tensor < data.tensors.size()
+                && !data.tensors.get(tensor).isConstant()
+                && data.births[tensor] != Integer.MAX_VALUE;
+    }
+
+    private static int aliasRoot(PlanningData data, int tensor) {
+        int root = tensor;
+        while (data.aliasSink[root] >= 0) root = data.aliasSink[root];
+        return root;
     }
 
     private static void mapPhantomOffsets(PlanningData data, long[] offsets) {
@@ -261,6 +331,18 @@ public final class MemoryPlanner {
                         "GELU phantom sink has no workspace allocation: " + sink);
             }
             offsets[tensor] = offsets[sink];
+        }
+    }
+
+    private static void mapAliasOffsets(PlanningData data, long[] offsets) {
+        for (int tensor = 0; tensor < data.aliasSink.length; tensor++) {
+            int root = data.aliasSink[tensor];
+            if (root < 0) continue;
+            if (offsets[root] < 0) {
+                throw new OcrException(OcrErrorCode.INVALID_MODEL,
+                        "elementwise alias root has no workspace allocation: " + root);
+            }
+            offsets[tensor] = offsets[root];
         }
     }
 
@@ -413,6 +495,8 @@ public final class MemoryPlanner {
         final int[] consumerCounts;
         final int[] lastUses;
         final int[] phantomSink;
+        final int[] aliasSink;
+        final boolean[] fusedNodes;
 
         PlanningData(List<TensorInfo> tensors, List<NodeInfo> nodes,
                      List<TensorShape> shapes, int nodeCount, long[] sizes,
@@ -428,6 +512,9 @@ public final class MemoryPlanner {
             this.lastUses = lastUses;
             this.phantomSink = new int[tensors.size()];
             Arrays.fill(this.phantomSink, -1);
+            this.aliasSink = new int[tensors.size()];
+            Arrays.fill(this.aliasSink, -1);
+            this.fusedNodes = new boolean[nodes.size()];
         }
     }
 
