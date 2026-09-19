@@ -595,8 +595,7 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             if (kernelHeight == 5 && kernelWidth == 5 && strideHeight == 1
                     && dilationHeight == 1 && dilationWidth == 1
                     && padTop == 2 && padLeft == 2 && padBottom == 2 && padRight == 2
-                    && outputHeight == height && outputWidth == width
-                    && height == 5 && width >= 5) {
+                    && outputHeight == height && outputWidth == width && width >= 5) {
                 depthwiseFiveByFive(input, inputOffset, weights, weightOffset, bias, biasOffset,
                         output, outputOffset, batch, channels, height, width);
                 return;
