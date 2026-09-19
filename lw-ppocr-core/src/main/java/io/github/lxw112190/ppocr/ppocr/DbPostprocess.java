@@ -9,6 +9,9 @@ import java.util.List;
 
 /** Bounded first-stage DB postprocess for probability maps. */
 public final class DbPostprocess {
+    private static final byte BACKGROUND = 0;
+    private static final byte FOREGROUND = 1;
+    private static final byte VISITED = 2;
     private static final float MIN_FITTED_SIDE = 3.0f;
     private static final float MIN_UNCLIPPED_SIDE = 5.0f;
     private static final float MIN_RESTORED_SIDE = 4.0f;
@@ -60,25 +63,26 @@ public final class DbPostprocess {
                                                      int maxCandidates, float unclipRatio,
                                                      boolean useDilation, int sourceWidth,
                                                      int sourceHeight, Scratch scratch) {
-        boolean[] bitmap = scratch.bitmap;
+        byte[] states = scratch.states;
         int pixelCount = width * height;
         for (int i = 0; i < pixelCount; i++) {
-            bitmap[i] = probabilities[probabilityOffset + i] > bitmapThreshold;
+            states[i] = probabilities[probabilityOffset + i] > bitmapThreshold
+                    ? FOREGROUND : BACKGROUND;
         }
-        if (useDilation) dilate2x2(bitmap, width, height);
-        boolean[] visited = scratch.visited;
-        Arrays.fill(visited, false);
+        if (useDilation) dilate2x2(states, width, height);
         int[] queue = scratch.queue;
-        long[] componentPoints = scratch.componentPoints;
+        long[] componentPoints = scratch.boundary;
         long[] hull = scratch.hull;
         float[] corners = scratch.corners;
         float[] sortedCorners = scratch.sortedCorners;
+        float[] restored = scratch.restored;
+        Rectangle rectangle = scratch.rectangle;
         List<DetectionBox> boxes = new ArrayList<DetectionBox>();
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int start = y * width + x;
-                if (visited[start] || !bitmap[start]) continue;
-                visited[start] = true;
+                if (states[start] != FOREGROUND) continue;
+                states[start] = VISITED;
                 int head = 0;
                 int tail = 0;
                 queue[tail++] = start;
@@ -93,18 +97,19 @@ public final class DbPostprocess {
                             int neighborY = currentY + deltaY;
                             if (neighborX < 0 || neighborX >= width || neighborY < 0 || neighborY >= height) continue;
                             int neighbor = neighborY * width + neighborX;
-                            if (!visited[neighbor] && bitmap[neighbor]) {
-                                visited[neighbor] = true;
+                            if (states[neighbor] == FOREGROUND) {
+                                states[neighbor] = VISITED;
                                 queue[tail++] = neighbor;
                             }
                         }
                     }
                 }
-                int pointCount = boundaryPoints(bitmap, width, height, queue, tail, componentPoints);
+                if (componentPoints.length < tail) componentPoints = scratch.ensureBoundary(tail);
+                int pointCount = boundaryPoints(states, width, height, queue, tail, componentPoints);
                 if (pointCount <= 2) continue;
+                if (hull.length < pointCount * 2) hull = scratch.ensureHull(pointCount * 2);
                 int hullCount = convexHull(componentPoints, pointCount, hull);
-                Rectangle rectangle = minimumRectangle(hull, hullCount);
-                if (rectangle == null) continue;
+                if (!minimumRectangle(hull, hullCount, rectangle)) continue;
                 float rectangleWidth = rectangle.maxU - rectangle.minU;
                 float rectangleHeight = rectangle.maxV - rectangle.minV;
                 float shortestSide = Math.min(rectangleWidth, rectangleHeight);
@@ -116,7 +121,6 @@ public final class DbPostprocess {
                 if (shortestSide + 2.0f * expansion < MIN_UNCLIPPED_SIDE) continue;
                 rectanglePoints(rectangle, expansion, corners);
                 orderClockwise(corners, sortedCorners);
-                float[] restored = new float[8];
                 for (int point = 0; point < 4; point++) {
                     float restoredX = corners[point * 2] / widthRatio;
                     float restoredY = corners[point * 2 + 1] / heightRatio;
@@ -137,13 +141,14 @@ public final class DbPostprocess {
                 if (boxes.size() == maxCandidates) {
                     throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB candidate limit exceeded");
                 }
-                boxes.add(new DetectionBox(restored, score));
+                boxes.add(new DetectionBox(restored[0], restored[1], restored[2], restored[3],
+                        restored[4], restored[5], restored[6], restored[7], score));
             }
         }
         return Collections.unmodifiableList(boxes);
     }
 
-    private static int boundaryPoints(boolean[] bitmap, int width, int height, int[] component,
+    private static int boundaryPoints(byte[] states, int width, int height, int[] component,
                                       int count, long[] output) {
         int pointCount = 0;
         for (int i = 0; i < count; i++) {
@@ -151,10 +156,10 @@ public final class DbPostprocess {
             int y = position / width;
             int x = position - y * width;
             boolean boundary = x == 0 || y == 0 || x + 1 == width || y + 1 == height;
-            if (!boundary && bitmap[position - 1] == false) boundary = true;
-            if (!boundary && x + 1 < width && !bitmap[position + 1]) boundary = true;
-            if (!boundary && y > 0 && !bitmap[position - width]) boundary = true;
-            if (!boundary && y + 1 < height && !bitmap[position + width]) boundary = true;
+            if (!boundary && states[position - 1] == BACKGROUND) boundary = true;
+            if (!boundary && x + 1 < width && states[position + 1] == BACKGROUND) boundary = true;
+            if (!boundary && y > 0 && states[position - width] == BACKGROUND) boundary = true;
+            if (!boundary && y + 1 < height && states[position + width] == BACKGROUND) boundary = true;
             if (boundary) output[pointCount++] = encodePoint(x, y);
         }
         return pointCount;
@@ -183,9 +188,8 @@ public final class DbPostprocess {
         return count > 1 ? count - 1 : 0;
     }
 
-    private static Rectangle minimumRectangle(long[] hull, int hullCount) {
-        if (hullCount < 3) return null;
-        Rectangle best = null;
+    private static boolean minimumRectangle(long[] hull, int hullCount, Rectangle best) {
+        if (hullCount < 3) return false;
         float bestArea = Float.POSITIVE_INFINITY;
         for (int edge = 0; edge < hullCount; edge++) {
             long current = hull[edge];
@@ -215,10 +219,10 @@ public final class DbPostprocess {
             float area = (maxU - minU) * (maxV - minV);
             if (area < bestArea) {
                 bestArea = area;
-                best = new Rectangle(ux, uy, vx, vy, minU, maxU, minV, maxV);
+                best.set(ux, uy, vx, vy, minU, maxU, minV, maxV);
             }
         }
-        return best;
+        return bestArea != Float.POSITIVE_INFINITY;
     }
 
     private static float rectangleScore(float[] probabilities, int probabilityOffset,
@@ -349,13 +353,14 @@ public final class DbPostprocess {
     }
 
     private static final class Scratch {
-        private final boolean[] bitmap;
-        private final boolean[] visited;
+        private final byte[] states;
         private final int[] queue;
-        private final long[] componentPoints;
-        private final long[] hull;
+        private long[] boundary;
+        private long[] hull;
         private final float[] corners;
         private final float[] sortedCorners;
+        private final float[] restored;
+        private final Rectangle rectangle;
 
         private Scratch(int width, int height) {
             if (width <= 0 || height <= 0) {
@@ -366,13 +371,39 @@ public final class DbPostprocess {
                 throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "DB component geometry is too large");
             }
             int count = (int) pixelCount;
-            this.bitmap = new boolean[count];
-            this.visited = new boolean[count];
+            this.states = new byte[count];
             this.queue = new int[count];
-            this.componentPoints = new long[count];
-            this.hull = new long[count * 2];
+            this.boundary = new long[Math.min(count, 256)];
+            this.hull = new long[Math.min(count * 2, 512)];
             this.corners = new float[8];
             this.sortedCorners = new float[8];
+            this.restored = new float[8];
+            this.rectangle = new Rectangle();
+        }
+
+        private long[] ensureBoundary(int required) {
+            if (required <= boundary.length) return boundary;
+            boundary = grow(boundary, required);
+            return boundary;
+        }
+
+        private long[] ensureHull(int required) {
+            if (required <= hull.length) return hull;
+            hull = grow(hull, required);
+            return hull;
+        }
+
+        private static long[] grow(long[] values, int required) {
+            int capacity = values.length == 0 ? 1 : values.length;
+            while (capacity < required) {
+                int next = capacity + (capacity >> 1) + 1;
+                if (next <= capacity) {
+                    capacity = required;
+                    break;
+                }
+                capacity = next;
+            }
+            return Arrays.copyOf(values, capacity);
         }
     }
 
@@ -418,17 +449,17 @@ public final class DbPostprocess {
     }
 
     private static final class Rectangle {
-        private final float ux;
-        private final float uy;
-        private final float vx;
-        private final float vy;
-        private final float minU;
-        private final float maxU;
-        private final float minV;
-        private final float maxV;
+        private float ux;
+        private float uy;
+        private float vx;
+        private float vy;
+        private float minU;
+        private float maxU;
+        private float minV;
+        private float maxV;
 
-        private Rectangle(float ux, float uy, float vx, float vy,
-                          float minU, float maxU, float minV, float maxV) {
+        private void set(float ux, float uy, float vx, float vy,
+                         float minU, float maxU, float minV, float maxV) {
             this.ux = ux;
             this.uy = uy;
             this.vx = vx;
@@ -440,19 +471,16 @@ public final class DbPostprocess {
         }
     }
 
-    private static void dilate2x2(boolean[] bitmap, int width, int height) {
-        boolean[] dilated = new boolean[bitmap.length];
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
+    private static void dilate2x2(byte[] states, int width, int height) {
+        for (int y = height - 1; y >= 0; y--) {
+            for (int x = width - 1; x >= 0; x--) {
                 int index = y * width + x;
-                if (!bitmap[index]) continue;
-                dilated[index] = true;
-                if (x + 1 < width) dilated[index + 1] = true;
-                if (y + 1 < height) dilated[index + width] = true;
-                if (x + 1 < width && y + 1 < height) dilated[index + width + 1] = true;
+                if (states[index] != FOREGROUND) continue;
+                if (x + 1 < width) states[index + 1] = FOREGROUND;
+                if (y + 1 < height) states[index + width] = FOREGROUND;
+                if (x + 1 < width && y + 1 < height) states[index + width + 1] = FOREGROUND;
             }
         }
-        System.arraycopy(dilated, 0, bitmap, 0, bitmap.length);
     }
 
     private static void validate(float[] probabilities, int width, int height,
