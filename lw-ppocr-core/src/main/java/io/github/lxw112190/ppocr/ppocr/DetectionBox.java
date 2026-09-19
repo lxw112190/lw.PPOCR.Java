@@ -17,16 +17,9 @@ public final class DetectionBox {
     private final float score;
 
     public DetectionBox(float[] points, float score) {
-        if (points == null || points.length != 8 || !Float.isFinite(score)) {
-            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "detection box is invalid");
-        }
-        for (float point : points) {
-            if (!Float.isFinite(point)) {
-                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "detection box contains non-finite coordinates");
-            }
-        }
-        this(point(points, 0), point(points, 1), point(points, 2), point(points, 3),
-                point(points, 4), point(points, 5), point(points, 6), point(points, 7), score);
+        this(validatedPoint(points, 0), validatedPoint(points, 1), validatedPoint(points, 2),
+                validatedPoint(points, 3), validatedPoint(points, 4), validatedPoint(points, 5),
+                validatedPoint(points, 6), validatedPoint(points, 7), score);
     }
 
     DetectionBox(float point0, float point1, float point2, float point3,
@@ -72,7 +65,14 @@ public final class DetectionBox {
         return "DetectionBox{" + Arrays.toString(getPoints()) + ", score=" + score + "}";
     }
 
-    private static float point(float[] points, int index) {
+    private static float validatedPoint(float[] points, int index) {
+        if (points == null || points.length != 8) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "detection box is invalid");
+        }
+        if (!Float.isFinite(points[index])) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "detection box contains non-finite coordinates");
+        }
         return points[index];
     }
 }
