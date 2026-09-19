@@ -21,7 +21,7 @@ final class CompiledModel {
     private final int[][] nodeInputs;
     private final int[][] nodeOutputs;
     private final ByteBuffer[] parameters;
-    private final float[][] constants;
+    private final ConstantTensor[] constants;
     private final int[] tensorConsumerCounts;
     private final int[] tensorLastUses;
 
@@ -37,7 +37,7 @@ final class CompiledModel {
             nodeOutputs[i] = nodes[i].getOutputs();
             parameters[i] = model.parameterData(i);
         }
-        this.constants = decodeConstants(model);
+        this.constants = prepareConstants(model);
         this.tensorConsumerCounts = new int[model.getTensors().size()];
         this.tensorLastUses = new int[tensorConsumerCounts.length];
         Arrays.fill(tensorLastUses, -1);
@@ -71,14 +71,20 @@ final class CompiledModel {
     int[] nodeInputs(int index) { return nodeInputs[index]; }
     int[] nodeOutputs(int index) { return nodeOutputs[index]; }
     ByteBuffer parameterData(int index) { return parameters[index]; }
-    float[] constant(int tensorIndex) { return constants[tensorIndex]; }
-    float[][] constants() { return constants; }
+    float[] constant(int tensorIndex) {
+        ConstantTensor constant = constants[tensorIndex];
+        return constant == null ? null : constant.canonical();
+    }
+    boolean isConstantMaterialized(int tensorIndex) {
+        ConstantTensor constant = constants[tensorIndex];
+        return constant != null && constant.isMaterialized();
+    }
     int tensorConsumerCount(int tensorIndex) { return tensorConsumerCounts[tensorIndex]; }
     int tensorLastUse(int tensorIndex) { return tensorLastUses[tensorIndex]; }
 
-    private static float[][] decodeConstants(LwmModel model) {
+    private static ConstantTensor[] prepareConstants(LwmModel model) {
         List<TensorInfo> tensors = model.getTensors();
-        float[][] decoded = new float[tensors.size()][];
+        ConstantTensor[] prepared = new ConstantTensor[tensors.size()];
         for (int i = 0; i < tensors.size(); i++) {
             TensorInfo tensor = tensors.get(i);
             if (!tensor.isConstant()) continue;
@@ -86,14 +92,9 @@ final class CompiledModel {
                 throw new IllegalArgumentException("only F32 execution is supported: tensor " + i);
             }
             int length = elementCount(tensor, i);
-            ByteBuffer bytes = model.constantData(i);
-            float[] values = new float[length];
-            for (int element = 0; element < length; element++) {
-                values[element] = bytes.getFloat(element * 4);
-            }
-            decoded[i] = values;
+            prepared[i] = new ConstantTensor(model.constantData(i), length);
         }
-        return decoded;
+        return prepared;
     }
 
     private static int elementCount(TensorInfo tensor, int tensorIndex) {

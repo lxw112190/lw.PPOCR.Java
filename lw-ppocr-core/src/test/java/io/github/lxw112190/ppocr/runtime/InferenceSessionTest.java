@@ -28,6 +28,9 @@ public final class InferenceSessionTest {
         FloatTensorView output = session.outputView();
         Assert.assertSame(input.array(), session.inputView().array());
         Assert.assertSame(output.array(), session.outputView().array());
+        Assert.assertEquals("same-shape ADD should reuse the single-use input range",
+                input.offset(), output.offset());
+        Assert.assertEquals(input.length(), output.length());
         System.arraycopy(new float[] {1, 2, 3, 4}, 0,
                 input.array(), input.offset(), input.length());
         session.runBound();
@@ -79,6 +82,17 @@ public final class InferenceSessionTest {
         Assert.assertSame(first.execution().constant(1), second.execution().constant(1));
         first.close();
         second.close();
+        model.close();
+    }
+
+    @Test
+    public void materializesConstantsOnlyWhenFirstRead() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
+        CompiledModel compiled = CompiledModel.acquire(model);
+        Assert.assertFalse(compiled.isConstantMaterialized(1));
+        float[] first = compiled.constant(1);
+        Assert.assertTrue(compiled.isConstantMaterialized(1));
+        Assert.assertSame(first, compiled.constant(1));
         model.close();
     }
 

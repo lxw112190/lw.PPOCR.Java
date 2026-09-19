@@ -11,7 +11,6 @@ public final class PreparedExecution {
     private final CompiledModel compiledModel;
     private final List<TensorShape> shapes;
     private final WorkspacePlan workspacePlan;
-    private final float[][] constants;
     private final int[] offsets;
     private final int[] lengths;
 
@@ -81,13 +80,12 @@ public final class PreparedExecution {
                 offsets[i] = -1;
             }
         }
-        this.constants = compiledModel.constants();
     }
 
     public LwmModel model() { return model; }
     public List<TensorShape> shapes() { return shapes; }
     public WorkspacePlan workspacePlan() { return workspacePlan; }
-    public float[] constant(int tensorIndex) { return constants[tensorIndex]; }
+    public float[] constant(int tensorIndex) { return compiledModel.constant(tensorIndex); }
     public int offset(int tensorIndex) { return offsets[tensorIndex]; }
     public int length(int tensorIndex) { return lengths[tensorIndex]; }
 
