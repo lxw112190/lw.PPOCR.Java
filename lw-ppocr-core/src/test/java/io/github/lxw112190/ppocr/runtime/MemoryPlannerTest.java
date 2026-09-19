@@ -45,9 +45,11 @@ public final class MemoryPlannerTest {
         WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
                 Arrays.asList(0, 1), Arrays.asList(3, 4), shapes);
 
-        Assert.assertEquals(208L, plan.getTotalBytes());
+        Assert.assertEquals(196L, plan.getTotalBytes());
         Assert.assertEquals(0L, plan.getOffset(3));
         Assert.assertEquals(64L, plan.getOffset(4));
+        Assert.assertEquals(208L, plan.getDiagnostics().getOldWorkspaceBytes());
+        Assert.assertEquals(148L, plan.getDiagnostics().getLiveLowerBoundBytes());
     }
 
     @Test(expected = IllegalArgumentException.class)

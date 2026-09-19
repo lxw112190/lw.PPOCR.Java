@@ -5,11 +5,12 @@ import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
-/** Lifetime-based best-fit planner for non-constant tensors. */
+/** Lifetime-based workspace planner with a measurable greedy V2 placement path. */
 public final class MemoryPlanner {
     private static final long ALIGNMENT = 64;
 
@@ -18,38 +19,43 @@ public final class MemoryPlanner {
     public static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes) {
-        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, true);
+        PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, true);
+        Allocation old = allocateLegacy(data);
+        Allocation current = allocateGreedy(data);
+        return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
+                old.totalBytes, liveLowerBound(data));
     }
 
     static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes) {
-        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, false);
+        PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, false);
+        Allocation old = allocateLegacy(data);
+        Allocation current = allocateGreedy(data);
+        return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
+                old.totalBytes, liveLowerBound(data));
     }
 
-    private static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
-                                      List<Integer> graphInputs, List<Integer> graphOutputs,
-                                      List<TensorShape> shapes, boolean requireEveryRuntimeTensor) {
-        if (tensors == null || nodes == null || graphInputs == null || graphOutputs == null || shapes == null ||
-                tensors.size() != shapes.size()) {
+    private static PlanningData prepare(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                                        List<Integer> graphInputs, List<Integer> graphOutputs,
+                                        List<TensorShape> shapes, boolean requireEveryRuntimeTensor) {
+        if (tensors == null || nodes == null || graphInputs == null || graphOutputs == null
+                || shapes == null || tensors.size() != shapes.size()) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "planner inputs are inconsistent");
         }
         int tensorCount = tensors.size();
-        long[] offsets = new long[tensorCount];
         long[] sizes = new long[tensorCount];
         int[] births = new int[tensorCount];
         int[] deaths = new int[tensorCount];
-        java.util.Arrays.fill(offsets, -1);
-        java.util.Arrays.fill(births, Integer.MAX_VALUE);
-        java.util.Arrays.fill(deaths, -1);
+        Arrays.fill(births, Integer.MAX_VALUE);
+        Arrays.fill(deaths, -1);
 
         for (int i = 0; i < tensorCount; i++) {
             TensorInfo tensor = tensors.get(i);
-            if (tensor.isConstant()) {
-                continue;
+            if (!tensor.isConstant()) {
+                sizes[i] = multiplyExact(shapes.get(i).getElementCount(),
+                        tensor.getDataType().getByteSize());
             }
-            long bytes = multiplyExact(shapes.get(i).getElementCount(), tensor.getDataType().getByteSize());
-            sizes[i] = bytes;
         }
         for (int input : graphInputs) {
             requireIndex(input, tensorCount);
@@ -71,40 +77,33 @@ public final class MemoryPlanner {
             deaths[output] = Math.max(deaths[output], nodes.size());
         }
         for (int i = 0; i < tensorCount; i++) {
-            if (requireEveryRuntimeTensor && !tensors.get(i).isConstant() &&
-                    births[i] == Integer.MAX_VALUE) {
-                throw new OcrException(OcrErrorCode.INVALID_MODEL, "runtime tensor has no producer or graph input: " + i);
+            if (requireEveryRuntimeTensor && !tensors.get(i).isConstant()
+                    && births[i] == Integer.MAX_VALUE) {
+                throw new OcrException(OcrErrorCode.INVALID_MODEL,
+                        "runtime tensor has no producer or graph input: " + i);
             }
             if (!tensors.get(i).isConstant() && deaths[i] < births[i]) {
                 deaths[i] = births[i];
             }
         }
+        return new PlanningData(tensors, nodes.size(), sizes, births, deaths);
+    }
 
-        List<Integer> order = new ArrayList<Integer>();
-        for (int i = 0; i < tensorCount; i++) {
-            if (!tensors.get(i).isConstant() && births[i] != Integer.MAX_VALUE) {
-                order.add(i);
-            }
-        }
-        Collections.sort(order, new Comparator<Integer>() {
-            @Override
-            public int compare(Integer left, Integer right) {
-                int result = Integer.compare(births[left], births[right]);
-                return result != 0 ? result : Integer.compare(deaths[left], deaths[right]);
-            }
-        });
-
+    private static Allocation allocateLegacy(PlanningData data) {
+        long[] offsets = new long[data.sizes.length];
+        Arrays.fill(offsets, -1);
+        List<Integer> order = runtimeOrder(data, false);
         List<Block> active = new ArrayList<Block>();
         List<Block> free = new ArrayList<Block>();
         long totalBytes = 0;
         for (int tensorIndex : order) {
-            releaseFinished(active, free, births[tensorIndex]);
-            long bytes = sizes[tensorIndex];
+            releaseFinished(active, free, data.births[tensorIndex]);
+            long bytes = data.sizes[tensorIndex];
             Block selected = bestFit(free, bytes);
             if (selected == null) {
                 long start = align(totalBytes);
                 totalBytes = addExact(start, bytes);
-                selected = new Block(start, bytes, deaths[tensorIndex], tensorIndex);
+                selected = new Block(start, bytes, data.deaths[tensorIndex], tensorIndex);
             } else {
                 free.remove(selected);
                 long blockEnd = addExact(selected.offset, selected.capacity);
@@ -116,12 +115,98 @@ public final class MemoryPlanner {
                     coalesceFree(free);
                 }
                 selected = new Block(selected.offset, allocationCapacity,
-                        deaths[tensorIndex], tensorIndex);
+                        data.deaths[tensorIndex], tensorIndex);
             }
             offsets[tensorIndex] = selected.offset;
             active.add(selected);
         }
-        return new WorkspacePlan(offsets, sizes, totalBytes);
+        return new Allocation(offsets, totalBytes);
+    }
+
+    private static Allocation allocateGreedy(PlanningData data) {
+        long[] offsets = new long[data.sizes.length];
+        Arrays.fill(offsets, -1);
+        List<Integer> order = runtimeOrder(data, true);
+        List<Placement> placed = new ArrayList<Placement>();
+        long totalBytes = 0;
+        for (int tensorIndex : order) {
+            long bytes = data.sizes[tensorIndex];
+            long reserved = align(bytes);
+            long offset = 0;
+            for (;;) {
+                long nextOffset = offset;
+                boolean collision = false;
+                for (Placement other : placed) {
+                    if (!overlapsLifetime(data.births[tensorIndex], data.deaths[tensorIndex],
+                            other.birth, other.death)) continue;
+                    if (!rangesOverlap(offset, reserved, other.offset, other.reserved)) continue;
+                    nextOffset = Math.max(nextOffset,
+                            align(addExact(other.offset, other.reserved)));
+                    collision = true;
+                }
+                if (!collision) break;
+                if (nextOffset <= offset) {
+                    throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
+                            "workspace placement does not make progress");
+                }
+                offset = nextOffset;
+            }
+            offsets[tensorIndex] = offset;
+            totalBytes = Math.max(totalBytes, addExact(offset, bytes));
+            placed.add(new Placement(offset, reserved,
+                    data.births[tensorIndex], data.deaths[tensorIndex]));
+        }
+        return new Allocation(offsets, totalBytes);
+    }
+
+    private static List<Integer> runtimeOrder(final PlanningData data, final boolean bySize) {
+        List<Integer> order = new ArrayList<Integer>();
+        for (int i = 0; i < data.sizes.length; i++) {
+            if (!data.tensors.get(i).isConstant() && data.births[i] != Integer.MAX_VALUE) {
+                order.add(i);
+            }
+        }
+        Collections.sort(order, new Comparator<Integer>() {
+            @Override
+            public int compare(Integer left, Integer right) {
+                if (bySize) {
+                    int result = Long.compare(data.sizes[right], data.sizes[left]);
+                    if (result != 0) return result;
+                }
+                int result = Integer.compare(data.births[left], data.births[right]);
+                if (result != 0) return result;
+                result = Integer.compare(data.deaths[left], data.deaths[right]);
+                return result != 0 ? result : Integer.compare(left, right);
+            }
+        });
+        return order;
+    }
+
+    private static long liveLowerBound(PlanningData data) {
+        long maximum = 0;
+        for (int time = 0; time <= data.nodeCount; time++) {
+            long live = 0;
+            for (int i = 0; i < data.sizes.length; i++) {
+                if (data.tensors.get(i).isConstant() || data.births[i] == Integer.MAX_VALUE) continue;
+                if (data.births[i] <= time && data.deaths[i] >= time) {
+                    live = addExact(live, data.sizes[i]);
+                }
+            }
+            maximum = Math.max(maximum, live);
+        }
+        return maximum;
+    }
+
+    private static boolean overlapsLifetime(int leftBirth, int leftDeath,
+                                             int rightBirth, int rightDeath) {
+        return leftBirth <= rightDeath && rightBirth <= leftDeath;
+    }
+
+    private static boolean rangesOverlap(long leftOffset, long leftSize,
+                                         long rightOffset, long rightSize) {
+        return leftSize > 0 && rightSize > 0
+                && leftOffset < addExact(rightOffset, rightSize)
+                && rightOffset < addExact(leftOffset, leftSize);
     }
 
     private static void releaseFinished(List<Block> active, List<Block> free, int birth) {
@@ -190,6 +275,47 @@ public final class MemoryPlanner {
     private static void requireIndex(int index, int count) {
         if (index < 0 || index >= count) {
             throw new OcrException(OcrErrorCode.INVALID_MODEL, "tensor index is outside the model");
+        }
+    }
+
+    private static final class PlanningData {
+        final List<TensorInfo> tensors;
+        final int nodeCount;
+        final long[] sizes;
+        final int[] births;
+        final int[] deaths;
+
+        PlanningData(List<TensorInfo> tensors, int nodeCount, long[] sizes,
+                     int[] births, int[] deaths) {
+            this.tensors = tensors;
+            this.nodeCount = nodeCount;
+            this.sizes = sizes;
+            this.births = births;
+            this.deaths = deaths;
+        }
+    }
+
+    private static final class Allocation {
+        final long[] offsets;
+        final long totalBytes;
+
+        Allocation(long[] offsets, long totalBytes) {
+            this.offsets = offsets;
+            this.totalBytes = totalBytes;
+        }
+    }
+
+    private static final class Placement {
+        final long offset;
+        final long reserved;
+        final int birth;
+        final int death;
+
+        Placement(long offset, long reserved, int birth, int death) {
+            this.offset = offset;
+            this.reserved = reserved;
+            this.birth = birth;
+            this.death = death;
         }
     }
 

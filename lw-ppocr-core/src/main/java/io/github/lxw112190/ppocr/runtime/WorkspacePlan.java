@@ -7,14 +7,23 @@ public final class WorkspacePlan {
     private final long[] offsets;
     private final long[] sizes;
     private final long totalBytes;
+    private final WorkspaceDiagnostics diagnostics;
 
     WorkspacePlan(long[] offsets, long[] sizes, long totalBytes) {
+        this(offsets, sizes, totalBytes, totalBytes, totalBytes);
+    }
+
+    WorkspacePlan(long[] offsets, long[] sizes, long totalBytes,
+                  long oldWorkspaceBytes, long liveLowerBoundBytes) {
         this.offsets = offsets.clone();
         this.sizes = sizes.clone();
         this.totalBytes = totalBytes;
+        this.diagnostics = new WorkspaceDiagnostics(oldWorkspaceBytes, totalBytes,
+                liveLowerBoundBytes);
     }
 
     public long getTotalBytes() { return totalBytes; }
+    public WorkspaceDiagnostics getDiagnostics() { return diagnostics; }
     public long getOffset(int tensorIndex) { return offsets[tensorIndex]; }
     public long getSize(int tensorIndex) { return sizes[tensorIndex]; }
     public boolean isAllocated(int tensorIndex) { return offsets[tensorIndex] >= 0; }

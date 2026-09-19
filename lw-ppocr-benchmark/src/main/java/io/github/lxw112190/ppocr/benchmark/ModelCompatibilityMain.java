@@ -102,6 +102,13 @@ public final class ModelCompatibilityMain {
                     .append(",\"nodes\":").append(nodes.size())
                     .append(",\"constant_bytes\":").append(constantBytes)
                     .append(",\"workspace_bytes\":").append(execution.workspacePlan().getTotalBytes())
+                    .append(",\"old_workspace_bytes\":")
+                    .append(execution.workspacePlan().getDiagnostics().getOldWorkspaceBytes())
+                    .append(",\"workspace_live_lower_bound_bytes\":")
+                    .append(execution.workspacePlan().getDiagnostics().getLiveLowerBoundBytes())
+                    .append(",\"workspace_efficiency\":")
+                    .append(String.format(Locale.ROOT, "%.6f",
+                            execution.workspacePlan().getDiagnostics().getEfficiency()))
                     .append(",\"conv\":{\"pointwise\":").append(pointwise)
                     .append(",\"depthwise\":").append(depthwise)
                     .append(",\"general\":").append(general)
