@@ -43,6 +43,7 @@ public final class ClsPreprocess {
                 (scaledWidth + source.height() - 1L) / source.height());
         java.util.Arrays.fill(output, outputOffset, outputOffset + (int) required, -1.0f);
         byte[] pixels = source.pixels();
+        int sourceOffset = source.offset();
         for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {
             double sourceY = ((double) outputY + 0.5) * source.height() / INPUT_HEIGHT - 0.5;
             int sourceY0Raw = (int) Math.floor(sourceY);
@@ -58,10 +59,10 @@ public final class ClsPreprocess {
                 int sourceX1 = clamp(sourceX1Raw, source.width());
                 double weightX = sourceX - sourceX0Raw;
                 for (int channel = 0; channel < 3; channel++) {
-                    double topLeft = pixels[sourceY0 * source.stride() + sourceX0 * 3 + channel] & 0xff;
-                    double topRight = pixels[sourceY0 * source.stride() + sourceX1 * 3 + channel] & 0xff;
-                    double bottomLeft = pixels[sourceY1 * source.stride() + sourceX0 * 3 + channel] & 0xff;
-                    double bottomRight = pixels[sourceY1 * source.stride() + sourceX1 * 3 + channel] & 0xff;
+                    double topLeft = pixels[sourceOffset + sourceY0 * source.stride() + sourceX0 * 3 + channel] & 0xff;
+                    double topRight = pixels[sourceOffset + sourceY0 * source.stride() + sourceX1 * 3 + channel] & 0xff;
+                    double bottomLeft = pixels[sourceOffset + sourceY1 * source.stride() + sourceX0 * 3 + channel] & 0xff;
+                    double bottomRight = pixels[sourceOffset + sourceY1 * source.stride() + sourceX1 * 3 + channel] & 0xff;
                     double top = topLeft + (topRight - topLeft) * weightX;
                     double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
                     double value = top + (bottom - top) * weightY;

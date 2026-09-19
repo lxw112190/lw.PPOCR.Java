@@ -2,6 +2,8 @@ package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.image.BgrImage;
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -71,5 +73,27 @@ public final class PerspectiveCropTest {
         BgrImage expected = PerspectiveCrop.crop(source, small);
         Assert.assertArrayEquals(expected.pixels(),
                 Arrays.copyOf(reused.pixels(), expected.pixels().length));
+    }
+
+    @Test
+    public void batchWorkspaceKeepsMultipleCropsInOneArena() {
+        byte[] pixels = new byte[6 * 6 * 3];
+        for (int i = 0; i < pixels.length; i++) pixels[i] = (byte) i;
+        BgrImage source = new BgrImage(pixels, 6, 6, 18);
+        List<DetectionBox> boxes = Arrays.asList(
+                new DetectionBox(new float[] {0, 0, 5, 0, 5, 5, 0, 5}, 0.9f),
+                new DetectionBox(new float[] {1, 1, 4, 1, 4, 4, 1, 4}, 0.8f));
+        PerspectiveCrop.Workspace workspace = new PerspectiveCrop.Workspace();
+        List<BgrImage> crops = new ArrayList<BgrImage>();
+        workspace.cropAll(source, boxes, crops);
+        Assert.assertEquals(2, crops.size());
+        Assert.assertSame(crops.get(0).pixels(), crops.get(1).pixels());
+        Assert.assertNotEquals(crops.get(0).offset(), crops.get(1).offset());
+        BgrImage expected = PerspectiveCrop.crop(source, boxes.get(1));
+        byte[] actual = crops.get(1).pixels();
+        for (int i = 0; i < expected.width() * expected.height() * 3; i++) {
+            Assert.assertEquals(expected.pixels()[i] & 0xff,
+                    actual[crops.get(1).offset() + i] & 0xff);
+        }
     }
 }

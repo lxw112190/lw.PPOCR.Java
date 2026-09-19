@@ -23,6 +23,11 @@ public final class DbPostprocess {
         return new Decoder(width, height);
     }
 
+    /** Creates a reusable decoder which can switch between DET output shapes. */
+    public static DynamicDecoder createDynamicDecoder() {
+        return new DynamicDecoder();
+    }
+
     /**
      * Extracts 8-connected foreground components, fits their minimum rotated
      * rectangles, and restores quadrilaterals to source-image coordinates.
@@ -295,14 +300,28 @@ public final class DbPostprocess {
 
     /** Reusable decoder; callers must not invoke it concurrently. */
     public static final class Decoder {
-        private final int width;
-        private final int height;
-        private final Scratch scratch;
+        private int width;
+        private int height;
+        private Scratch scratch;
 
         private Decoder(int width, int height) {
             this.width = width;
             this.height = height;
             this.scratch = new Scratch(width, height);
+        }
+
+        private void ensureShape(int width, int height) {
+            if (width <= 0 || height <= 0) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "DB map dimensions are invalid");
+            }
+            if (this.scratch == null) {
+                this.scratch = new Scratch(width, height);
+            } else {
+                this.scratch.ensurePixelCapacity(width, height);
+            }
+            this.width = width;
+            this.height = height;
         }
 
         public List<DetectionBox> decode(float[] probabilities, float bitmapThreshold,
@@ -352,9 +371,32 @@ public final class DbPostprocess {
         }
     }
 
+    /** Reusable, single-threaded DB decoder shared by all DET shape sessions. */
+    public static final class DynamicDecoder {
+        private Decoder decoder;
+
+        private DynamicDecoder() { }
+
+        public List<DetectionBox> decodeToSource(float[] probabilities, int probabilityOffset,
+                                                 int width, int height, float bitmapThreshold,
+                                                 float boxThreshold, float widthRatio,
+                                                 float heightRatio, int maxCandidates,
+                                                 float unclipRatio, boolean useDilation,
+                                                 int sourceWidth, int sourceHeight) {
+            if (decoder == null) {
+                decoder = new Decoder(width, height);
+            } else {
+                decoder.ensureShape(width, height);
+            }
+            return decoder.decodeToSource(probabilities, probabilityOffset, bitmapThreshold,
+                    boxThreshold, widthRatio, heightRatio, maxCandidates, unclipRatio,
+                    useDilation, sourceWidth, sourceHeight);
+        }
+    }
+
     private static final class Scratch {
-        private final byte[] states;
-        private final int[] queue;
+        private byte[] states;
+        private int[] queue;
         private long[] boundary;
         private long[] hull;
         private final float[] corners;
@@ -379,6 +421,18 @@ public final class DbPostprocess {
             this.sortedCorners = new float[8];
             this.restored = new float[8];
             this.rectangle = new Rectangle();
+        }
+
+        private void ensurePixelCapacity(int width, int height) {
+            long pixelCount = (long) width * height;
+            if (pixelCount <= 0L || pixelCount > Integer.MAX_VALUE ||
+                    pixelCount > Integer.MAX_VALUE / 2) {
+                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
+                        "DB component geometry is too large");
+            }
+            int count = (int) pixelCount;
+            if (states.length < count) states = Arrays.copyOf(states, count);
+            if (queue.length < count) queue = Arrays.copyOf(queue, count);
         }
 
         private long[] ensureBoundary(int required) {

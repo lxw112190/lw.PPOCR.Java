@@ -16,7 +16,8 @@ final class DetSessionContext implements AutoCloseable {
     final int height;
     final InferenceSession session;
     final DetPreprocess.Workspace preprocess;
-    final DbPostprocess.Decoder postprocessor;
+    final int mapWidth;
+    final int mapHeight;
     float widthRatio;
     float heightRatio;
 
@@ -43,7 +44,8 @@ final class DetSessionContext implements AutoCloseable {
             FloatTensorView input = prepared.inputView();
             this.preprocess = new DetPreprocess.Workspace(width, height,
                     input.array(), input.offset());
-            this.postprocessor = DbPostprocess.createDecoder(mapWidth, mapHeight);
+            this.mapWidth = mapWidth;
+            this.mapHeight = mapHeight;
         } catch (RuntimeException e) {
             prepared.close();
             throw e;

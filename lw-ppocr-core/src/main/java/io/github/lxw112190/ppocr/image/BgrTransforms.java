@@ -19,7 +19,7 @@ public final class BgrTransforms {
         byte[] rotated = new byte[(int) byteCount];
         byte[] pixels = source.pixels();
         for (int y = 0; y < source.height(); y++) {
-            int sourceRow = y * source.stride();
+            int sourceRow = source.offset() + y * source.stride();
             int destinationRow = (source.height() - 1 - y) * (int) rowBytes;
             for (int x = 0; x < source.width(); x++) {
                 int sourcePixel = sourceRow + x * 3;

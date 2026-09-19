@@ -103,23 +103,25 @@ public final class ReadingOrder {
         private int column;
 
         private Item(DetectionBox box, int originalIndex) {
-            float[] points = box.getPoints();
-            if (points.length != 8) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "detection box must have four points");
-            float highX = points[0];
-            float lowX = points[0];
-            float lowY = points[1];
-            float sumX = 0.0f;
-            float sumY = 0.0f;
-            for (int i = 0; i < points.length; i += 2) {
-                if (!Float.isFinite(points[i]) || !Float.isFinite(points[i + 1])) {
-                    throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "detection box contains non-finite coordinates");
-                }
-                lowX = Math.min(lowX, points[i]);
-                highX = Math.max(highX, points[i]);
-                lowY = Math.min(lowY, points[i + 1]);
-                sumX += points[i];
-                sumY += points[i + 1];
+            float x0 = box.x0();
+            float y0 = box.y0();
+            float x1 = box.x1();
+            float y1 = box.y1();
+            float x2 = box.x2();
+            float y2 = box.y2();
+            float x3 = box.x3();
+            float y3 = box.y3();
+            if (!Float.isFinite(x0) || !Float.isFinite(y0) || !Float.isFinite(x1) ||
+                    !Float.isFinite(y1) || !Float.isFinite(x2) || !Float.isFinite(y2) ||
+                    !Float.isFinite(x3) || !Float.isFinite(y3)) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "detection box contains non-finite coordinates");
             }
+            float lowX = Math.min(Math.min(x0, x1), Math.min(x2, x3));
+            float highX = Math.max(Math.max(x0, x1), Math.max(x2, x3));
+            float lowY = Math.min(Math.min(y0, y1), Math.min(y2, y3));
+            float sumX = x0 + x1 + x2 + x3;
+            float sumY = y0 + y1 + y2 + y3;
             this.box = box;
             this.originalIndex = originalIndex;
             this.minX = lowX;

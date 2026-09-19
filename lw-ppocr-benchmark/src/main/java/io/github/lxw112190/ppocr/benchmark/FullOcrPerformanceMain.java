@@ -466,13 +466,9 @@ public final class FullOcrPerformanceMain {
             crops.ensureCapacity(boxes.size());
             if (rotations.length < boxes.size()) rotations = new boolean[boxes.size()];
             try {
-                for (int line = 0; line < boxes.size(); line++) {
-                    DetectionBox box = boxes.get(line);
-                    start = System.nanoTime();
-                    BgrImage crop = cropper.crop(source, box, line);
-                    sample.cropNanos += System.nanoTime() - start;
-                    crops.add(crop);
-                }
+                start = System.nanoTime();
+                cropper.cropAll(source, boxes, crops);
+                sample.cropNanos = System.nanoTime() - start;
                 start = System.nanoTime();
                 List<ClsClassificationResult> classifications;
                 if (profileOperators) {

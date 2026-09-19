@@ -103,9 +103,7 @@ public final class PaddleOcr implements AutoCloseable {
         ParallelismPlan parallelism = options.parallelismPlan(boxes.size());
         prepareStaging(boxes.size());
         try {
-            for (int i = 0; i < boxes.size(); i++) {
-                cropStaging.add(cropper.crop(source, boxes.get(i), i));
-            }
+            cropper.cropAll(source, boxes, cropStaging);
             if (classifier == null) {
                 Arrays.fill(classificationStaging, 0, boxes.size(), null);
             } else {

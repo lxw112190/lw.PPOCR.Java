@@ -110,6 +110,20 @@ public final class DbPostprocessTest {
     }
 
     @Test
+    public void dynamicDecoderReusesAcrossMapShapes() {
+        DbPostprocess.DynamicDecoder decoder = DbPostprocess.createDynamicDecoder();
+        List<DetectionBox> first = decoder.decodeToSource(
+                rectangle(10, 10, 1, 1, 8, 8, 0.9f), 0, 10, 10,
+                0.5f, 0.7f, 1.5f, 1.5f, 4, 1.0f, false, 10, 10);
+        List<DetectionBox> second = decoder.decodeToSource(
+                rectangle(12, 8, 1, 1, 10, 6, 0.9f), 0, 12, 8,
+                0.5f, 0.7f, 1.5f, 1.5f, 4, 1.0f, false, 12, 8);
+        Assert.assertEquals(1, first.size());
+        Assert.assertEquals(1, second.size());
+        Assert.assertEquals(0.9f, second.get(0).getScore(), 0.00001f);
+    }
+
+    @Test
     public void filtersCandidatesAtEachPaddleMinimumSideStage() {
         Assert.assertEquals(0, DbPostprocess.decode(
                 rectangle(12, 12, 2, 2, 9, 4, 0.9f),

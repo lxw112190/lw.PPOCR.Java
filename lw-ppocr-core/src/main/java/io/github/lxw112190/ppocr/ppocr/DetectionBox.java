@@ -45,6 +45,15 @@ public final class DetectionBox {
     }
     public float getScore() { return score; }
 
+    float x0() { return point0; }
+    float y0() { return point1; }
+    float x1() { return point2; }
+    float y1() { return point3; }
+    float x2() { return point4; }
+    float y2() { return point5; }
+    float x3() { return point6; }
+    float y3() { return point7; }
+
     void copyPointsTo(float[] destination) {
         if (destination == null || destination.length != 8) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,

@@ -19,9 +19,44 @@ public final class PerspectiveCrop {
         private final float[] values = new float[8];
         private final double[] points = new double[8];
         private final List<byte[]> pixelBuffers = new ArrayList<byte[]>();
+        private byte[] arena = new byte[0];
+        private int[] cropOffsets = new int[0];
+        private final int[] dimensions = new int[2];
 
         public BgrImage crop(BgrImage source, DetectionBox box) {
             return PerspectiveCrop.crop(source, box, values, points, null);
+        }
+
+        /** Crops all boxes into one reusable arena so line crops share one byte array. */
+        public void cropAll(BgrImage source, List<DetectionBox> boxes, List<BgrImage> destination) {
+            if (source == null || boxes == null || destination == null) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "crop batch inputs are required");
+            }
+            int count = boxes.size();
+            ensureCropMetadata(count);
+            long totalBytes = 0L;
+            for (int i = 0; i < count; i++) {
+                dimensions(source, boxes.get(i), values, points, dimensions);
+                if (totalBytes > Integer.MAX_VALUE) {
+                    throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "crop arena is too large");
+                }
+                cropOffsets[i] = (int) totalBytes;
+                totalBytes += (long) dimensions[0] * dimensions[1] * 3L;
+            }
+            if (totalBytes > Integer.MAX_VALUE) {
+                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "crop arena is too large");
+            }
+            if (arena.length < (int) totalBytes) {
+                int next = Math.max((int) totalBytes,
+                        arena.length + Math.max(1, arena.length >> 1));
+                arena = new byte[next];
+            }
+            destination.clear();
+            for (int i = 0; i < count; i++) {
+                destination.add(PerspectiveCrop.crop(source, boxes.get(i), values, points,
+                        arena, cropOffsets[i]));
+            }
         }
 
         /**
@@ -39,10 +74,21 @@ public final class PerspectiveCrop {
             pixelBuffers.set(slot, result.pixels());
             return result;
         }
+
+        private void ensureCropMetadata(int count) {
+            if (cropOffsets.length >= count) return;
+            cropOffsets = new int[count];
+        }
     }
 
     private static BgrImage crop(BgrImage source, DetectionBox box,
                                  float[] values, double[] points, byte[] reusableOutput) {
+        return crop(source, box, values, points, reusableOutput, 0);
+    }
+
+    private static BgrImage crop(BgrImage source, DetectionBox box,
+                                 float[] values, double[] points, byte[] reusableOutput,
+                                 int outputOffset) {
         if (source == null || box == null) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image and detection box are required");
         }
@@ -59,8 +105,11 @@ public final class PerspectiveCrop {
         int outputHeight = rotateVertical ? unrotatedWidth : unrotatedHeight;
         long outputBytes = (long) outputWidth * outputHeight * 3L;
         if (outputBytes > Integer.MAX_VALUE) throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "crop is too large");
-        byte[] output = reusableOutput != null && reusableOutput.length >= outputBytes
-                ? reusableOutput : new byte[(int) outputBytes];
+        if (outputOffset < 0 || outputBytes > Integer.MAX_VALUE - (long) outputOffset) {
+            throw new OcrException(OcrErrorCode.RESOURCE_LIMIT, "crop output offset is invalid");
+        }
+        byte[] output = reusableOutput != null && reusableOutput.length - outputOffset >= outputBytes
+                ? reusableOutput : new byte[(int) (outputOffset + outputBytes)];
         double dx1 = points[2] - points[4];
         double dx2 = points[6] - points[4];
         double dx3 = points[0] - points[2] + points[4] - points[6];
@@ -99,13 +148,31 @@ public final class PerspectiveCrop {
                 }
                 int destinationX = rotateVertical ? unrotatedHeight - 1 - y : x;
                 int destinationY = rotateVertical ? x : y;
-                int destination = (destinationY * outputWidth + destinationX) * 3;
+                int destination = outputOffset + (destinationY * outputWidth + destinationX) * 3;
                 for (int channel = 0; channel < 3; channel++) {
                     output[destination + channel] = (byte) sample(sourcePixels, source, sourceX, sourceY, channel);
                 }
             }
         }
-        return new BgrImage(output, outputWidth, outputHeight, outputWidth * 3);
+        return new BgrImage(output, outputOffset, outputWidth, outputHeight, outputWidth * 3);
+    }
+
+    private static void dimensions(BgrImage source, DetectionBox box,
+                                   float[] values, double[] points, int[] output) {
+        if (source == null || box == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "source image and detection box are required");
+        }
+        box.copyPointsTo(values);
+        for (int i = 0; i < values.length; i++) {
+            if (!Float.isFinite(values[i])) throw invalid("detection box contains non-finite coordinates");
+            points[i] = values[i];
+        }
+        int unrotatedWidth = roundedDistance(points[0], points[1], points[2], points[3]);
+        int unrotatedHeight = roundedDistance(points[0], points[1], points[6], points[7]);
+        boolean rotateVertical = (double) unrotatedHeight >= (double) unrotatedWidth * 1.5;
+        output[0] = rotateVertical ? unrotatedHeight : unrotatedWidth;
+        output[1] = rotateVertical ? unrotatedWidth : unrotatedHeight;
     }
 
     private static int roundedDistance(double x0, double y0, double x1, double y1) {
@@ -125,10 +192,11 @@ public final class PerspectiveCrop {
         int y1 = clamp(y0Raw + 1, source.height());
         double weightX = x - x0Raw;
         double weightY = y - y0Raw;
-        double topLeft = pixels[y0 * source.stride() + x0 * 3 + channel] & 0xff;
-        double topRight = pixels[y0 * source.stride() + x1 * 3 + channel] & 0xff;
-        double bottomLeft = pixels[y1 * source.stride() + x0 * 3 + channel] & 0xff;
-        double bottomRight = pixels[y1 * source.stride() + x1 * 3 + channel] & 0xff;
+        int sourceOffset = source.offset();
+        double topLeft = pixels[sourceOffset + y0 * source.stride() + x0 * 3 + channel] & 0xff;
+        double topRight = pixels[sourceOffset + y0 * source.stride() + x1 * 3 + channel] & 0xff;
+        double bottomLeft = pixels[sourceOffset + y1 * source.stride() + x0 * 3 + channel] & 0xff;
+        double bottomRight = pixels[sourceOffset + y1 * source.stride() + x1 * 3 + channel] & 0xff;
         double top = topLeft + (topRight - topLeft) * weightX;
         double bottom = bottomLeft + (bottomRight - bottomLeft) * weightX;
         double value = top + (bottom - top) * weightY;

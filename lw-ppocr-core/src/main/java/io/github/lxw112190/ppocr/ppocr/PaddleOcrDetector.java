@@ -25,6 +25,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
     private final int maximumSideLength;
     private final KernelBackend backend;
     private final DetSessionCache sessions;
+    private final DbPostprocess.DynamicDecoder postprocessor;
     private boolean closed;
 
     /** Uses C-compatible defaults: bitmap 0.3, box 0.6, unclip 1.6, no dilation. */
@@ -39,8 +40,9 @@ public final class PaddleOcrDetector implements AutoCloseable {
         context.preprocess(source);
         context.session.runBound();
         FloatTensorView probabilityMap = context.session.outputView();
-        return context.postprocessor.decodeToSource(
-                probabilityMap.array(), probabilityMap.offset(), bitmapThreshold, boxThreshold,
+        return postprocessor.decodeToSource(
+                probabilityMap.array(), probabilityMap.offset(), context.mapWidth, context.mapHeight,
+                bitmapThreshold, boxThreshold,
                 context.widthRatio, context.heightRatio,
                 maxCandidates, unclipRatio, useDilation, source.width(), source.height());
     }
@@ -97,6 +99,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
         this.maximumSideLength = dynamicInput ? maximumSideLength : 0;
         this.backend = backend;
         this.sessions = new DetSessionCache(DYNAMIC_CACHE_CAPACITY);
+        this.postprocessor = DbPostprocess.createDynamicDecoder();
         if (!dynamicInput) {
             try {
                 sessions.getOrCreate(new DetShapeKey(fixedInputHeight, fixedInputWidth), model, backend);
