@@ -18,7 +18,7 @@ import jdk.incubator.vector.VectorSpecies;
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
 public final class VectorBackend implements KernelBackend, FusedGeluBackend,
         ProjectionArgMaxBackend, InPlaceElementwiseBackend {
-    private static final VectorSpecies<Float> SPECIES = FloatVector.SPECIES_PREFERRED;
+    private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
     private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
     private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.makeZip(SPECIES, 0);
     private static final VectorShuffle<Float> ZIP_HIGH = VectorShuffle.makeZip(SPECIES, 1);
