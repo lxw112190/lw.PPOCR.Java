@@ -2,11 +2,13 @@ target/
 .maven-repository/
 benchmark-results/
 build-local-data/
+build-local/
 dist/
 *.rar
 *.class
 *.jar
 *.log
+__pycache__/
 .idea/
 .vscode/
 *.iml

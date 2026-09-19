@@ -6,6 +6,7 @@ import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -18,6 +19,7 @@ public final class PaddleOcr implements AutoCloseable {
     private final PaddleOcrRecognizer recognizer;
     private final PerspectiveCrop.Workspace cropper;
     private final PaddleOcrOptions options;
+    private final ArrayList<DetectionBox> detectionStaging;
     private final ArrayList<OcrLineResult> lineStaging;
     private final ArrayList<BgrImage> cropStaging;
     private ClsClassificationResult[] classificationStaging;
@@ -53,6 +55,7 @@ public final class PaddleOcr implements AutoCloseable {
         this.recognizer = recognizer;
         this.cropper = new PerspectiveCrop.Workspace();
         this.options = options;
+        this.detectionStaging = new ArrayList<DetectionBox>();
         this.lineStaging = new ArrayList<OcrLineResult>();
         this.cropStaging = new ArrayList<BgrImage>();
         this.classificationStaging = new ClsClassificationResult[0];
@@ -102,10 +105,12 @@ public final class PaddleOcr implements AutoCloseable {
 
     public OcrResult recognize(BgrImage source) {
         ensureOpen();
-        List<DetectionBox> boxes = detector.detect(source,
+        detectionStaging.clear();
+        detector.detectInto(source,
                 options.getDetectionBitmapThreshold(), options.getDetectionBoxThreshold(),
                 options.getDetectionUnclipRatio(), options.isDetectionDilation(),
-                options.getMaxDetectionCandidates());
+                options.getMaxDetectionCandidates(), detectionStaging);
+        List<DetectionBox> boxes = detectionStaging;
         ParallelismPlan parallelism = options.parallelismPlan(boxes.size());
         prepareStaging(boxes.size());
         try {
@@ -122,8 +127,10 @@ public final class PaddleOcr implements AutoCloseable {
                 boolean rotated = false;
                 if (classification != null &&
                         classification.requiresRotation(options.getClassifierThreshold())) {
-                    crop = BgrTransforms.rotate180(crop);
-                    cropStaging.set(i, crop);
+                    // The crop arena is owned by this pipeline and CLS has finished
+                    // reading it, so rotate the slot in place instead of allocating
+                    // another full crop-sized byte array.
+                    BgrTransforms.rotate180InPlace(crop);
                     rotated = true;
                 }
                 rotationStaging[i] = rotated;
@@ -137,10 +144,76 @@ public final class PaddleOcr implements AutoCloseable {
                 lineStaging.add(new OcrLineResult(box, recognitionTexts[i], recognitionScores[i],
                         classification, rotationStaging[i]));
             }
-            return new OcrResult(lineStaging).sorted(options.getReadingOrder());
+            ReadingOrder.sortLinesInPlace(lineStaging, options.getReadingOrder());
+            return new OcrResult(lineStaging);
         } finally {
             clearStaging(boxes.size());
         }
+    }
+
+    /** Returns the combined workspace measurements of the prepared DET/CLS/REC sessions. */
+    public WorkspaceDiagnostics workspaceDiagnostics() {
+        ensureOpen();
+        return WorkspaceDiagnostics.aggregate(
+                detector.workspaceDiagnostics(),
+                classifier == null ? null : classifier.workspaceDiagnostics(),
+                recognizer.workspaceDiagnostics());
+    }
+
+    /** Returns the capacity of reusable DB postprocess buffers in bytes. */
+    public long dbScratchBytes() {
+        ensureOpen();
+        return detector.dbScratchBytes();
+    }
+
+    /** Returns the capacity of the reusable perspective-crop workspace in bytes. */
+    public long cropWorkspaceBytes() {
+        ensureOpen();
+        return cropper.workspaceBytes();
+    }
+
+    /** Returns canonical FP32 constants materialized by the three OCR models. */
+    public long decodedConstantBytes() {
+        ensureOpen();
+        return detector.decodedConstantBytes()
+                + (classifier == null ? 0L : classifier.decodedConstantBytes())
+                + recognizer.decodedConstantBytes();
+    }
+
+    /** Returns prepared REC projection matrices retained by the pipeline. */
+    public long packedWeightBytes() {
+        ensureOpen();
+        return recognizer.packedWeightBytes();
+    }
+
+    /** Returns prepared DET workspace bytes across currently cached shapes. */
+    public long detectorWorkspaceBytes() {
+        ensureOpen();
+        return detector.workspaceDiagnostics().getWorkspaceBytes();
+    }
+
+    /** Returns prepared CLS workspace bytes across currently prepared workers. */
+    public long classifierWorkspaceBytes() {
+        ensureOpen();
+        return classifier == null ? 0L : classifier.workspaceDiagnostics().getWorkspaceBytes();
+    }
+
+    /** Returns prepared REC workspace bytes across currently prepared widths. */
+    public long recognizerWorkspaceBytes() {
+        ensureOpen();
+        return recognizer.workspaceDiagnostics().getWorkspaceBytes();
+    }
+
+    /** Returns REC bucket workspace bytes in 192/320/480/640/960 policy order. */
+    public long[] recognizerWorkspaceBytesByWidth() {
+        ensureOpen();
+        return recognizer.workspaceBytesByWidth();
+    }
+
+    /** Returns workspace bytes for a non-bucket fallback REC session, if any. */
+    public long recognizerFallbackWorkspaceBytes() {
+        ensureOpen();
+        return recognizer.fallbackWorkspaceBytes();
     }
 
     private void prepareStaging(int size) {
@@ -161,13 +234,14 @@ public final class PaddleOcr implements AutoCloseable {
     }
 
     private void clearStaging(int size) {
+        detectionStaging.clear();
         lineStaging.clear();
         cropStaging.clear();
         Arrays.fill(classificationStaging, 0, size, null);
         Arrays.fill(recognitionTexts, 0, size, null);
-        Arrays.fill(recognitionScores, 0, size, 0.0f);
-        Arrays.fill(recognitionEmittedCounts, 0, size, 0);
-        Arrays.fill(recognitionResizedWidths, 0, size, 0);
+        // Primitive result buffers are overwritten for every valid crop on the
+        // next invocation; clearing them only adds memory traffic.  Object
+        // buffers are cleared so a large previous result is not retained.
     }
 
     @Override

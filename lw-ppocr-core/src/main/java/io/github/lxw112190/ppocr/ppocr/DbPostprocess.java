@@ -58,7 +58,7 @@ public final class DbPostprocess {
                 widthRatio, heightRatio, maxCandidates, unclipRatio);
         return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
                 0, widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
-                -1, -1, new Scratch(width, height));
+                -1, -1, new Scratch(width, height), null);
     }
 
     private static List<DetectionBox> decodeInternal(float[] probabilities, int width, int height,
@@ -67,7 +67,8 @@ public final class DbPostprocess {
                                                      float widthRatio, float heightRatio,
                                                      int maxCandidates, float unclipRatio,
                                                      boolean useDilation, int sourceWidth,
-                                                     int sourceHeight, Scratch scratch) {
+                                                     int sourceHeight, Scratch scratch,
+                                                     List<DetectionBox> destination) {
         byte[] states = scratch.states;
         int pixelCount = width * height;
         for (int i = 0; i < pixelCount; i++) {
@@ -82,7 +83,11 @@ public final class DbPostprocess {
         float[] sortedCorners = scratch.sortedCorners;
         float[] restored = scratch.restored;
         Rectangle rectangle = scratch.rectangle;
-        List<DetectionBox> boxes = new ArrayList<DetectionBox>();
+        // Most Tiny DB maps produce a small number of boxes. Reserve a bounded
+        // result buffer up front so ordinary decodes do not repeatedly grow and
+        // copy ArrayList's backing array, while keeping pathological limits cheap.
+        List<DetectionBox> boxes = destination == null
+                ? new ArrayList<DetectionBox>(Math.min(maxCandidates, 64)) : destination;
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
                 int start = y * width + x;
@@ -150,7 +155,7 @@ public final class DbPostprocess {
                         restored[4], restored[5], restored[6], restored[7], score));
             }
         }
-        return Collections.unmodifiableList(boxes);
+        return destination == null ? Collections.unmodifiableList(boxes) : boxes;
     }
 
     private static int boundaryPoints(byte[] states, int width, int height, int[] component,
@@ -324,6 +329,11 @@ public final class DbPostprocess {
             this.height = height;
         }
 
+        /** Returns the capacity of the reusable DB component buffers in bytes. */
+        long workspaceBytes() {
+            return scratch == null ? 0L : scratch.workspaceBytes();
+        }
+
         public List<DetectionBox> decode(float[] probabilities, float bitmapThreshold,
                                          float boxThreshold, float widthRatio,
                                          float heightRatio, int maxCandidates,
@@ -332,7 +342,7 @@ public final class DbPostprocess {
                     widthRatio, heightRatio, maxCandidates, unclipRatio);
             return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
                     0, widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
-                    -1, -1, scratch);
+                    -1, -1, scratch, null);
         }
 
         /** Decodes boxes and clamps restored coordinates to the source image bounds. */
@@ -349,7 +359,7 @@ public final class DbPostprocess {
                     widthRatio, heightRatio, maxCandidates, unclipRatio);
             return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
                     0, widthRatio, heightRatio, maxCandidates, unclipRatio, useDilation,
-                    sourceWidth, sourceHeight, scratch);
+                    sourceWidth, sourceHeight, scratch, null);
         }
 
         /** Decodes a map stored in a reusable array at the given element offset. */
@@ -367,7 +377,28 @@ public final class DbPostprocess {
                     boxThreshold, widthRatio, heightRatio, maxCandidates, unclipRatio);
             return decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
                     probabilityOffset, widthRatio, heightRatio, maxCandidates, unclipRatio,
-                    useDilation, sourceWidth, sourceHeight, scratch);
+                    useDilation, sourceWidth, sourceHeight, scratch, null);
+        }
+
+        private void decodeToSourceInto(float[] probabilities, int probabilityOffset,
+                                        float bitmapThreshold, float boxThreshold,
+                                        float widthRatio, float heightRatio, int maxCandidates,
+                                        float unclipRatio, boolean useDilation, int sourceWidth,
+                                        int sourceHeight, List<DetectionBox> destination) {
+            if (destination == null) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "DB destination list is required");
+            }
+            destination.clear();
+            if (sourceWidth <= 0 || sourceHeight <= 0) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "Source image dimensions are invalid");
+            }
+            validate(probabilities, probabilityOffset, width, height, bitmapThreshold,
+                    boxThreshold, widthRatio, heightRatio, maxCandidates, unclipRatio);
+            decodeInternal(probabilities, width, height, bitmapThreshold, boxThreshold,
+                    probabilityOffset, widthRatio, heightRatio, maxCandidates, unclipRatio,
+                    useDilation, sourceWidth, sourceHeight, scratch, destination);
         }
     }
 
@@ -376,6 +407,11 @@ public final class DbPostprocess {
         private Decoder decoder;
 
         private DynamicDecoder() { }
+
+        /** Returns the capacity of the reusable DB component buffers in bytes. */
+        long workspaceBytes() {
+            return decoder == null ? 0L : decoder.workspaceBytes();
+        }
 
         public List<DetectionBox> decodeToSource(float[] probabilities, int probabilityOffset,
                                                  int width, int height, float bitmapThreshold,
@@ -391,6 +427,26 @@ public final class DbPostprocess {
             return decoder.decodeToSource(probabilities, probabilityOffset, bitmapThreshold,
                     boxThreshold, widthRatio, heightRatio, maxCandidates, unclipRatio,
                     useDilation, sourceWidth, sourceHeight);
+        }
+
+        void decodeToSourceInto(float[] probabilities, int probabilityOffset,
+                                int width, int height, float bitmapThreshold,
+                                float boxThreshold, float widthRatio, float heightRatio,
+                                int maxCandidates, float unclipRatio, boolean useDilation,
+                                int sourceWidth, int sourceHeight,
+                                List<DetectionBox> destination) {
+            if (destination == null) {
+                throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                        "DB destination list is required");
+            }
+            if (decoder == null) {
+                decoder = new Decoder(width, height);
+            } else {
+                decoder.ensureShape(width, height);
+            }
+            decoder.decodeToSourceInto(probabilities, probabilityOffset, bitmapThreshold,
+                    boxThreshold, widthRatio, heightRatio, maxCandidates, unclipRatio,
+                    useDilation, sourceWidth, sourceHeight, destination);
         }
     }
 
@@ -458,6 +514,19 @@ public final class DbPostprocess {
                 capacity = next;
             }
             return Arrays.copyOf(values, capacity);
+        }
+
+        private long workspaceBytes() {
+            // This reports backing-array capacity rather than object headers;
+            // it is intended to compare the large reusable buffers across
+            // benchmark runs, not to approximate a JVM heap dump.
+            return (long) states.length
+                    + (long) queue.length * Integer.BYTES
+                    + (long) boundary.length * Long.BYTES
+                    + (long) hull.length * Long.BYTES
+                    + (long) (corners.length + sortedCorners.length + restored.length)
+                            * Float.BYTES
+                    + 8L * Float.BYTES;
         }
     }
 

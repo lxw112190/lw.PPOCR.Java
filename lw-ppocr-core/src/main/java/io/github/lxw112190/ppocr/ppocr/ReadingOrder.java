@@ -25,6 +25,68 @@ public final class ReadingOrder {
             if (box == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "boxes cannot contain null");
             items.add(new Item(box, index));
         }
+        sortItems(items, order);
+        List<DetectionBox> result = new ArrayList<DetectionBox>(items.size());
+        for (Item item : items) result.add(item.box);
+        return Collections.unmodifiableList(result);
+    }
+
+    /** Sorts complete OCR lines without rebuilding an identity mapping by box. */
+    static List<OcrLineResult> sortLines(List<OcrLineResult> lines, int order) {
+        if (lines == null || order < HORIZONTAL_LTR || order > VERTICAL_LTR) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "lines and reading order are invalid");
+        }
+        List<Item> items = new ArrayList<Item>(lines.size());
+        for (int index = 0; index < lines.size(); index++) {
+            OcrLineResult line = lines.get(index);
+            if (line == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "lines cannot contain null");
+            items.add(new Item(line, index));
+        }
+        sortItems(items, order);
+        List<OcrLineResult> result = new ArrayList<OcrLineResult>(items.size());
+        for (Item item : items) result.add(item.line);
+        return Collections.unmodifiableList(result);
+    }
+
+    /**
+     * Sorts an internal, caller-owned line staging list in place.
+     * The common horizontal policy avoids the temporary Item objects used by
+     * the public list-returning API. Vertical policies retain the existing
+     * column assignment implementation.
+     */
+    static void sortLinesInPlace(List<OcrLineResult> lines, int order) {
+        if (lines == null || order < HORIZONTAL_LTR || order > VERTICAL_LTR) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "lines and reading order are invalid");
+        }
+        for (OcrLineResult line : lines) {
+            if (line == null) throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "lines cannot contain null");
+        }
+        if (order == HORIZONTAL_LTR) {
+            // The pipeline uses a reusable ArrayList here. A stable insertion
+            // sort keeps that list in place and avoids TimSort's temporary
+            // object-array allocation for the usual small line counts.
+            insertionSortLines(lines);
+            return;
+        }
+        List<OcrLineResult> sorted = sortLines(lines, order);
+        lines.clear();
+        lines.addAll(sorted);
+    }
+
+    private static void insertionSortLines(List<OcrLineResult> lines) {
+        for (int index = 1; index < lines.size(); index++) {
+            OcrLineResult value = lines.get(index);
+            int position = index - 1;
+            while (position >= 0 && HORIZONTAL_LINES.compare(lines.get(position), value) > 0) {
+                lines.set(position + 1, lines.get(position));
+                position--;
+            }
+            lines.set(position + 1, value);
+        }
+    }
+
+    private static void sortItems(List<Item> items, int order) {
         if (order == HORIZONTAL_LTR) {
             Collections.sort(items, new Comparator<Item>() {
                 @Override public int compare(Item left, Item right) {
@@ -49,9 +111,28 @@ public final class ReadingOrder {
                 }
             });
         }
-        List<DetectionBox> result = new ArrayList<DetectionBox>(items.size());
-        for (Item item : items) result.add(item.box);
-        return Collections.unmodifiableList(result);
+    }
+
+    private static final Comparator<OcrLineResult> HORIZONTAL_LINES =
+            new Comparator<OcrLineResult>() {
+                @Override
+                public int compare(OcrLineResult left, OcrLineResult right) {
+                    DetectionBox leftBox = left.getBox();
+                    DetectionBox rightBox = right.getBox();
+                    float leftMinY = minY(leftBox);
+                    float rightMinY = minY(rightBox);
+                    boolean sameLine = Math.abs(leftMinY - rightMinY) < 10.0f;
+                    return Float.compare(sameLine ? minX(leftBox) : leftMinY,
+                            sameLine ? minX(rightBox) : rightMinY);
+                }
+            };
+
+    private static float minX(DetectionBox box) {
+        return Math.min(Math.min(box.x0(), box.x1()), Math.min(box.x2(), box.x3()));
+    }
+
+    private static float minY(DetectionBox box) {
+        return Math.min(Math.min(box.y0(), box.y1()), Math.min(box.y2(), box.y3()));
     }
 
     private static void assignColumns(List<Item> items) {
@@ -93,6 +174,7 @@ public final class ReadingOrder {
 
     private static final class Item {
         private final DetectionBox box;
+        private final OcrLineResult line;
         private final int originalIndex;
         private final float minX;
         private final float maxX;
@@ -103,6 +185,14 @@ public final class ReadingOrder {
         private int column;
 
         private Item(DetectionBox box, int originalIndex) {
+            this(box, null, originalIndex);
+        }
+
+        private Item(OcrLineResult line, int originalIndex) {
+            this(line.getBox(), line, originalIndex);
+        }
+
+        private Item(DetectionBox box, OcrLineResult line, int originalIndex) {
             float x0 = box.x0();
             float y0 = box.y0();
             float x1 = box.x1();
@@ -123,6 +213,7 @@ public final class ReadingOrder {
             float sumX = x0 + x1 + x2 + x3;
             float sumY = y0 + y1 + y2 + y3;
             this.box = box;
+            this.line = line;
             this.originalIndex = originalIndex;
             this.minX = lowX;
             this.maxX = highX;

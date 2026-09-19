@@ -1,7 +1,11 @@
 package io.github.lxw112190.ppocr.runtime;
 
 import io.github.lxw112190.ppocr.model.LwmModel;
+import io.github.lxw112190.ppocr.model.NodeInfo;
+import io.github.lxw112190.ppocr.model.OperatorType;
 import io.github.lxw112190.ppocr.model.TensorInfo;
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -48,17 +52,18 @@ public final class PreparedExecution {
     }
 
     private PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
-                              List<io.github.lxw112190.ppocr.model.NodeInfo> nodes,
+                              List<NodeInfo> nodes,
                               List<Integer> outputs, boolean partial, boolean fuseGelu,
                               boolean aliasElementwise) {
         this.compiledModel = CompiledModel.acquire(model);
         this.model = compiledModel.model();
         this.shapes = ShapeResolver.resolve(model, inputShapes);
+        int[] concatAxes = concatAxes(nodes, compiledModel);
         this.workspacePlan = partial
                 ? MemoryPlanner.planPartial(model.getTensors(), nodes, model.getGraphInputs(),
-                        outputs, shapes, fuseGelu, aliasElementwise)
+                        outputs, shapes, fuseGelu, aliasElementwise, concatAxes)
                 : MemoryPlanner.plan(model.getTensors(), nodes, model.getGraphInputs(),
-                        outputs, shapes, fuseGelu, aliasElementwise);
+                        outputs, shapes, fuseGelu, aliasElementwise, concatAxes);
         this.offsets = new int[model.getTensors().size()];
         this.lengths = new int[model.getTensors().size()];
         for (int i = 0; i < model.getTensors().size(); i++) {
@@ -86,9 +91,23 @@ public final class PreparedExecution {
     public List<TensorShape> shapes() { return shapes; }
     public WorkspacePlan workspacePlan() { return workspacePlan; }
     public float[] constant(int tensorIndex) { return compiledModel.constant(tensorIndex); }
+    ByteBuffer constantRaw(int tensorIndex) { return compiledModel.constantRaw(tensorIndex); }
+    /** Returns the currently materialized canonical constant storage in bytes. */
+    public long decodedConstantBytes() { return compiledModel.decodedConstantBytes(); }
     public int offset(int tensorIndex) { return offsets[tensorIndex]; }
     public int length(int tensorIndex) { return lengths[tensorIndex]; }
 
     CompiledModel compiledModel() { return compiledModel; }
+
+    private static int[] concatAxes(List<NodeInfo> nodes, CompiledModel compiledModel) {
+        int[] axes = new int[nodes.size()];
+        Arrays.fill(axes, Integer.MIN_VALUE);
+        for (int i = 0; i < nodes.size(); i++) {
+            if (nodes.get(i).getOperator() != OperatorType.CONCAT) continue;
+            ByteBuffer parameters = compiledModel.parameterData(i);
+            if (parameters.limit() >= 8) axes[i] = parameters.getInt(4);
+        }
+        return axes;
+    }
 
 }

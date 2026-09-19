@@ -8,6 +8,7 @@ import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.FloatTensorView;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.util.Collections;
 
 /** Prepared DET graph and reusable shape-specific state. */
@@ -59,6 +60,14 @@ final class DetSessionContext implements AutoCloseable {
         preprocess.resizeNormalize(source);
         widthRatio = preprocess.getWidthRatio();
         heightRatio = preprocess.getHeightRatio();
+    }
+
+    WorkspaceDiagnostics workspaceDiagnostics() {
+        return session.workspaceDiagnostics();
+    }
+
+    long decodedConstantBytes() {
+        return session.decodedConstantBytes();
     }
 
     @Override

@@ -39,4 +39,15 @@ public final class ClsPreprocessTest {
         Assert.assertEquals(80, workspace.getResizedWidth());
         Assert.assertEquals(1.0f, workspace.getChw()[80 * 160 + 20], 0.00001f);
     }
+
+    @Test
+    public void intoPathMatchesOneShotWhenDestinationContainsStaleValues() {
+        BgrImage source = new BgrImage(new byte[7 * 19 * 3], 7, 19, 21);
+        ClsPreprocessResult expected = ClsPreprocess.resizeNormalize(source);
+        float[] actual = new float[expected.getChw().length + 11];
+        java.util.Arrays.fill(actual, 0.25f);
+        ClsPreprocess.resizeNormalizeInto(source, actual, 5);
+        Assert.assertArrayEquals(expected.getChw(),
+                java.util.Arrays.copyOfRange(actual, 5, 5 + expected.getChw().length), 0.0f);
+    }
 }

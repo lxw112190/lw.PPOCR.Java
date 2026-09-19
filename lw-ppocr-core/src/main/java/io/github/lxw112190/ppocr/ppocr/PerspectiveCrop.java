@@ -75,6 +75,19 @@ public final class PerspectiveCrop {
             return result;
         }
 
+        /** Returns the capacity of reusable crop pixel and metadata buffers in bytes. */
+        public long workspaceBytes() {
+            long bytes = arena.length
+                    + (long) cropOffsets.length * Integer.BYTES
+                    + (long) values.length * Float.BYTES
+                    + (long) points.length * Double.BYTES
+                    + (long) dimensions.length * Integer.BYTES;
+            for (byte[] buffer : pixelBuffers) {
+                if (buffer != null) bytes += buffer.length;
+            }
+            return bytes;
+        }
+
         private void ensureCropMetadata(int count) {
             if (cropOffsets.length >= count) return;
             cropOffsets = new int[count];

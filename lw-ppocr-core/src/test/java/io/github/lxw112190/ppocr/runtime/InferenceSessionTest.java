@@ -97,6 +97,19 @@ public final class InferenceSessionTest {
     }
 
     @Test
+    public void readsRawConstantsWithoutMaterializingCanonicalArray() {
+        LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
+        CompiledModel compiled = CompiledModel.acquire(model);
+        Assert.assertFalse(compiled.isConstantMaterialized(1));
+        ByteBuffer raw = compiled.constantRaw(1);
+        Assert.assertNotNull(raw);
+        Assert.assertEquals(16, raw.remaining());
+        Assert.assertEquals(1.0f, raw.order(ByteOrder.LITTLE_ENDIAN).getFloat(0), 0.0f);
+        Assert.assertFalse(compiled.isConstantMaterialized(1));
+        model.close();
+    }
+
+    @Test
     public void sharesCompiledModelAcrossDynamicSessions() {
         LwmModel model = LwmLoader.load(new ByteArrayInputStream(addModel()));
         InferenceSession first = new InferenceSession(model);

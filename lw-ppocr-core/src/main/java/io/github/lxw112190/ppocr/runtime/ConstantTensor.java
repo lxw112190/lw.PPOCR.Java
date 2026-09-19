@@ -26,6 +26,11 @@ final class ConstantTensor {
         return length;
     }
 
+    /** Returns a read-only little-endian view without materializing a float array. */
+    ByteBuffer raw() {
+        return raw.duplicate().order(ByteOrder.LITTLE_ENDIAN);
+    }
+
     float[] canonical() {
         float[] value = canonical;
         if (value != null) return value;
@@ -45,5 +50,9 @@ final class ConstantTensor {
 
     boolean isMaterialized() {
         return canonical != null;
+    }
+
+    long decodedBytes() {
+        return canonical == null ? 0L : (long) canonical.length * Float.BYTES;
     }
 }

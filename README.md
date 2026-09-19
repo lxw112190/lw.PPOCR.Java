@@ -220,6 +220,17 @@ LWM model paths and dictionary path. It writes one JSON record per image;
 and matched-line CER metrics as the C evaluator. The corpus and generated
 reports stay outside the repository.
 
+The final summary emitted by `DatasetOcrPerformanceMain` also includes
+`heap_before_bytes`, `heap_after_bytes`, and `peak_used_heap_bytes`, plus a
+`runtime` object with DET/CLS/REC workspace sizes, REC 192/320/480/640/960
+bucket sizes, its live lower-bound estimate, `workspace_efficiency`,
+`db_scratch_bytes`, and `crop_arena_bytes`.
+It also reports `decoded_constant_bytes` and `packed_weight_bytes`, so model
+constant materialization can be separated from execution workspace. These
+fields make model workspace, DB geometry scratch, crop-cache, and model-weight
+changes comparable across runs without changing the per-image prediction
+records.
+
 ```text
 java -cp "lw-ppocr-core/target/classes;lw-ppocr-imageio/target/classes;lw-ppocr-benchmark/target/classes" \
   io.github.lxw112190.ppocr.benchmark.DatasetOcrPerformanceMain \

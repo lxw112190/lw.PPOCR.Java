@@ -9,16 +9,12 @@ import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -28,9 +24,8 @@ public final class PaddleOcrClassifier implements AutoCloseable {
     private final LwmModel model;
     private final KernelBackend backend;
     private final List<ClsSessionContext> contexts;
-    private final List<Future<Void>> taskFutures;
-    private ExecutorService parallelExecutor;
-    private int parallelExecutorSize;
+    private final ReusableParallelExecutor parallelExecutor;
+    private final ClassifyWorkerAction workerAction;
     private boolean closed;
 
     public PaddleOcrClassifier(LwmModel model) {
@@ -46,7 +41,8 @@ public final class PaddleOcrClassifier implements AutoCloseable {
         this.model = model;
         this.backend = backend;
         this.contexts = new ArrayList<ClsSessionContext>();
-        this.taskFutures = new ArrayList<Future<Void>>();
+        this.parallelExecutor = new ReusableParallelExecutor(DaemonThreadFactory.INSTANCE);
+        this.workerAction = new ClassifyWorkerAction();
         try {
             contexts.add(new ClsSessionContext(model, backend));
         } catch (RuntimeException e) {
@@ -78,6 +74,26 @@ public final class PaddleOcrClassifier implements AutoCloseable {
         return contexts.get(0).classify(source);
     }
 
+    /** Returns the combined workspace measurements of currently prepared CLS workers. */
+    public WorkspaceDiagnostics workspaceDiagnostics() {
+        ensureOpen();
+        WorkspaceDiagnostics[] values = new WorkspaceDiagnostics[contexts.size()];
+        for (int i = 0; i < contexts.size(); i++) values[i] = contexts.get(i).workspaceDiagnostics();
+        return WorkspaceDiagnostics.aggregate(values);
+    }
+
+    /** Returns canonical FP32 constants materialized by the CLS model. */
+    public long decodedConstantBytes() {
+        ensureOpen();
+        return contexts.isEmpty() ? 0L : contexts.get(0).decodedConstantBytes();
+    }
+
+    /** Returns the number of currently prepared CLS worker sessions. */
+    public int preparedSessionCount() {
+        ensureOpen();
+        return contexts.size();
+    }
+
     /** Classifies images concurrently while preserving input order. */
     public List<ClsClassificationResult> classifyAll(List<BgrImage> sources, int parallelism) {
         validateBatch(sources, parallelism, null);
@@ -87,9 +103,9 @@ public final class PaddleOcrClassifier implements AutoCloseable {
         return Arrays.asList(results);
     }
 
-    /** Internal low-allocation batch path used by the owning OCR pipeline. */
-    void classifyAllInto(List<BgrImage> sources, int parallelism,
-                         ClsClassificationResult[] results) {
+    /** Classifies into caller-owned result storage without allocating a result list. */
+    public void classifyAllInto(List<BgrImage> sources, int parallelism,
+                                ClsClassificationResult[] results) {
         validateBatch(sources, parallelism, results);
         if (sources.isEmpty()) return;
 
@@ -100,22 +116,11 @@ public final class PaddleOcrClassifier implements AutoCloseable {
             return;
         }
 
-        ExecutorService executor = executor(workers);
-        taskFutures.clear();
+        workerAction.prepare(sources, results, workers);
         try {
-            for (int workerIndex = 0; workerIndex < workers; workerIndex++) {
-                final int index = workerIndex;
-                taskFutures.add(executor.submit(new Callable<Void>() {
-                    @Override
-                    public Void call() {
-                        classifyWorker(sources, results, index, workers);
-                        return null;
-                    }
-                }));
-            }
-            await(taskFutures);
+            parallelExecutor.run(workers, workerAction);
         } finally {
-            taskFutures.clear();
+            workerAction.clear();
         }
     }
 
@@ -142,10 +147,9 @@ public final class PaddleOcrClassifier implements AutoCloseable {
     public void close() {
         if (!closed) {
             closed = true;
-            if (parallelExecutor != null) parallelExecutor.shutdown();
+            parallelExecutor.close();
             for (ClsSessionContext context : contexts) context.close();
             contexts.clear();
-            taskFutures.clear();
             model.close();
         }
     }
@@ -162,36 +166,29 @@ public final class PaddleOcrClassifier implements AutoCloseable {
         }
     }
 
-    private ExecutorService executor(int size) {
-        if (parallelExecutor == null || parallelExecutorSize < size) {
-            if (parallelExecutor != null) parallelExecutor.shutdown();
-            parallelExecutor = Executors.newFixedThreadPool(size, DaemonThreadFactory.INSTANCE);
-            parallelExecutorSize = size;
-        }
-        return parallelExecutor;
-    }
+    /** Reusable classifier batch dispatcher; one classifier owns one instance. */
+    private final class ClassifyWorkerAction implements ReusableParallelExecutor.WorkerAction {
+        private List<BgrImage> sources;
+        private ClsClassificationResult[] results;
+        private int workers;
 
-    private static void await(List<Future<Void>> futures) {
-        RuntimeException failure = null;
-        for (Future<Void> future : futures) {
-            try {
-                future.get();
-            } catch (InterruptedException e) {
-                for (Future<Void> pending : futures) pending.cancel(true);
-                Thread.currentThread().interrupt();
-                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
-                        "parallel CLS execution was interrupted", e);
-            } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                RuntimeException current = cause instanceof RuntimeException
-                        ? (RuntimeException) cause
-                        : new OcrException(OcrErrorCode.RESOURCE_LIMIT,
-                                "parallel CLS execution failed", cause);
-                if (failure == null) failure = current;
-                else failure.addSuppressed(current);
-            }
+        private void prepare(List<BgrImage> sources, ClsClassificationResult[] results,
+                             int workers) {
+            this.sources = sources;
+            this.results = results;
+            this.workers = workers;
         }
-        if (failure != null) throw failure;
+
+        private void clear() {
+            sources = null;
+            results = null;
+            workers = 0;
+        }
+
+        @Override
+        public void run(int workerIndex) {
+            classifyWorker(sources, results, workerIndex, workers);
+        }
     }
 
     private static void validateModel(LwmModel model) {

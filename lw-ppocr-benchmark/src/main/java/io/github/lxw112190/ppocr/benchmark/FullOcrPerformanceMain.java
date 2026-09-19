@@ -19,8 +19,8 @@ import io.github.lxw112190.ppocr.ppocr.PaddleOcrOptions;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrRecognizer;
 import io.github.lxw112190.ppocr.ppocr.ParallelismPlan;
 import io.github.lxw112190.ppocr.ppocr.PerspectiveCrop;
-import io.github.lxw112190.ppocr.ppocr.RecRecognitionResult;
 import io.github.lxw112190.ppocr.runtime.InferenceProfiler;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.io.IOException;
 import java.io.InputStream;
 import java.lang.management.GarbageCollectorMXBean;
@@ -73,7 +73,7 @@ public final class FullOcrPerformanceMain {
         long heapBefore = stabilizedHeap(memory);
         long loadStart = System.nanoTime();
         try (ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend,
-                recognitionParallelism, classificationParallelism)) {
+                recognitionParallelism, classificationParallelism, allocationProbe)) {
             long modelLoadNanos = System.nanoTime() - loadStart;
             long heapAfterLoad = stabilizedHeap(memory);
             StageSample cold = pipeline.recognize(image);
@@ -84,7 +84,7 @@ public final class FullOcrPerformanceMain {
             resetHeapPeaks();
             long gcCountBefore = gcCount();
             long gcTimeBefore = gcTimeMillis();
-            long allocatedBefore = allocationProbe.totalAllocatedBytes();
+            ThreadAllocationProbe.Snapshot allocatedBefore = allocationProbe.snapshot();
             long[] total = new long[iterations];
             long[] detection = new long[iterations];
             long[] crop = new long[iterations];
@@ -123,13 +123,16 @@ public final class FullOcrPerformanceMain {
                 throw new IllegalStateException("profile invocation changed OCR line count: measured="
                         + lineCount + ", profiled=" + profiledSample.lines);
             }
+            WorkspaceDiagnostics workspace = pipeline.workspaceDiagnostics();
 
             Arrays.sort(total);
             String benchmark = detectorLimit == DEFAULT_DETECTOR_LIMIT
                     ? "full-ocr-default" : "full-ocr-det" + detectorLimit;
-            String profileScope = "all-threads";
+            String profileScope = "stable-live-threads";
+            String vectorBits = vectorBitsSetting(backendName);
             System.out.printf(Locale.ROOT,
-                    "{\"schema\":4,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                    "{\"schema\":5,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                            + "\"vector_bits\":\"%s\","
                             + "\"features\":{\"rec_projection_fusion\":%s,"
                             + "\"auto_parallelism\":%s},"
                             + "\"parallelism_policy\":\"%s\","
@@ -157,9 +160,23 @@ public final class FullOcrPerformanceMain {
                             + "\"allocation_measurement\":\"%s\","
                             + "\"allocated_bytes_total\":%d,"
                             + "\"allocated_bytes_per_ocr\":%d,"
-                            + "\"allocated_bytes_per_line\":%d,\"operators\":%s,"
+                            + "\"allocated_bytes_per_line\":%d,"
+                            + "\"workspace_bytes\":%d,"
+                            + "\"workspace_old_bytes\":%d,"
+                            + "\"workspace_live_lower_bound_bytes\":%d,"
+                            + "\"workspace_efficiency\":%.6f,"
+                            + "\"db_scratch_bytes\":%d,\"crop_arena_bytes\":%d,"
+                            + "\"det_workspace_bytes\":%d,\"cls_workspace_bytes\":%d,"
+                            + "\"rec_workspace_bytes\":%d,\"rec_workspace_by_width\":%s,"
+                            + "\"rec_fallback_workspace_bytes\":%d,"
+                            + "\"decoded_constant_bytes\":%d,\"packed_weight_bytes\":%d,"
+                            + "\"workspace_sessions\":{\"detector\":%d,\"classifier\":%d,\"recognizer\":%d},"
+                            + "\"profile_stage_allocated_bytes\":{"
+                            + "\"detection\":%d,\"crop\":%d,\"classification\":%d,"
+                            + "\"rotation\":%d,\"recognition\":%d,\"sorting\":%d},"
+                            + "\"operators\":%s,"
                             + "\"stage_operators\":%s,\"stage_hot_nodes\":%s}%n",
-                    benchmark, backendName,
+                    benchmark, backendName, vectorBits,
                     Boolean.toString(pipeline.isProjectionFusionActive()),
                     Boolean.toString(automaticParallelism), parallelismPolicy,
                     classificationParallelism,
@@ -178,6 +195,18 @@ public final class FullOcrPerformanceMain {
                     allocationProbe.method(), allocatedBytes,
                     perOperation(allocatedBytes, iterations),
                     perOperation(allocatedBytes, (long) iterations * Math.max(1, lineCount)),
+                    workspace.getWorkspaceBytes(), workspace.getOldWorkspaceBytes(),
+                    workspace.getLiveLowerBoundBytes(), workspace.getEfficiency(),
+                    pipeline.dbScratchBytes(), pipeline.cropWorkspaceBytes(),
+                    pipeline.detectorWorkspaceBytes(), pipeline.classifierWorkspaceBytes(),
+                    pipeline.recognizerWorkspaceBytes(), pipeline.recognizerWorkspaceJson(),
+                    pipeline.recognizerFallbackWorkspaceBytes(),
+                    pipeline.decodedConstantBytes(), pipeline.packedWeightBytes(),
+                    pipeline.detectorSessionCount(), pipeline.classifierSessionCount(),
+                    pipeline.recognizerSessionCount(),
+                    profiledSample.detectionAllocatedBytes, profiledSample.cropAllocatedBytes,
+                    profiledSample.classificationAllocatedBytes, profiledSample.rotationAllocatedBytes,
+                    profiledSample.recognitionAllocatedBytes, profiledSample.sortingAllocatedBytes,
                     operatorJson(profiledSample.detectionProfile,
                             profiledSample.classificationProfile,
                             profiledSample.recognitionProfile),
@@ -196,9 +225,20 @@ public final class FullOcrPerformanceMain {
         }
     }
 
+    private static String vectorBitsSetting(String backendName) {
+        if (!"vector".equals(backendName)) return "n/a";
+        String value = System.getProperty("lwppocr.vectorBits", "preferred");
+        if ("128".equals(value) || "256".equals(value)
+                || "512".equals(value) || "preferred".equals(value)) {
+            return value;
+        }
+        return "unknown";
+    }
+
     private static ProfiledPipeline loadPipeline(int detectorLimit, KernelBackend backend,
                                                  int recognitionParallelism,
-                                                 int classificationParallelism) throws IOException {
+                                                 int classificationParallelism,
+                                                 ThreadAllocationProbe allocationProbe) throws IOException {
         LwmModel detectorModel = loadModel(DET_MODEL);
         PaddleOcrDetector detector = null;
         LwmModel classifierModel = null;
@@ -214,7 +254,7 @@ public final class FullOcrPerformanceMain {
             dictionary = loadDictionary();
             recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary, backend);
             return new ProfiledPipeline(detector, classifier, recognizer,
-                    recognitionParallelism, classificationParallelism);
+                    recognitionParallelism, classificationParallelism, allocationProbe);
         } catch (RuntimeException e) {
             if (recognizer != null) recognizer.close();
             else {
@@ -410,6 +450,17 @@ public final class FullOcrPerformanceMain {
         return escaped.toString();
     }
 
+    private static String recWorkspaceJson(long[] values) {
+        StringBuilder json = new StringBuilder("{\"192\":");
+        json.append(values.length > 0 ? values[0] : 0L)
+                .append(",\"320\":").append(values.length > 1 ? values[1] : 0L)
+                .append(",\"480\":").append(values.length > 2 ? values[2] : 0L)
+                .append(",\"640\":").append(values.length > 3 ? values[3] : 0L)
+                .append(",\"960\":").append(values.length > 4 ? values[4] : 0L)
+                .append('}');
+        return json.toString();
+    }
+
     /** Benchmark-only copy of the public pipeline orchestration with stage boundaries. */
     private static final class ProfiledPipeline implements AutoCloseable {
         private final PaddleOcrDetector detector;
@@ -419,18 +470,27 @@ public final class FullOcrPerformanceMain {
         private final PaddleOcrOptions options = PaddleOcrOptions.defaults();
         private final int recognitionParallelism;
         private final int classificationParallelism;
+        private final ThreadAllocationProbe allocationProbe;
+        private final ArrayList<DetectionBox> boxes = new ArrayList<DetectionBox>();
         private final ArrayList<OcrLineResult> lines = new ArrayList<OcrLineResult>();
         private final ArrayList<BgrImage> crops = new ArrayList<BgrImage>();
+        private ClsClassificationResult[] classifications = new ClsClassificationResult[0];
+        private String[] recognitionTexts = new String[0];
+        private float[] recognitionScores = new float[0];
+        private int[] recognitionEmittedCounts = new int[0];
+        private int[] recognitionResizedWidths = new int[0];
         private boolean[] rotations = new boolean[0];
 
         private ProfiledPipeline(PaddleOcrDetector detector, PaddleOcrClassifier classifier,
                                  PaddleOcrRecognizer recognizer, int recognitionParallelism,
-                                 int classificationParallelism) {
+                                 int classificationParallelism,
+                                 ThreadAllocationProbe allocationProbe) {
             this.detector = detector;
             this.classifier = classifier;
             this.recognizer = recognizer;
             this.recognitionParallelism = recognitionParallelism;
             this.classificationParallelism = classificationParallelism;
+            this.allocationProbe = allocationProbe;
         }
 
         private StageSample recognize(BgrImage source) {
@@ -445,89 +505,156 @@ public final class FullOcrPerformanceMain {
             return recognizer.isProjectionFusionActive();
         }
 
+        private WorkspaceDiagnostics workspaceDiagnostics() {
+            return WorkspaceDiagnostics.aggregate(detector.workspaceDiagnostics(),
+                    classifier.workspaceDiagnostics(), recognizer.workspaceDiagnostics());
+        }
+
+        private long dbScratchBytes() { return detector.dbScratchBytes(); }
+        private long cropWorkspaceBytes() { return cropper.workspaceBytes(); }
+        private long detectorWorkspaceBytes() {
+            return detector.workspaceDiagnostics().getWorkspaceBytes();
+        }
+        private long classifierWorkspaceBytes() {
+            return classifier.workspaceDiagnostics().getWorkspaceBytes();
+        }
+        private long recognizerWorkspaceBytes() {
+            return recognizer.workspaceDiagnostics().getWorkspaceBytes();
+        }
+        private String recognizerWorkspaceJson() {
+            return recWorkspaceJson(recognizer.workspaceBytesByWidth());
+        }
+        private long recognizerFallbackWorkspaceBytes() {
+            return recognizer.fallbackWorkspaceBytes();
+        }
+        private long decodedConstantBytes() {
+            return detector.decodedConstantBytes()
+                    + classifier.decodedConstantBytes() + recognizer.decodedConstantBytes();
+        }
+        private long packedWeightBytes() { return recognizer.packedWeightBytes(); }
+
+        private int detectorSessionCount() { return detector.preparedSessionCount(); }
+        private int classifierSessionCount() { return classifier.preparedSessionCount(); }
+        private int recognizerSessionCount() { return recognizer.preparedSessionCount(); }
+
         private StageSample recognize(BgrImage source, boolean profileOperators) {
             StageSample sample = new StageSample();
             long totalStart = System.nanoTime();
             long start = System.nanoTime();
-            List<DetectionBox> boxes;
+            ThreadAllocationProbe.Snapshot allocationStart = profileOperators
+                    ? allocationProbe.snapshot() : null;
+            boxes.clear();
             if (profileOperators) {
                 try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
-                    boxes = detect(source);
+                    detect(source, boxes);
                     sample.detectionProfile = profiler.snapshot();
                 }
             } else {
-                boxes = detect(source);
+                detect(source, boxes);
             }
             sample.detectionNanos = System.nanoTime() - start;
+            sample.detectionAllocatedBytes = profileOperators
+                    ? allocationProbe.deltaSince(allocationStart) : -1L;
 
             lines.clear();
             crops.clear();
             lines.ensureCapacity(boxes.size());
             crops.ensureCapacity(boxes.size());
+            ensureStaging(boxes.size());
             if (rotations.length < boxes.size()) rotations = new boolean[boxes.size()];
             try {
                 start = System.nanoTime();
+                allocationStart = profileOperators ? allocationProbe.snapshot() : null;
                 cropper.cropAll(source, boxes, crops);
                 sample.cropNanos = System.nanoTime() - start;
+                sample.cropAllocatedBytes = profileOperators
+                        ? allocationProbe.deltaSince(allocationStart) : -1L;
                 start = System.nanoTime();
-                List<ClsClassificationResult> classifications;
+                allocationStart = profileOperators ? allocationProbe.snapshot() : null;
                 if (profileOperators) {
                     try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
-                        classifications = classifier.classifyAll(crops, classificationParallelism);
+                        classifier.classifyAllInto(crops, classificationParallelism, classifications);
                         sample.classificationProfile = profiler.snapshot();
                     }
                 } else {
-                    classifications = classifier.classifyAll(crops, classificationParallelism);
+                    classifier.classifyAllInto(crops, classificationParallelism, classifications);
                 }
                 sample.classificationNanos = System.nanoTime() - start;
+                sample.classificationAllocatedBytes = profileOperators
+                        ? allocationProbe.deltaSince(allocationStart) : -1L;
+                allocationStart = profileOperators ? allocationProbe.snapshot() : null;
                 for (int line = 0; line < boxes.size(); line++) {
                     BgrImage crop = crops.get(line);
-                    ClsClassificationResult classification = classifications.get(line);
+                    ClsClassificationResult classification = classifications[line];
                     boolean rotated = false;
                     if (classification.requiresRotation(options.getClassifierThreshold())) {
                         start = System.nanoTime();
-                        crop = BgrTransforms.rotate180(crop);
+                        BgrTransforms.rotate180InPlace(crop);
                         sample.rotationNanos += System.nanoTime() - start;
                         rotated = true;
                     }
-                    crops.set(line, crop);
                     rotations[line] = rotated;
                 }
+                sample.rotationAllocatedBytes = profileOperators
+                        ? allocationProbe.deltaSince(allocationStart) : -1L;
                 start = System.nanoTime();
-                List<RecRecognitionResult> recognitions;
+                allocationStart = profileOperators ? allocationProbe.snapshot() : null;
                 if (profileOperators) {
                     try (InferenceProfiler profiler = InferenceProfiler.startShared()) {
-                        recognitions = recognizer.recognizeAll(crops, recognitionParallelism);
+                        recognizer.recognizeAllInto(crops, recognitionParallelism,
+                                recognitionTexts, recognitionScores, recognitionEmittedCounts,
+                                recognitionResizedWidths);
                         sample.recognitionProfile = profiler.snapshot();
                     }
                 } else {
-                    recognitions = recognizer.recognizeAll(crops, recognitionParallelism);
+                    recognizer.recognizeAllInto(crops, recognitionParallelism,
+                            recognitionTexts, recognitionScores, recognitionEmittedCounts,
+                            recognitionResizedWidths);
                 }
                 sample.recognitionNanos = System.nanoTime() - start;
+                sample.recognitionAllocatedBytes = profileOperators
+                        ? allocationProbe.deltaSince(allocationStart) : -1L;
                 for (int i = 0; i < boxes.size(); i++) {
-                    RecRecognitionResult recognition = recognitions.get(i);
-                    ClsClassificationResult classification = classifications.get(i);
+                    ClsClassificationResult classification = classifications[i];
                     DetectionBox box = boxes.get(i);
-                    lines.add(new OcrLineResult(box, recognition.getText(), recognition.getScore(),
+                    lines.add(new OcrLineResult(box, recognitionTexts[i], recognitionScores[i],
                             classification, rotations[i]));
                 }
                 start = System.nanoTime();
+                allocationStart = profileOperators ? allocationProbe.snapshot() : null;
                 OcrResult result = new OcrResult(lines).sorted(options.getReadingOrder());
                 sample.sortingNanos = System.nanoTime() - start;
+                sample.sortingAllocatedBytes = profileOperators
+                        ? allocationProbe.deltaSince(allocationStart) : -1L;
                 sample.lines = result.getLines().size();
                 sample.totalNanos = System.nanoTime() - totalStart;
                 return sample;
             } finally {
+                Arrays.fill(classifications, null);
+                Arrays.fill(recognitionTexts, null);
+                // Primitive staging is overwritten on the next successful run;
+                // only reference arrays need clearing to avoid retention.
+                boxes.clear();
                 lines.clear();
                 crops.clear();
             }
         }
 
-        private List<DetectionBox> detect(BgrImage source) {
-            return detector.detect(source,
+        private void detect(BgrImage source, List<DetectionBox> destination) {
+            detector.detectInto(source,
                     options.getDetectionBitmapThreshold(), options.getDetectionBoxThreshold(),
                     options.getDetectionUnclipRatio(), options.isDetectionDilation(),
-                    options.getMaxDetectionCandidates());
+                    options.getMaxDetectionCandidates(), destination);
+        }
+
+        private void ensureStaging(int size) {
+            if (classifications.length < size) classifications = new ClsClassificationResult[size];
+            if (recognitionTexts.length < size) {
+                recognitionTexts = new String[size];
+                recognitionScores = new float[size];
+                recognitionEmittedCounts = new int[size];
+                recognitionResizedWidths = new int[size];
+            }
         }
 
         @Override
@@ -550,6 +677,12 @@ public final class FullOcrPerformanceMain {
         private InferenceProfiler.Profile detectionProfile;
         private InferenceProfiler.Profile classificationProfile;
         private InferenceProfiler.Profile recognitionProfile;
+        private long detectionAllocatedBytes = -1L;
+        private long cropAllocatedBytes = -1L;
+        private long classificationAllocatedBytes = -1L;
+        private long rotationAllocatedBytes = -1L;
+        private long recognitionAllocatedBytes = -1L;
+        private long sortingAllocatedBytes = -1L;
     }
 
     /** Optional HotSpot allocation counter; unavailable JVMs report -1 without failing CI. */
@@ -571,25 +704,57 @@ public final class FullOcrPerformanceMain {
             return new ThreadAllocationProbe(bean);
         }
 
-        private long totalAllocatedBytes() {
-            if (bean == null) return -1L;
-            long[] ids = ManagementFactory.getThreadMXBean().getAllThreadIds();
-            long[] bytes = bean.getThreadAllocatedBytes(ids);
+        private Snapshot snapshot() {
+            if (bean == null) return Snapshot.unavailable();
+            java.lang.management.ThreadMXBean threadBean = ManagementFactory.getThreadMXBean();
+            long[] ids = threadBean.getAllThreadIds();
+            return new Snapshot(ids, bean.getThreadAllocatedBytes(ids));
+        }
+
+        private long deltaSince(Snapshot before) {
+            if (before == null || before.isUnavailable()) return -1L;
+            Snapshot after = snapshot();
+            if (after.isUnavailable()) return -1L;
+
             long total = 0L;
-            for (long value : bytes) {
-                if (value >= 0L) total += value;
+            for (int i = 0; i < before.threadIds.length; i++) {
+                long beforeBytes = before.allocatedBytes[i];
+                if (beforeBytes < 0L) continue;
+                int afterIndex = indexOf(after.threadIds, before.threadIds[i]);
+                if (afterIndex < 0) continue;
+                long afterBytes = after.allocatedBytes[afterIndex];
+                if (afterBytes >= 0L) total += nonNegativeDelta(afterBytes, beforeBytes);
             }
             return total;
         }
 
-        private long deltaSince(long before) {
-            if (before < 0L) return -1L;
-            long after = totalAllocatedBytes();
-            return after < 0L ? -1L : nonNegativeDelta(after, before);
+        private static int indexOf(long[] values, long value) {
+            for (int i = 0; i < values.length; i++) {
+                if (values[i] == value) return i;
+            }
+            return -1;
+        }
+
+        private static final class Snapshot {
+            private final long[] threadIds;
+            private final long[] allocatedBytes;
+
+            private Snapshot(long[] threadIds, long[] allocatedBytes) {
+                this.threadIds = threadIds;
+                this.allocatedBytes = allocatedBytes;
+            }
+
+            private static Snapshot unavailable() {
+                return new Snapshot(null, null);
+            }
+
+            private boolean isUnavailable() {
+                return threadIds == null;
+            }
         }
 
         private String method() {
-            return bean == null ? "unavailable" : "hotspot-thread-mxbean-all-live-threads";
+            return bean == null ? "unavailable" : "hotspot-thread-mxbean-stable-live-threads";
         }
     }
 }

@@ -20,6 +20,11 @@ public final class OcrResult {
         this.lines = Collections.unmodifiableList(copy);
     }
 
+    /** Internal constructor for a list already validated and made immutable by ReadingOrder. */
+    private OcrResult(List<OcrLineResult> sortedLines, boolean trusted) {
+        this.lines = sortedLines;
+    }
+
     public List<OcrLineResult> getLines() { return lines; }
 
     public String getText() {
@@ -32,20 +37,6 @@ public final class OcrResult {
     }
 
     public OcrResult sorted(int order) {
-        List<DetectionBox> boxes = new ArrayList<DetectionBox>(lines.size());
-        for (OcrLineResult line : lines) boxes.add(line.getBox());
-        List<DetectionBox> sortedBoxes = ReadingOrder.sort(boxes, order);
-        boolean[] used = new boolean[lines.size()];
-        List<OcrLineResult> sortedLines = new ArrayList<OcrLineResult>(lines.size());
-        for (DetectionBox box : sortedBoxes) {
-            for (int i = 0; i < lines.size(); i++) {
-                if (!used[i] && lines.get(i).getBox() == box) {
-                    used[i] = true;
-                    sortedLines.add(lines.get(i));
-                    break;
-                }
-            }
-        }
-        return new OcrResult(sortedLines);
+        return new OcrResult(ReadingOrder.sortLines(lines, order), true);
     }
 }

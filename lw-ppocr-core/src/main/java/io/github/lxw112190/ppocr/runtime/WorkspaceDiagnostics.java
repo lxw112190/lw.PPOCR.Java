@@ -17,6 +17,22 @@ public final class WorkspaceDiagnostics {
     public long getWorkspaceBytes() { return workspaceBytes; }
     public long getLiveLowerBoundBytes() { return liveLowerBoundBytes; }
 
+    /** Combines measurements from shape-specialized sessions without changing any session state. */
+    public static WorkspaceDiagnostics aggregate(WorkspaceDiagnostics... values) {
+        long oldBytes = 0L;
+        long plannedBytes = 0L;
+        long lowerBoundBytes = 0L;
+        if (values != null) {
+            for (WorkspaceDiagnostics value : values) {
+                if (value == null) continue;
+                oldBytes = Math.addExact(oldBytes, value.oldWorkspaceBytes);
+                plannedBytes = Math.addExact(plannedBytes, value.workspaceBytes);
+                lowerBoundBytes = Math.addExact(lowerBoundBytes, value.liveLowerBoundBytes);
+            }
+        }
+        return new WorkspaceDiagnostics(oldBytes, plannedBytes, lowerBoundBytes);
+    }
+
     public double getEfficiency() {
         return workspaceBytes == 0 ? 1.0 : (double) liveLowerBoundBytes / workspaceBytes;
     }

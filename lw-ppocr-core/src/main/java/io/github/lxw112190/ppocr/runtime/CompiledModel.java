@@ -75,10 +75,23 @@ final class CompiledModel {
         ConstantTensor constant = constants[tensorIndex];
         return constant == null ? null : constant.canonical();
     }
+    ByteBuffer constantRaw(int tensorIndex) {
+        ConstantTensor constant = constants[tensorIndex];
+        return constant == null ? null : constant.raw();
+    }
     boolean isConstantMaterialized(int tensorIndex) {
         ConstantTensor constant = constants[tensorIndex];
         return constant != null && constant.isMaterialized();
     }
+
+    long decodedConstantBytes() {
+        long total = 0L;
+        for (ConstantTensor constant : constants) {
+            if (constant != null) total += constant.decodedBytes();
+        }
+        return total;
+    }
+
     int tensorConsumerCount(int tensorIndex) { return tensorConsumerCounts[tensorIndex]; }
     int tensorLastUse(int tensorIndex) { return tensorLastUses[tensorIndex]; }
 

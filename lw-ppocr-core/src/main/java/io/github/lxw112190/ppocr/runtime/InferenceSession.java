@@ -155,6 +155,18 @@ public final class InferenceSession implements AutoCloseable {
 
     public PreparedExecution execution() { ensureOpen(); return execution; }
 
+    /** Returns the prepared workspace measurements for this shape-specialized session. */
+    public WorkspaceDiagnostics workspaceDiagnostics() {
+        ensureOpen();
+        return execution.workspacePlan().getDiagnostics();
+    }
+
+    /** Returns the canonical FP32 constant storage materialized for this model. */
+    public long decodedConstantBytes() {
+        ensureOpen();
+        return execution.decodedConstantBytes();
+    }
+
     @Override
     public void close() { closed = true; }
 
@@ -415,7 +427,9 @@ public final class InferenceSession implements AutoCloseable {
                 break;
             case RESHAPE:
                 if (inputs.length != 1 || execution.length(inputs[0]) != execution.length(output)) throw unsupported(node, "reshape element count mismatch");
-                System.arraycopy(left, leftOffset, storage, offset(output), execution.length(output));
+                if (!isSameWorkspaceRange(inputs[0], output, left, storage)) {
+                    System.arraycopy(left, leftOffset, storage, offset(output), execution.length(output));
+                }
                 break;
             case SOFTMAX:
                 executeSoftmax(node, storage, output);
@@ -662,7 +676,19 @@ public final class InferenceSession implements AutoCloseable {
                 validateUnsqueeze(inputShape, outputShape, axes);
             }
         }
-        System.arraycopy(data(inputs[0], storage), offset(inputs[0]), storage, offset(output), execution.length(output));
+        float[] input = data(inputs[0], storage);
+        if (!isSameWorkspaceRange(inputs[0], output, input, storage)) {
+            System.arraycopy(input, offset(inputs[0]), storage, offset(output), execution.length(output));
+        }
+    }
+
+    private boolean isSameWorkspaceRange(int input, int output, float[] inputData,
+                                         float[] storage) {
+        return inputData == storage
+                && execution.workspacePlan().isAllocated(input)
+                && execution.workspacePlan().isAllocated(output)
+                && offset(input) == offset(output)
+                && execution.length(input) == execution.length(output);
     }
 
     private void validateSqueeze(TensorShape input, TensorShape output, int[] axes) {
@@ -714,6 +740,7 @@ public final class InferenceSession implements AutoCloseable {
         ConcatPlan plan = concatPlans[node.index];
         TensorShape shape = execution.shapes().get(inputs[0]);
         if (plan != null) {
+            if (plan.preassembled) return;
             for (int i = 0; i < inputs.length; i++) plan.values[i] = data(inputs[i], storage);
             backend.concat(plan.values, plan.offsets, storage, offset(output),
                     shape.dimensionsUnsafe(), plan.axis, plan.axisSizes);
@@ -868,7 +895,29 @@ public final class InferenceSession implements AutoCloseable {
         for (int dimension = 0; dimension < shape.getRank(); dimension++) {
             if (dimension != axis && outputShape.get(dimension) != shape.get(dimension)) return;
         }
+        plan.preassembled = isPreassembledConcat(plan, inputs, outputs[0], axis, outputShape);
         concatPlans[node.index] = plan;
+    }
+
+    private boolean isPreassembledConcat(ConcatPlan plan, int[] inputs, int output,
+                                         int axis, TensorShape outputShape) {
+        if (axis != 0 || outputShape.getElementCount() > Integer.MAX_VALUE) return false;
+        if (!execution.workspacePlan().isAllocated(output)) return false;
+        long expectedOffset = execution.offset(output);
+        if (expectedOffset < 0) return false;
+        long expectedLength = 0;
+        for (int i = 0; i < inputs.length; i++) {
+            int input = inputs[i];
+            if (!execution.workspacePlan().isAllocated(input)
+                    || execution.workspacePlan().getSize(input) != 0L
+                    || execution.offset(input) != expectedOffset + expectedLength
+                    || execution.length(input) != plan.axisSizes[i]
+                    * outputShape.getElementCount() / outputShape.get(0)) {
+                return false;
+            }
+            expectedLength += execution.length(input);
+        }
+        return expectedLength == execution.length(output);
     }
 
     private void prepareLayout(PreparedNode node) {
@@ -900,6 +949,7 @@ public final class InferenceSession implements AutoCloseable {
         private final float[][] values;
         private final int[] offsets;
         private final int[] axisSizes;
+        private boolean preassembled;
 
         private ConcatPlan(int inputCount, int axis) {
             this.axis = axis;

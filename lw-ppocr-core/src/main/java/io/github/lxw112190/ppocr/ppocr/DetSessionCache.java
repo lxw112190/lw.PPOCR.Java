@@ -2,6 +2,7 @@ package io.github.lxw112190.ppocr.ppocr;
 
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -17,6 +18,24 @@ final class DetSessionCache implements AutoCloseable {
     }
 
     DetSessionContext get(DetShapeKey key) { return entries.get(key); }
+
+    WorkspaceDiagnostics workspaceDiagnostics() {
+        WorkspaceDiagnostics[] values = new WorkspaceDiagnostics[entries.size()];
+        int index = 0;
+        for (DetSessionContext context : entries.values()) {
+            values[index++] = context.workspaceDiagnostics();
+        }
+        return WorkspaceDiagnostics.aggregate(values);
+    }
+
+    long decodedConstantBytes() {
+        for (DetSessionContext context : entries.values()) {
+            return context.decodedConstantBytes();
+        }
+        return 0L;
+    }
+
+    int size() { return entries.size(); }
 
     DetSessionContext getOrCreate(DetShapeKey key, LwmModel model, KernelBackend backend) {
         DetSessionContext existing = entries.get(key);

@@ -36,4 +36,41 @@ public final class CtcDecoderTest {
             Assert.assertEquals(OcrErrorCode.INVALID_MODEL, e.getCode());
         }
     }
+
+    @Test
+    public void reusesCallerOwnedTextBuilderWithoutChangingOutput() throws Exception {
+        PaddleOcrDictionary dictionary = PaddleOcrDictionary.load(new ByteArrayInputStream(
+                "你\r\n好\r\n".getBytes(StandardCharsets.UTF_8)));
+        try {
+            float[] probabilities = new float[] {
+                    0.9f, 0.1f, 0.0f, 0.0f,
+                    0.1f, 0.8f, 0.1f, 0.0f,
+                    0.1f, 0.8f, 0.1f, 0.0f,
+                    0.9f, 0.1f, 0.0f, 0.0f
+            };
+            float[] scores = new float[1];
+            int[] emitted = new int[1];
+            StringBuilder builder = new StringBuilder("stale");
+            String text = CtcDecoder.decodeGreedyInto(probabilities, 0, 4, 4,
+                    dictionary, scores, 0, emitted, 0, builder);
+            Assert.assertEquals("你", text);
+            Assert.assertEquals(1, emitted[0]);
+            Assert.assertEquals(0.8f, scores[0], 0.00001f);
+            Assert.assertEquals("你", builder.toString());
+
+            float[] second = new float[] {
+                    0.9f, 0.1f, 0.0f, 0.0f,
+                    0.1f, 0.0f, 0.8f, 0.1f,
+                    0.1f, 0.0f, 0.8f, 0.1f,
+                    0.9f, 0.1f, 0.0f, 0.0f
+            };
+            String secondText = CtcDecoder.decodeGreedyInto(second, 0, 4, 4,
+                    dictionary, scores, 0, emitted, 0, builder);
+            Assert.assertEquals("好", secondText);
+            Assert.assertEquals("你", text);
+            Assert.assertEquals("好", builder.toString());
+        } finally {
+            dictionary.close();
+        }
+    }
 }

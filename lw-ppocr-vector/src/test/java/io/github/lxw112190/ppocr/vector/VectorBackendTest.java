@@ -133,6 +133,18 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void matchesScalarContiguousReduceMeanWithUnorderedNegativeAxes() {
+        int[] dimensions = {2, 3, 4};
+        int[] axes = {-1, -2};
+        float[] input = values(2 * 3 * 4, 0.03125f, -0.5f);
+        float[] expected = new float[2];
+        float[] actual = new float[2];
+        scalar.reduceMean(input, 0, expected, 0, dimensions, axes, false);
+        vector.reduceMean(input, 0, actual, 0, dimensions, axes, false);
+        Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
     public void matchesScalarPointwiseConvolution() {
         float[] input = new float[3 * 23];
         float[] weights = new float[8 * 3];
@@ -147,6 +159,31 @@ public final class VectorBackendTest {
         vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
                 1, 3, 1, 23, 8, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 23);
         Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
+    public void matchesScalarLargeLowChannelStrideOneConvolution() {
+        int channels = 64;
+        int height = 80;
+        int width = 80;
+        int outputChannels = 16;
+        float[] input = values(channels * height * width, 0.001953125f, -0.5f);
+        float[] weights = values(outputChannels * channels * 3 * 3,
+                0.00390625f, -0.25f);
+        float[] bias = values(outputChannels, 0.015625f, -0.125f);
+        float[] expected = new float[outputChannels * height * width];
+        float[] actual = new float[expected.length];
+
+        scalar.conv(input, 0, weights, 0, bias, 0, expected, 0,
+                1, channels, height, width, outputChannels,
+                3, 3, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, height, width);
+        vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
+                1, channels, height, width, outputChannels,
+                3, 3, 1, 1, 1, 1, 1, 1, 1, 1,
+                1, height, width);
+
+        Assert.assertArrayEquals(expected, actual, 0.0f);
     }
 
     @Test
@@ -330,6 +367,32 @@ public final class VectorBackendTest {
                 1, 4, 7, 15, outputChannels, 3, 3, 2, 2, 1, 1,
                 1, 1, 1, 1, 2, 4, 8);
         Assert.assertArrayEquals(expected, actual, 0.000001f);
+    }
+
+    @Test
+    public void matchesScalarRecognitionStrideTwoConvolutionShape() {
+        int channels = 24;
+        int height = 24;
+        int width = 120;
+        int outputChannels = 48;
+        int outputHeight = (height + 1) / 2;
+        int outputWidth = (width + 1) / 2;
+        float[] input = values(channels * height * width, 0.001953125f, -0.375f);
+        float[] weights = values(outputChannels * channels * 9, 0.0078125f, -0.25f);
+        float[] bias = values(outputChannels, 0.03125f, -0.0625f);
+        float[] expected = new float[outputChannels * outputHeight * outputWidth];
+        float[] actual = new float[expected.length];
+
+        scalar.conv(input, 0, weights, 0, bias, 0, expected, 0,
+                1, channels, height, width, outputChannels,
+                3, 3, 2, 2, 1, 1, 1, 1, 1, 1,
+                1, outputHeight, outputWidth);
+        vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
+                1, channels, height, width, outputChannels,
+                3, 3, 2, 2, 1, 1, 1, 1, 1, 1,
+                1, outputHeight, outputWidth);
+
+        Assert.assertArrayEquals(expected, actual, 0.0f);
     }
 
     @Test

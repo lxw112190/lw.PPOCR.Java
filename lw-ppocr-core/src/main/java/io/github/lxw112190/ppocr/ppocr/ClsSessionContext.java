@@ -6,6 +6,7 @@ import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.FloatTensorView;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.util.Collections;
 
 /** Mutable fixed-shape state owned by one CLS worker. */
@@ -30,6 +31,14 @@ final class ClsSessionContext implements AutoCloseable {
                 ((long) ClsPreprocess.INPUT_HEIGHT * source.width()
                         + source.height() - 1L) / source.height());
         return ClsPostprocess.decode(output.array(), output.offset(), output.length(), resizedWidth);
+    }
+
+    WorkspaceDiagnostics workspaceDiagnostics() {
+        return session.workspaceDiagnostics();
+    }
+
+    long decodedConstantBytes() {
+        return session.decodedConstantBytes();
     }
 
     @Override

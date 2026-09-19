@@ -44,10 +44,18 @@ public final class RecPreprocess {
         long scaledWidth = (long) INPUT_HEIGHT * source.width();
         int resizedWidth = (int) Math.min(targetWidth,
                 (scaledWidth + source.height() - 1L) / source.height());
-        float padding = (float) (128.0 * NORMALIZE_SCALE - 1.0);
-        java.util.Arrays.fill(output, outputOffset,
-                outputOffset + (int) outputElements, padding);
         long plane = (long) INPUT_HEIGHT * targetWidth;
+        float padding = (float) (128.0 * NORMALIZE_SCALE - 1.0);
+        if (resizedWidth < targetWidth) {
+            for (int channel = 0; channel < 3; channel++) {
+                int channelOffset = outputOffset + channel * (int) plane;
+                for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {
+                    int paddingStart = channelOffset + outputY * targetWidth + resizedWidth;
+                    java.util.Arrays.fill(output, paddingStart,
+                            paddingStart + targetWidth - resizedWidth, padding);
+                }
+            }
+        }
         byte[] pixels = source.pixels();
         int sourceOffset = source.offset();
         for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {

@@ -9,16 +9,12 @@ import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.nio.file.Path;
-import java.util.concurrent.Callable;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -36,9 +32,8 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
     private RecognitionGroup fallbackGroup;
     private final RecognitionGroup[] activeGroups;
     private int activeGroupCount;
-    private final List<Future<Void>> taskFutures;
-    private ExecutorService parallelExecutor;
-    private int parallelExecutorSize;
+    private final ReusableParallelExecutor parallelExecutor;
+    private final GroupWorkerAction groupWorkerAction;
     private boolean closed;
 
     /** Takes ownership of the model and dictionary and closes both on close(). */
@@ -64,7 +59,8 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         this.sessions = new RecSessionContext[RecWidthPolicy.bucketCount()];
         this.reusableGroups = new RecognitionGroup[RecWidthPolicy.bucketCount()];
         this.activeGroups = new RecognitionGroup[RecWidthPolicy.bucketCount()];
-        this.taskFutures = new ArrayList<Future<Void>>();
+        this.parallelExecutor = new ReusableParallelExecutor(DaemonThreadFactory.INSTANCE);
+        this.groupWorkerAction = new GroupWorkerAction();
     }
 
     public static PaddleOcrRecognizer load(Path modelPath, Path dictionaryPath) {
@@ -108,6 +104,62 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         return false;
     }
 
+    /** Returns the combined workspace measurements of currently prepared REC width sessions. */
+    public WorkspaceDiagnostics workspaceDiagnostics() {
+        ensureOpen();
+        WorkspaceDiagnostics[] values = new WorkspaceDiagnostics[sessions.length + 1];
+        int count = 0;
+        for (RecSessionContext context : sessions) {
+            if (context != null) values[count++] = context.workspaceDiagnostics();
+        }
+        if (fallbackSession != null) values[count++] = fallbackSession.workspaceDiagnostics();
+        return WorkspaceDiagnostics.aggregate(Arrays.copyOf(values, count));
+    }
+
+    /** Returns canonical FP32 constants materialized by the REC model. */
+    public long decodedConstantBytes() {
+        ensureOpen();
+        for (RecSessionContext context : sessions) {
+            if (context != null) return context.decodedConstantBytes();
+        }
+        return fallbackSession == null ? 0L : fallbackSession.decodedConstantBytes();
+    }
+
+    /** Returns prepared projection matrices retained by REC sessions in bytes. */
+    public long packedWeightBytes() {
+        ensureOpen();
+        long total = 0L;
+        for (RecSessionContext context : sessions) {
+            if (context != null) total += context.packedWeightBytes();
+        }
+        if (fallbackSession != null) total += fallbackSession.packedWeightBytes();
+        return total;
+    }
+
+    /** Returns workspace bytes for the fixed REC buckets in policy order. */
+    public long[] workspaceBytesByWidth() {
+        ensureOpen();
+        long[] values = new long[sessions.length];
+        for (int i = 0; i < sessions.length; i++) {
+            if (sessions[i] != null) values[i] = sessions[i].workspaceDiagnostics().getWorkspaceBytes();
+        }
+        return values;
+    }
+
+    /** Returns workspace bytes for a non-bucket fallback REC session, if any. */
+    public long fallbackWorkspaceBytes() {
+        ensureOpen();
+        return fallbackSession == null ? 0L : fallbackSession.workspaceDiagnostics().getWorkspaceBytes();
+    }
+
+    /** Returns the number of currently prepared REC width sessions. */
+    public int preparedSessionCount() {
+        ensureOpen();
+        int count = fallbackSession == null ? 0 : 1;
+        for (RecSessionContext context : sessions) if (context != null) count++;
+        return count;
+    }
+
     /** Recognizes images in input order while evaluating independent width groups concurrently. */
     public List<RecRecognitionResult> recognizeAll(List<BgrImage> sources, int parallelism) {
         validateBatch(sources, parallelism);
@@ -128,15 +180,14 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         try {
             executeGroups(parallelism, results, null, null, null, null);
         } finally {
-            taskFutures.clear();
             resetGroups();
         }
     }
 
-    /** Internal primitive staging path used by the owning OCR pipeline. */
-    void recognizeAllInto(List<BgrImage> sources, int parallelism,
-                          String[] texts, float[] scores, int[] emittedCounts,
-                          int[] resizedWidths) {
+    /** Recognizes into caller-owned primitive result storage without allocating a result list. */
+    public void recognizeAllInto(List<BgrImage> sources, int parallelism,
+                                 String[] texts, float[] scores, int[] emittedCounts,
+                                 int[] resizedWidths) {
         validateBatch(sources, parallelism);
         validatePrimitiveResults(sources.size(), texts, scores, emittedCounts, resizedWidths);
         if (sources.isEmpty()) return;
@@ -145,7 +196,6 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         try {
             executeGroups(parallelism, null, texts, scores, emittedCounts, resizedWidths);
         } finally {
-            taskFutures.clear();
             resetGroups();
         }
     }
@@ -206,20 +256,13 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
             return;
         }
 
-        ExecutorService executor = executor(workers);
         sortGroupsLargestFirst();
-        taskFutures.clear();
-        for (int i = 0; i < activeGroupCount; i++) {
-            final RecognitionGroup group = activeGroups[i];
-            taskFutures.add(executor.submit(new Callable<Void>() {
-                @Override
-                public Void call() {
-                    recognize(group, objectResults, texts, scores, emittedCounts, resizedWidths);
-                    return null;
-                }
-            }));
+        groupWorkerAction.prepare(objectResults, texts, scores, emittedCounts, resizedWidths);
+        try {
+            parallelExecutor.run(workers, groupWorkerAction);
+        } finally {
+            groupWorkerAction.clear();
         }
-        await(taskFutures);
     }
 
     private void resetGroups() {
@@ -228,29 +271,6 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
             activeGroups[i] = null;
         }
         activeGroupCount = 0;
-    }
-
-    private static void await(List<Future<Void>> futures) {
-        RuntimeException failure = null;
-        for (Future<Void> future : futures) {
-            try {
-                future.get();
-            } catch (InterruptedException e) {
-                for (Future<Void> pending : futures) pending.cancel(true);
-                Thread.currentThread().interrupt();
-                throw new OcrException(OcrErrorCode.RESOURCE_LIMIT,
-                        "parallel REC execution was interrupted", e);
-            } catch (ExecutionException e) {
-                Throwable cause = e.getCause();
-                RuntimeException current = cause instanceof RuntimeException
-                        ? (RuntimeException) cause
-                        : new OcrException(OcrErrorCode.RESOURCE_LIMIT,
-                                "parallel REC execution failed", cause);
-                if (failure == null) failure = current;
-                else failure.addSuppressed(current);
-            }
-        }
-        if (failure != null) throw failure;
     }
 
     private RecSessionContext context(int slot, int targetWidth) {
@@ -326,20 +346,11 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         resizedWidths[resultIndex] = context.resizedWidth();
     }
 
-    private ExecutorService executor(int size) {
-        if (parallelExecutor == null || parallelExecutorSize < size) {
-            if (parallelExecutor != null) parallelExecutor.shutdown();
-            parallelExecutor = Executors.newFixedThreadPool(size, DaemonThreadFactory.INSTANCE);
-            parallelExecutorSize = size;
-        }
-        return parallelExecutor;
-    }
-
     @Override
     public void close() {
         if (!closed) {
             closed = true;
-            if (parallelExecutor != null) parallelExecutor.shutdown();
+            parallelExecutor.close();
             for (int i = 0; i < sessions.length; i++) {
                 if (sessions[i] != null) {
                     sessions[i].close();
@@ -353,7 +364,6 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
             resetGroups();
             Arrays.fill(reusableGroups, null);
             fallbackGroup = null;
-            taskFutures.clear();
             dictionary.close();
             model.close();
         }
@@ -432,6 +442,48 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
             int capacity = Math.max(required, Math.max(4, indexes.length * 2));
             indexes = Arrays.copyOf(indexes, capacity);
             sources = Arrays.copyOf(sources, capacity);
+        }
+    }
+
+    /** Reusable multi-worker dispatcher; one recognizer owns one instance. */
+    private final class GroupWorkerAction implements ReusableParallelExecutor.WorkerAction {
+        private RecRecognitionResult[] objectResults;
+        private String[] texts;
+        private float[] scores;
+        private int[] emittedCounts;
+        private int[] resizedWidths;
+        private int nextGroup;
+
+        private void prepare(RecRecognitionResult[] objectResults, String[] texts,
+                             float[] scores, int[] emittedCounts, int[] resizedWidths) {
+            this.objectResults = objectResults;
+            this.texts = texts;
+            this.scores = scores;
+            this.emittedCounts = emittedCounts;
+            this.resizedWidths = resizedWidths;
+            this.nextGroup = 0;
+        }
+
+        private void clear() {
+            objectResults = null;
+            texts = null;
+            scores = null;
+            emittedCounts = null;
+            resizedWidths = null;
+            nextGroup = 0;
+        }
+
+        private synchronized int claimGroup() {
+            return nextGroup < activeGroupCount ? nextGroup++ : -1;
+        }
+
+        @Override
+        public void run(int workerIndex) {
+            int groupIndex;
+            while ((groupIndex = claimGroup()) >= 0) {
+                recognize(activeGroups[groupIndex], objectResults, texts, scores,
+                        emittedCounts, resizedWidths);
+            }
         }
     }
 

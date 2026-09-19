@@ -10,6 +10,7 @@ import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
 import io.github.lxw112190.ppocr.model.TensorInfo;
 import io.github.lxw112190.ppocr.runtime.FloatTensorView;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.nio.file.Path;
 import java.util.List;
 
@@ -45,6 +46,49 @@ public final class PaddleOcrDetector implements AutoCloseable {
                 bitmapThreshold, boxThreshold,
                 context.widthRatio, context.heightRatio,
                 maxCandidates, unclipRatio, useDilation, source.width(), source.height());
+    }
+
+    /** Returns the combined workspace measurements of currently prepared DET sessions. */
+    public WorkspaceDiagnostics workspaceDiagnostics() {
+        ensureOpen();
+        return sessions.workspaceDiagnostics();
+    }
+
+    /** Returns the capacity of the reusable DB postprocess buffers in bytes. */
+    public long dbScratchBytes() {
+        ensureOpen();
+        return postprocessor.workspaceBytes();
+    }
+
+    /** Returns canonical FP32 constants materialized by the DET model. */
+    public long decodedConstantBytes() {
+        ensureOpen();
+        return sessions.decodedConstantBytes();
+    }
+
+    /** Returns the number of currently prepared DET shape sessions. */
+    public int preparedSessionCount() {
+        ensureOpen();
+        return sessions.size();
+    }
+
+    /** Fills a caller-owned detection list without allocating a result list. */
+    public void detectInto(BgrImage source, float bitmapThreshold, float boxThreshold,
+                           float unclipRatio, boolean useDilation, int maxCandidates,
+                           List<DetectionBox> destination) {
+        ensureOpen();
+        if (destination == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "DET destination list is required");
+        }
+        DetSessionContext context = contextFor(source);
+        context.preprocess(source);
+        context.session.runBound();
+        FloatTensorView probabilityMap = context.session.outputView();
+        postprocessor.decodeToSourceInto(
+                probabilityMap.array(), probabilityMap.offset(), context.mapWidth, context.mapHeight,
+                bitmapThreshold, boxThreshold, context.widthRatio, context.heightRatio,
+                maxCandidates, unclipRatio, useDilation, source.width(), source.height(), destination);
     }
 
     public PaddleOcrDetector(LwmModel model) {

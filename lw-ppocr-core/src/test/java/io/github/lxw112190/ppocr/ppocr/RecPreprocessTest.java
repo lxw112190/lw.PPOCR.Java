@@ -38,4 +38,15 @@ public final class RecPreprocessTest {
         Assert.assertEquals(32, workspace.getResizedWidth());
         Assert.assertEquals(1.0f, workspace.getChw()[32 * 48 + 8], 0.00001f);
     }
+
+    @Test
+    public void intoPathMatchesOneShotWhenDestinationContainsStaleValues() {
+        BgrImage source = new BgrImage(new byte[7 * 19 * 3], 7, 19, 21);
+        RecPreprocessResult expected = RecPreprocess.resizeNormalize(source, 32);
+        float[] actual = new float[expected.getChw().length + 11];
+        java.util.Arrays.fill(actual, 0.25f);
+        RecPreprocess.resizeNormalizeInto(source, 32, actual, 5);
+        Assert.assertArrayEquals(expected.getChw(),
+                java.util.Arrays.copyOfRange(actual, 5, 5 + expected.getChw().length), 0.0f);
+    }
 }

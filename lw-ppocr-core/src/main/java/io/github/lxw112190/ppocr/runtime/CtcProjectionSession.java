@@ -49,14 +49,14 @@ public final class CtcProjectionSession implements AutoCloseable {
                 tail.projectionNodeIndex, tail.activationTensor);
         try {
             PreparedExecution execution = prefix.execution();
-            float[] canonicalWeights = execution.constant(tail.weightTensor);
+            ByteBuffer rawWeights = execution.constantRaw(tail.weightTensor);
             float[] bias = execution.constant(tail.biasTensor);
-            if (canonicalWeights == null || bias == null) {
+            if (rawWeights == null || bias == null) {
                 prefix.close();
                 return null;
             }
-            PreparedMatMulWeights prepared = new PreparedMatMulWeights(canonicalWeights, 0,
-                    tail.inner, tail.columns);
+            PreparedMatMulWeights prepared = PreparedMatMulWeights.fromLittleEndian(
+                    rawWeights, tail.inner, tail.columns);
             return new CtcProjectionSession(prefix, projection, prepared, bias,
                     tail.rows);
         } catch (RuntimeException e) {
@@ -114,6 +114,14 @@ public final class CtcProjectionSession implements AutoCloseable {
     public int getClassCount() { return weights.getColumns(); }
     public long getDenseOutputBytesAvoided() { return (long) rows * weights.getColumns() * 4L; }
     public long getWorkspaceBytes() { ensureOpen(); return prefix.execution().workspacePlan().getTotalBytes(); }
+    /** Returns the prepared projection matrix capacity in bytes. */
+    public long getPackedWeightBytes() { ensureOpen(); return weights.packedBytes(); }
+    /** Returns canonical FP32 constants materialized by the prefix graph. */
+    public long getDecodedConstantBytes() { ensureOpen(); return prefix.decodedConstantBytes(); }
+    public WorkspaceDiagnostics workspaceDiagnostics() {
+        ensureOpen();
+        return prefix.workspaceDiagnostics();
+    }
 
     @Override
     public void close() {
@@ -183,6 +191,11 @@ public final class CtcProjectionSession implements AutoCloseable {
             int activationTensor = projectionInputs[0];
             int weightTensor = projectionInputs[1];
             if (!tensors.get(weightTensor).isConstant() || !tensors.get(biasTensor).isConstant()) return null;
+            // The raw-to-prepared path is useful only when the projection owns
+            // the matrix.  A shared constant must remain available through the
+            // normal canonical accessor for the other consumer.
+            if (compiled.tensorConsumerCount(weightTensor) != 1
+                    || compiled.tensorLastUse(weightTensor) != projectionIndex) return null;
             if (compiled.tensorConsumerCount(projectionOutput) != 1 ||
                     compiled.tensorLastUse(projectionOutput) != addIndex ||
                     compiled.tensorConsumerCount(addOutputs[0]) != 1 ||

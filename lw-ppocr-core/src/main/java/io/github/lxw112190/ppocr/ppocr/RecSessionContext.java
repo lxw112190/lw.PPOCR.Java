@@ -7,6 +7,7 @@ import io.github.lxw112190.ppocr.runtime.InferenceSession;
 import io.github.lxw112190.ppocr.runtime.CtcProjectionSession;
 import io.github.lxw112190.ppocr.runtime.FloatTensorView;
 import io.github.lxw112190.ppocr.runtime.TensorShape;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.util.Collections;
 
 /** Mutable, width-specialized state owned by one non-thread-safe recognizer. */
@@ -16,6 +17,7 @@ final class RecSessionContext implements AutoCloseable {
     final CtcProjectionSession projectionSession;
     final CompactCtcOutput compactOutput;
     final int timeSteps;
+    private final StringBuilder textScratch = new StringBuilder(128);
     private int resizedWidth;
 
     RecSessionContext(io.github.lxw112190.ppocr.model.LwmModel model, int width, int classCount,
@@ -77,18 +79,33 @@ final class RecSessionContext implements AutoCloseable {
             projectionSession.runBound(compactOutput.classIds(), compactOutput.logits(),
                     compactOutput.probabilities());
             return CtcDecoder.decodeGreedyInto(compactOutput, dictionary,
-                    scores, scoreIndex, emittedCounts, emittedIndex);
+                    scores, scoreIndex, emittedCounts, emittedIndex, textScratch);
         }
         session.runBound();
         FloatTensorView output = session.outputView();
         return CtcDecoder.decodeGreedyInto(output.array(), output.offset(), timeSteps,
                 dictionary.classCount(), dictionary, scores, scoreIndex,
-                emittedCounts, emittedIndex);
+                emittedCounts, emittedIndex, textScratch);
     }
 
     int resizedWidth() { return resizedWidth; }
 
     boolean usesProjectionFusion() { return projectionSession != null; }
+
+    WorkspaceDiagnostics workspaceDiagnostics() {
+        return projectionSession != null
+                ? projectionSession.workspaceDiagnostics() : session.workspaceDiagnostics();
+    }
+
+    long decodedConstantBytes() {
+        return projectionSession != null
+                ? projectionSession.getDecodedConstantBytes()
+                : session.decodedConstantBytes();
+    }
+
+    long packedWeightBytes() {
+        return projectionSession == null ? 0L : projectionSession.getPackedWeightBytes();
+    }
 
     @Override
     public void close() {

@@ -41,7 +41,16 @@ public final class ClsPreprocess {
         long scaledWidth = (long) INPUT_HEIGHT * source.width();
         int resizedWidth = (int) Math.min(INPUT_WIDTH,
                 (scaledWidth + source.height() - 1L) / source.height());
-        java.util.Arrays.fill(output, outputOffset, outputOffset + (int) required, -1.0f);
+        if (resizedWidth < INPUT_WIDTH) {
+            for (int channel = 0; channel < 3; channel++) {
+                int channelOffset = outputOffset + channel * INPUT_HEIGHT * INPUT_WIDTH;
+                for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {
+                    int paddingStart = channelOffset + outputY * INPUT_WIDTH + resizedWidth;
+                    java.util.Arrays.fill(output, paddingStart,
+                            paddingStart + INPUT_WIDTH - resizedWidth, -1.0f);
+                }
+            }
+        }
         byte[] pixels = source.pixels();
         int sourceOffset = source.offset();
         for (int outputY = 0; outputY < INPUT_HEIGHT; outputY++) {

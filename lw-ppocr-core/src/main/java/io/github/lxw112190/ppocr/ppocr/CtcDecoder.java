@@ -84,6 +84,18 @@ public final class CtcDecoder {
                                    PaddleOcrDictionary dictionary,
                                    float[] scoreOutput, int scoreIndex,
                                    int[] emittedOutput, int emittedIndex) {
+        return decodeGreedyInto(probabilities, probabilityOffset, timeSteps, classCount,
+                dictionary, scoreOutput, scoreIndex, emittedOutput, emittedIndex,
+                new StringBuilder());
+    }
+
+    /** Internal overload which reuses the caller-owned text builder. */
+    static String decodeGreedyInto(float[] probabilities, int probabilityOffset,
+                                   int timeSteps, int classCount,
+                                   PaddleOcrDictionary dictionary,
+                                   float[] scoreOutput, int scoreIndex,
+                                   int[] emittedOutput, int emittedIndex,
+                                   StringBuilder text) {
         validateOutput(scoreOutput, scoreIndex, emittedOutput, emittedIndex);
         long elements = (long) timeSteps * classCount;
         if (probabilities == null || dictionary == null || probabilityOffset < 0
@@ -93,7 +105,11 @@ public final class CtcDecoder {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
                     "CTC probability shape or dictionary is invalid");
         }
-        StringBuilder text = new StringBuilder();
+        if (text == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "CTC text builder is required");
+        }
+        text.setLength(0);
         int previous = 0;
         int emitted = 0;
         double scoreSum = 0.0;
@@ -132,12 +148,26 @@ public final class CtcDecoder {
                                    PaddleOcrDictionary dictionary,
                                    float[] scoreOutput, int scoreIndex,
                                    int[] emittedOutput, int emittedIndex) {
+        return decodeGreedyInto(compact, dictionary, scoreOutput, scoreIndex,
+                emittedOutput, emittedIndex, new StringBuilder());
+    }
+
+    /** Internal overload which reuses the caller-owned text builder. */
+    static String decodeGreedyInto(CompactCtcOutput compact,
+                                   PaddleOcrDictionary dictionary,
+                                   float[] scoreOutput, int scoreIndex,
+                                   int[] emittedOutput, int emittedIndex,
+                                   StringBuilder text) {
         validateOutput(scoreOutput, scoreIndex, emittedOutput, emittedIndex);
         if (compact == null || dictionary == null || compact.getTimeSteps() <= 0) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
                     "compact CTC output or dictionary is invalid");
         }
-        StringBuilder text = new StringBuilder();
+        if (text == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "CTC text builder is required");
+        }
+        text.setLength(0);
         int previous = 0;
         int emitted = 0;
         double scoreSum = 0.0;

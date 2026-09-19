@@ -8,6 +8,7 @@ import io.github.lxw112190.ppocr.ppocr.OcrLineResult;
 import io.github.lxw112190.ppocr.ppocr.OcrResult;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcr;
 import io.github.lxw112190.ppocr.ppocr.PaddleOcrOptions;
+import io.github.lxw112190.ppocr.runtime.WorkspaceDiagnostics;
 import java.io.BufferedWriter;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -63,6 +64,17 @@ public final class DatasetOcrPerformanceMain {
         long totalNanos = 0L;
         int totalLines = 0;
         long peakUsedHeap = 0L;
+        long heapBefore = usedHeap();
+        WorkspaceDiagnostics workspace = null;
+        long dbScratchBytes = 0L;
+        long cropArenaBytes = 0L;
+        long decodedConstantBytes = 0L;
+        long packedWeightBytes = 0L;
+        long detectorWorkspaceBytes = 0L;
+        long classifierWorkspaceBytes = 0L;
+        long recognizerWorkspaceBytes = 0L;
+        long[] recognizerWorkspaceByWidth = new long[5];
+        long recognizerFallbackWorkspaceBytes = 0L;
         try (PaddleOcr ocr = PaddleOcr.load(detector, classifier, recognizer, dictionary,
                 options, backend);
              BufferedWriter writer = Files.newBufferedWriter(output, StandardCharsets.UTF_8)) {
@@ -81,12 +93,51 @@ public final class DatasetOcrPerformanceMain {
                         index + 1, images.size(), image.getFileName(), result.getLines().size(),
                         elapsed / 1_000_000.0);
             }
+            workspace = ocr.workspaceDiagnostics();
+            dbScratchBytes = ocr.dbScratchBytes();
+            cropArenaBytes = ocr.cropWorkspaceBytes();
+            decodedConstantBytes = ocr.decodedConstantBytes();
+            packedWeightBytes = ocr.packedWeightBytes();
+            detectorWorkspaceBytes = ocr.detectorWorkspaceBytes();
+            classifierWorkspaceBytes = ocr.classifierWorkspaceBytes();
+            recognizerWorkspaceBytes = ocr.recognizerWorkspaceBytes();
+            recognizerWorkspaceByWidth = ocr.recognizerWorkspaceBytesByWidth();
+            recognizerFallbackWorkspaceBytes = ocr.recognizerFallbackWorkspaceBytes();
         }
+        long heapAfter = usedHeap();
+        if (workspace == null) throw new IllegalStateException("workspace diagnostics unavailable");
         System.out.printf(Locale.ROOT,
                 "{\"benchmark\":\"dataset-ocr\",\"images\":%d,\"total_lines\":%d,"
-                        + "\"mean_ms\":%.3f,\"peak_used_heap_bytes\":%d,\"output\":\"%s\"}%n",
+                        + "\"mean_ms\":%.3f,\"heap_before_bytes\":%d,"
+                        + "\"heap_after_bytes\":%d,\"peak_used_heap_bytes\":%d,"
+                        + "\"runtime\":{\"det_workspace_bytes\":%d,"
+                        + "\"cls_workspace_bytes\":%d,\"rec_workspace_bytes\":%d,"
+                        + "\"rec_workspace_by_width\":%s,"
+                        + "\"rec_fallback_workspace_bytes\":%d,"
+                        + "\"workspace_old_bytes\":%d,"
+                        + "\"workspace_bytes\":%d,\"workspace_live_lower_bound_bytes\":%d,"
+                        + "\"workspace_efficiency\":%.6f,\"db_scratch_bytes\":%d,"
+                        + "\"crop_arena_bytes\":%d,\"decoded_constant_bytes\":%d,"
+                        + "\"packed_weight_bytes\":%d},\"output\":\"%s\"}%n",
                 images.size(), totalLines, totalNanos / 1_000_000.0 / images.size(),
-                peakUsedHeap, jsonEscape(output.toString()));
+                heapBefore, heapAfter, peakUsedHeap,
+                detectorWorkspaceBytes, classifierWorkspaceBytes, recognizerWorkspaceBytes,
+                recWorkspaceJson(recognizerWorkspaceByWidth), recognizerFallbackWorkspaceBytes,
+                workspace.getOldWorkspaceBytes(), workspace.getWorkspaceBytes(),
+                workspace.getLiveLowerBoundBytes(), workspace.getEfficiency(),
+                dbScratchBytes, cropArenaBytes, decodedConstantBytes, packedWeightBytes,
+                jsonEscape(output.toString()));
+    }
+
+    private static String recWorkspaceJson(long[] values) {
+        StringBuilder json = new StringBuilder("{\"192\":");
+        json.append(values.length > 0 ? values[0] : 0L)
+                .append(",\"320\":").append(values.length > 1 ? values[1] : 0L)
+                .append(",\"480\":").append(values.length > 2 ? values[2] : 0L)
+                .append(",\"640\":").append(values.length > 3 ? values[3] : 0L)
+                .append(",\"960\":").append(values.length > 4 ? values[4] : 0L)
+                .append('}');
+        return json.toString();
     }
 
     private static List<Path> imageFiles(Path dataset) throws IOException {

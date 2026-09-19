@@ -1,5 +1,6 @@
 package io.github.lxw112190.ppocr.runtime;
 
+import io.github.lxw112190.ppocr.model.DataType;
 import io.github.lxw112190.ppocr.model.NodeInfo;
 import io.github.lxw112190.ppocr.model.OperatorType;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
@@ -33,10 +34,23 @@ public final class MemoryPlanner {
                               List<Integer> graphInputs, List<Integer> graphOutputs,
                               List<TensorShape> shapes, boolean fuseGelu,
                               boolean aliasElementwise) {
-        PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, true);
+        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, fuseGelu,
+                aliasElementwise, null);
+    }
+
+    static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                              List<Integer> graphInputs, List<Integer> graphOutputs,
+                              List<TensorShape> shapes, boolean fuseGelu,
+                              boolean aliasElementwise, int[] concatAxes) {
+        PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, true,
+                concatAxes);
         Allocation old = allocateLegacy(data);
         if (fuseGelu) markGeluPhantoms(data);
-        if (aliasElementwise) markElementwiseAliases(data);
+        if (aliasElementwise) {
+            markLayoutAliases(data);
+            markElementwiseAliases(data);
+            markConcatAliases(data);
+        }
         Allocation current = allocateGreedy(data);
         mapPhantomOffsets(data, current.offsets);
         mapAliasOffsets(data, current.offsets);
@@ -60,10 +74,23 @@ public final class MemoryPlanner {
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes, boolean fuseGelu,
                                      boolean aliasElementwise) {
-        PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, false);
+        return planPartial(tensors, nodes, graphInputs, graphOutputs, shapes, fuseGelu,
+                aliasElementwise, null);
+    }
+
+    static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                                     List<Integer> graphInputs, List<Integer> graphOutputs,
+                                     List<TensorShape> shapes, boolean fuseGelu,
+                                     boolean aliasElementwise, int[] concatAxes) {
+        PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, false,
+                concatAxes);
         Allocation old = allocateLegacy(data);
         if (fuseGelu) markGeluPhantoms(data);
-        if (aliasElementwise) markElementwiseAliases(data);
+        if (aliasElementwise) {
+            markLayoutAliases(data);
+            markElementwiseAliases(data);
+            markConcatAliases(data);
+        }
         Allocation current = allocateGreedy(data);
         mapPhantomOffsets(data, current.offsets);
         mapAliasOffsets(data, current.offsets);
@@ -73,10 +100,15 @@ public final class MemoryPlanner {
 
     private static PlanningData prepare(List<TensorInfo> tensors, List<NodeInfo> nodes,
                                         List<Integer> graphInputs, List<Integer> graphOutputs,
-                                        List<TensorShape> shapes, boolean requireEveryRuntimeTensor) {
+                                        List<TensorShape> shapes, boolean requireEveryRuntimeTensor,
+                                        int[] concatAxes) {
         if (tensors == null || nodes == null || graphInputs == null || graphOutputs == null
                 || shapes == null || tensors.size() != shapes.size()) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "planner inputs are inconsistent");
+        }
+        if (concatAxes != null && concatAxes.length != nodes.size()) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT,
+                    "concat axis metadata does not match planner nodes");
         }
         int tensorCount = tensors.size();
         long[] sizes = new long[tensorCount];
@@ -128,7 +160,7 @@ public final class MemoryPlanner {
             }
         }
         return new PlanningData(tensors, nodes, shapes, nodes.size(), sizes, births, deaths,
-                consumerCounts, lastUses);
+                consumerCounts, lastUses, concatAxes);
     }
 
     private static Allocation allocateLegacy(PlanningData data) {
@@ -287,9 +319,121 @@ public final class MemoryPlanner {
                 if (!isAliasableInput(data, input, output, nodeIndex)) continue;
                 int root = aliasRoot(data, input);
                 data.aliasSink[output] = root;
+                data.aliasDeltaBytes[output] = aliasDelta(data, input);
                 data.sizes[output] = 0;
                 data.deaths[root] = Math.max(data.deaths[root], data.deaths[output]);
                 break;
+            }
+        }
+    }
+
+    /**
+     * Reshape and layout-only operators preserve row-major element order, so
+     * a single-use runtime input can provide the output storage directly.
+     */
+    private static void markLayoutAliases(PlanningData data) {
+        for (int nodeIndex = 0; nodeIndex < data.nodes.size(); nodeIndex++) {
+            if (data.fusedNodes[nodeIndex]) continue;
+            NodeInfo node = data.nodes.get(nodeIndex);
+            OperatorType operator = node.getOperator();
+            if (operator != OperatorType.RESHAPE
+                    && operator != OperatorType.SQUEEZE
+                    && operator != OperatorType.UNSQUEEZE) continue;
+            int[] inputs = node.getInputs();
+            int[] outputs = node.getOutputs();
+            if (inputs.length != 1 || outputs.length != 1) continue;
+            int input = inputs[0];
+            int output = outputs[0];
+            if (!isRuntimeTensor(data, input) || !isRuntimeTensor(data, output)
+                    || data.sizes[output] == 0 || data.aliasSink[output] >= 0
+                    || data.phantomSink[input] >= 0 || data.phantomSink[output] >= 0
+                    || data.consumerCounts[input] != 1
+                    || data.lastUses[input] != nodeIndex
+                    || data.tensors.get(input).getDataType() != DataType.F32
+                    || data.tensors.get(output).getDataType() != DataType.F32
+                    || data.shapes.get(input).getElementCount()
+                    != data.shapes.get(output).getElementCount()) continue;
+
+            int root = aliasRoot(data, input);
+            data.aliasSink[output] = root;
+            data.aliasDeltaBytes[output] = aliasDelta(data, input);
+            data.sizes[output] = 0;
+            data.deaths[root] = Math.max(data.deaths[root], data.deaths[output]);
+        }
+    }
+
+    /**
+     * Places contiguous Concat inputs inside their output storage. This is
+     * safe only when there is one outer row, so every input is one contiguous
+     * slice of the row-major output.
+     */
+    private static void markConcatAliases(PlanningData data) {
+        if (data.concatAxes == null) return;
+        for (int nodeIndex = 0; nodeIndex < data.nodes.size(); nodeIndex++) {
+            if (data.fusedNodes[nodeIndex]
+                    || data.nodes.get(nodeIndex).getOperator() != OperatorType.CONCAT) continue;
+            int axis = data.concatAxes[nodeIndex];
+            int[] inputs = data.nodes.get(nodeIndex).getInputs();
+            int[] outputs = data.nodes.get(nodeIndex).getOutputs();
+            if (axis == Integer.MIN_VALUE || inputs.length == 0 || outputs.length != 1) continue;
+            int output = outputs[0];
+            if (!isRuntimeTensor(data, output) || data.aliasSink[output] >= 0
+                    || data.phantomSink[output] >= 0
+                    || data.tensors.get(output).getDataType() != DataType.F32) continue;
+
+            TensorShape outputShape = data.shapes.get(output);
+            if (axis < 0) axis += outputShape.getRank();
+            if (axis < 0 || axis >= outputShape.getRank()) continue;
+            int outer = 1;
+            int inner = 1;
+            for (int dimension = 0; dimension < axis; dimension++) {
+                outer *= outputShape.get(dimension);
+            }
+            for (int dimension = axis + 1; dimension < outputShape.getRank(); dimension++) {
+                inner *= outputShape.get(dimension);
+            }
+            if (axis != 0 || outer != 1) continue;
+
+            long outputElements = outputShape.getElementCount();
+            long totalInputBytes = 0;
+            boolean valid = true;
+            for (int input : inputs) {
+                if (!isRuntimeTensor(data, input) || data.aliasSink[input] >= 0
+                        || data.phantomSink[input] >= 0
+                        || data.consumerCounts[input] != 1
+                        || data.lastUses[input] != nodeIndex
+                        || data.tensors.get(input).getDataType() != DataType.F32) {
+                    valid = false;
+                    break;
+                }
+                TensorShape inputShape = data.shapes.get(input);
+                if (inputShape.getRank() != outputShape.getRank()) {
+                    valid = false;
+                    break;
+                }
+                for (int dimension = 0; dimension < outputShape.getRank(); dimension++) {
+                    if (dimension != axis && inputShape.get(dimension) != outputShape.get(dimension)) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if (!valid) break;
+                long inputElements = inputShape.getElementCount();
+                if (inputElements != (long) inputShape.get(axis) * inner
+                        || totalInputBytes > outputElements * 4L - inputElements * 4L) {
+                    valid = false;
+                    break;
+                }
+                totalInputBytes += inputElements * 4L;
+            }
+            if (!valid || totalInputBytes != outputElements * 4L) continue;
+
+            long relative = 0;
+            for (int input : inputs) {
+                data.aliasSink[input] = output;
+                data.aliasDeltaBytes[input] = relative;
+                data.sizes[input] = 0;
+                relative += data.shapes.get(input).getElementCount() * 4L;
             }
         }
     }
@@ -322,6 +466,16 @@ public final class MemoryPlanner {
         return root;
     }
 
+    private static long aliasDelta(PlanningData data, int tensor) {
+        long delta = 0;
+        int current = tensor;
+        while (data.aliasSink[current] >= 0) {
+            delta = addExact(delta, data.aliasDeltaBytes[current]);
+            current = data.aliasSink[current];
+        }
+        return delta;
+    }
+
     private static void mapPhantomOffsets(PlanningData data, long[] offsets) {
         for (int tensor = 0; tensor < data.phantomSink.length; tensor++) {
             int sink = data.phantomSink[tensor];
@@ -342,7 +496,7 @@ public final class MemoryPlanner {
                 throw new OcrException(OcrErrorCode.INVALID_MODEL,
                         "elementwise alias root has no workspace allocation: " + root);
             }
-            offsets[tensor] = offsets[root];
+            offsets[tensor] = addExact(offsets[root], data.aliasDeltaBytes[tensor]);
         }
     }
 
@@ -496,11 +650,14 @@ public final class MemoryPlanner {
         final int[] lastUses;
         final int[] phantomSink;
         final int[] aliasSink;
+        final long[] aliasDeltaBytes;
         final boolean[] fusedNodes;
+        final int[] concatAxes;
 
         PlanningData(List<TensorInfo> tensors, List<NodeInfo> nodes,
                      List<TensorShape> shapes, int nodeCount, long[] sizes,
-                     int[] births, int[] deaths, int[] consumerCounts, int[] lastUses) {
+                     int[] births, int[] deaths, int[] consumerCounts, int[] lastUses,
+                     int[] concatAxes) {
             this.tensors = tensors;
             this.nodes = nodes;
             this.shapes = shapes;
@@ -514,7 +671,9 @@ public final class MemoryPlanner {
             Arrays.fill(this.phantomSink, -1);
             this.aliasSink = new int[tensors.size()];
             Arrays.fill(this.aliasSink, -1);
+            this.aliasDeltaBytes = new long[tensors.size()];
             this.fusedNodes = new boolean[nodes.size()];
+            this.concatAxes = concatAxes;
         }
     }
 

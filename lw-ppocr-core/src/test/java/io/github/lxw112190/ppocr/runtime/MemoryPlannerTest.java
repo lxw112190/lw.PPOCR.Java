@@ -133,6 +133,66 @@ public final class MemoryPlannerTest {
         Assert.assertEquals(16L, plan.getTotalBytes());
     }
 
+    @Test
+    public void aliasesShapeOnlyOperatorsIntoOneStorageGroup() {
+        List<TensorInfo> tensors = Arrays.asList(
+                tensor(TensorInfo.INPUT, 4), runtime(4), runtime(4));
+        List<NodeInfo> nodes = Arrays.asList(
+                new NodeInfo(OperatorType.SQUEEZE, new int[] {0}, new int[] {1}, 0, 0),
+                new NodeInfo(OperatorType.RESHAPE, new int[] {1}, new int[] {2}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(1, 4), TensorShape.of(4), TensorShape.of(2, 2));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Collections.singletonList(0), Collections.singletonList(2), shapes,
+                false, true);
+
+        Assert.assertEquals(plan.getOffset(0), plan.getOffset(1));
+        Assert.assertEquals(plan.getOffset(0), plan.getOffset(2));
+        Assert.assertEquals(0L, plan.getSize(1));
+        Assert.assertEquals(0L, plan.getSize(2));
+        Assert.assertEquals(16L, plan.getTotalBytes());
+    }
+
+    @Test
+    public void aliasesContiguousConcatInputsIntoOutputSlices() {
+        List<TensorInfo> tensors = Arrays.asList(
+                tensor(TensorInfo.INPUT, 2), tensor(TensorInfo.INPUT, 3), runtime(5));
+        List<NodeInfo> nodes = Collections.singletonList(
+                new NodeInfo(OperatorType.CONCAT, new int[] {0, 1}, new int[] {2}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(2), TensorShape.of(3), TensorShape.of(5));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Arrays.asList(0, 1), Collections.singletonList(2), shapes,
+                false, true, new int[] {0});
+
+        Assert.assertEquals(0L, plan.getOffset(0));
+        Assert.assertEquals(8L, plan.getOffset(1));
+        Assert.assertEquals(0L, plan.getOffset(2));
+        Assert.assertEquals(0L, plan.getSize(0));
+        Assert.assertEquals(0L, plan.getSize(1));
+        Assert.assertEquals(20L, plan.getTotalBytes());
+    }
+
+    @Test
+    public void doesNotAliasInterleavedConcatSlices() {
+        List<TensorInfo> tensors = Arrays.asList(
+                shaped(TensorInfo.INPUT, 2, 2), shaped(TensorInfo.INPUT, 2, 3),
+                shaped(0, 2, 5));
+        List<NodeInfo> nodes = Collections.singletonList(
+                new NodeInfo(OperatorType.CONCAT, new int[] {0, 1}, new int[] {2}, 0, 0));
+        List<TensorShape> shapes = Arrays.asList(
+                TensorShape.of(2, 2), TensorShape.of(2, 3), TensorShape.of(2, 5));
+
+        WorkspacePlan plan = MemoryPlanner.plan(tensors, nodes,
+                Arrays.asList(0, 1), Collections.singletonList(2), shapes,
+                false, true, new int[] {1});
+
+        Assert.assertEquals(16L, plan.getSize(0));
+        Assert.assertEquals(24L, plan.getSize(1));
+    }
+
     @Test(expected = IllegalArgumentException.class)
     public void rejectsInvalidShape() {
         TensorShape.of(4, 0);
@@ -148,6 +208,10 @@ public final class MemoryPlannerTest {
 
     private static TensorInfo tensor(int flags, int elements) {
         return new TensorInfo(DataType.F32, new int[] {elements}, flags, 0, 0, -1, 0);
+    }
+
+    private static TensorInfo shaped(int flags, int... dimensions) {
+        return new TensorInfo(DataType.F32, dimensions, flags, 0, 0, -1, 0);
     }
 
     private static TensorInfo constant() {

@@ -26,6 +26,8 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v4
+      - name: Test prediction comparison helper
+        run: python scripts/test-compare-predictions.py
       - name: Set up JDK 25
         uses: actions/setup-java@v4
         with:
@@ -87,6 +89,14 @@ jobs:
             | tee benchmark-results/rec-projection-matmul.json
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.PointwiseConvPerformanceMain vector rec \
+            | tee benchmark-results/rec-pointwise-conv-vector.json
+          java \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.PointwiseConvPerformanceMain scalar rec \
+            | tee benchmark-results/rec-pointwise-conv-scalar.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.ProjectionArgMaxPerformanceMain vector \
             | tee benchmark-results/rec-projection-argmax.json
           for cpu in 1 2 4 8; do
@@ -138,6 +148,14 @@ jobs:
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.DepthwiseConvPerformanceMain vector cls 50 100 \
             | tee benchmark-results/cls-depthwise-vector.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.DepthwiseConvPerformanceMain vector det 50 100 \
+            | tee benchmark-results/det-depthwise-vector.json
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.DepthwiseConvPerformanceMain vector rec 50 100 \
+            | tee benchmark-results/rec-depthwise-vector.json
           java -Xms64m -Xmx512m -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 \
             | tee benchmark-results/full-ocr-det320.json
@@ -148,6 +166,10 @@ jobs:
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector \
             | tee benchmark-results/full-ocr-vector-det320.json
+          java -XX:+UseCompactObjectHeaders -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector \
+            | tee benchmark-results/full-ocr-vector-compact-headers-det320.json
           java -Xms64m -Xmx512m --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 1 3 320 vector 4 4 \
@@ -192,6 +214,11 @@ jobs:
           echo '### REC projection MatMul performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/rec-projection-matmul.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### REC Pointwise Conv performance (Scalar and Vector API)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/rec-pointwise-conv-scalar.json >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/rec-pointwise-conv-vector.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### REC terminal fusion performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
@@ -242,6 +269,11 @@ jobs:
           cat benchmark-results/cls-depthwise-scalar.json >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/cls-depthwise-vector.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### DET/REC 5x5 depthwise performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/det-depthwise-vector.json >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/rec-depthwise-vector.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### Full OCR performance and JVM heap (Scalar baseline, DET 320)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-det320.json >> "$GITHUB_STEP_SUMMARY"
@@ -253,6 +285,10 @@ jobs:
           echo '### Full OCR performance and JVM heap (Vector API, DET 320, REC x1)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/full-ocr-vector-det320.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Full OCR performance and JVM heap (Vector API, Compact Object Headers, DET 320)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/full-ocr-vector-compact-headers-det320.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### Full OCR performance and JVM heap (Vector API, CLS x4, REC width groups x4)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"

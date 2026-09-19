@@ -321,16 +321,29 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
 
     private static int contiguousReducedSuffix(int rank, int[] axes) {
         if (axes.length == 0) return -1;
-        boolean[] reduced = new boolean[rank];
         int first = rank;
-        for (int axisValue : axes) {
+        for (int i = 0; i < axes.length; i++) {
+            int axisValue = axes[i];
             int axis = axisValue < 0 ? axisValue + rank : axisValue;
-            if (axis < 0 || axis >= rank || reduced[axis]) return -1;
-            reduced[axis] = true;
+            if (axis < 0 || axis >= rank) return -1;
+            for (int previous = 0; previous < i; previous++) {
+                int previousAxis = axes[previous] < 0 ? axes[previous] + rank : axes[previous];
+                if (previousAxis == axis) return -1;
+            }
             first = Math.min(first, axis);
         }
         if (rank - first != axes.length) return -1;
-        for (int axis = first; axis < rank; axis++) if (!reduced[axis]) return -1;
+        for (int axis = first; axis < rank; axis++) {
+            boolean present = false;
+            for (int axisValue : axes) {
+                int normalized = axisValue < 0 ? axisValue + rank : axisValue;
+                if (normalized == axis) {
+                    present = true;
+                    break;
+                }
+            }
+            if (!present) return -1;
+        }
         return first;
     }
     @Override public void concat(float[][] inputs, int[] inputOffsets, float[] output, int outputOffset,
@@ -345,144 +358,8 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
     @Override
     public void matMul(float[] left, int leftOffset, float[] right, int rightOffset,
                        float[] output, int outputOffset, int rows, int inner, int columns) {
-        int bound = SPECIES.loopBound(columns);
-        int vectorWidth = SPECIES.length();
-        int pairedBound = columns - columns % (vectorWidth * 2);
-        int blockWidth = vectorWidth * 4;
-        int blockBound = columns - columns % blockWidth;
-        int row = 0;
-        for (; row + 3 < rows; row += 4) {
-            int leftRow0 = leftOffset + row * inner;
-            int leftRow1 = leftRow0 + inner;
-            int leftRow2 = leftRow1 + inner;
-            int leftRow3 = leftRow2 + inner;
-            int outputRow0 = outputOffset + row * columns;
-            int outputRow1 = outputRow0 + columns;
-            int outputRow2 = outputRow1 + columns;
-            int outputRow3 = outputRow2 + columns;
-            int column = 0;
-            for (; column < pairedBound; column += vectorWidth * 2) {
-                FloatVector sum00 = FloatVector.zero(SPECIES);
-                FloatVector sum01 = FloatVector.zero(SPECIES);
-                FloatVector sum10 = FloatVector.zero(SPECIES);
-                FloatVector sum11 = FloatVector.zero(SPECIES);
-                FloatVector sum20 = FloatVector.zero(SPECIES);
-                FloatVector sum21 = FloatVector.zero(SPECIES);
-                FloatVector sum30 = FloatVector.zero(SPECIES);
-                FloatVector sum31 = FloatVector.zero(SPECIES);
-                int rightRow = rightOffset + column;
-                for (int k = 0; k < inner; k++) {
-                    FloatVector values0 = FloatVector.fromArray(SPECIES, right, rightRow);
-                    FloatVector values1 = FloatVector.fromArray(
-                            SPECIES, right, rightRow + vectorWidth);
-                    float left0 = left[leftRow0 + k];
-                    float left1 = left[leftRow1 + k];
-                    float left2 = left[leftRow2 + k];
-                    float left3 = left[leftRow3 + k];
-                    sum00 = sum00.add(values0.mul(left0));
-                    sum01 = sum01.add(values1.mul(left0));
-                    sum10 = sum10.add(values0.mul(left1));
-                    sum11 = sum11.add(values1.mul(left1));
-                    sum20 = sum20.add(values0.mul(left2));
-                    sum21 = sum21.add(values1.mul(left2));
-                    sum30 = sum30.add(values0.mul(left3));
-                    sum31 = sum31.add(values1.mul(left3));
-                    rightRow += columns;
-                }
-                sum00.intoArray(output, outputRow0 + column);
-                sum01.intoArray(output, outputRow0 + column + vectorWidth);
-                sum10.intoArray(output, outputRow1 + column);
-                sum11.intoArray(output, outputRow1 + column + vectorWidth);
-                sum20.intoArray(output, outputRow2 + column);
-                sum21.intoArray(output, outputRow2 + column + vectorWidth);
-                sum30.intoArray(output, outputRow3 + column);
-                sum31.intoArray(output, outputRow3 + column + vectorWidth);
-            }
-            for (; column < bound; column += vectorWidth) {
-                FloatVector sum0 = FloatVector.zero(SPECIES);
-                FloatVector sum1 = FloatVector.zero(SPECIES);
-                FloatVector sum2 = FloatVector.zero(SPECIES);
-                FloatVector sum3 = FloatVector.zero(SPECIES);
-                int rightRow = rightOffset + column;
-                for (int k = 0; k < inner; k++) {
-                    FloatVector values = FloatVector.fromArray(SPECIES, right, rightRow);
-                    sum0 = sum0.add(values.mul(left[leftRow0 + k]));
-                    sum1 = sum1.add(values.mul(left[leftRow1 + k]));
-                    sum2 = sum2.add(values.mul(left[leftRow2 + k]));
-                    sum3 = sum3.add(values.mul(left[leftRow3 + k]));
-                    rightRow += columns;
-                }
-                sum0.intoArray(output, outputRow0 + column);
-                sum1.intoArray(output, outputRow1 + column);
-                sum2.intoArray(output, outputRow2 + column);
-                sum3.intoArray(output, outputRow3 + column);
-            }
-            for (; column < columns; column++) {
-                float sum0 = 0.0f;
-                float sum1 = 0.0f;
-                float sum2 = 0.0f;
-                float sum3 = 0.0f;
-                int rightIndex = rightOffset + column;
-                for (int k = 0; k < inner; k++) {
-                    float value = right[rightIndex];
-                    sum0 += left[leftRow0 + k] * value;
-                    sum1 += left[leftRow1 + k] * value;
-                    sum2 += left[leftRow2 + k] * value;
-                    sum3 += left[leftRow3 + k] * value;
-                    rightIndex += columns;
-                }
-                output[outputRow0 + column] = sum0;
-                output[outputRow1 + column] = sum1;
-                output[outputRow2 + column] = sum2;
-                output[outputRow3 + column] = sum3;
-            }
-        }
-        for (; row < rows; row++) {
-            int outputRow = outputOffset + row * columns;
-            int leftRow = leftOffset + row * inner;
-            int column = 0;
-            for (; column < blockBound; column += blockWidth) {
-                FloatVector sum0 = FloatVector.zero(SPECIES);
-                FloatVector sum1 = FloatVector.zero(SPECIES);
-                FloatVector sum2 = FloatVector.zero(SPECIES);
-                FloatVector sum3 = FloatVector.zero(SPECIES);
-                int rightRow = rightOffset + column;
-                for (int k = 0; k < inner; k++) {
-                    float value = left[leftRow + k];
-                    sum0 = sum0.add(FloatVector.fromArray(SPECIES, right, rightRow).mul(value));
-                    sum1 = sum1.add(FloatVector.fromArray(
-                            SPECIES, right, rightRow + vectorWidth).mul(value));
-                    sum2 = sum2.add(FloatVector.fromArray(
-                            SPECIES, right, rightRow + vectorWidth * 2).mul(value));
-                    sum3 = sum3.add(FloatVector.fromArray(
-                            SPECIES, right, rightRow + vectorWidth * 3).mul(value));
-                    rightRow += columns;
-                }
-                sum0.intoArray(output, outputRow + column);
-                sum1.intoArray(output, outputRow + column + vectorWidth);
-                sum2.intoArray(output, outputRow + column + vectorWidth * 2);
-                sum3.intoArray(output, outputRow + column + vectorWidth * 3);
-            }
-            for (; column < bound; column += SPECIES.length()) {
-                FloatVector sum = FloatVector.zero(SPECIES);
-                int rightRow = rightOffset + column;
-                for (int k = 0; k < inner; k++) {
-                    sum = sum.add(FloatVector.fromArray(SPECIES, right, rightRow)
-                            .mul(left[leftRow + k]));
-                    rightRow += columns;
-                }
-                sum.intoArray(output, outputRow + column);
-            }
-            for (; column < columns; column++) {
-                float sum = 0.0f;
-                int rightIndex = rightOffset + column;
-                for (int k = 0; k < inner; k++) {
-                    sum += left[leftRow + k] * right[rightIndex];
-                    rightIndex += columns;
-                }
-                output[outputRow + column] = sum;
-            }
-        }
+        VectorMatMulKernel.multiply(left, leftOffset, right, rightOffset,
+                output, outputOffset, rows, inner, columns, SPECIES);
     }
 
     @Override
@@ -508,59 +385,12 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                 rowScratch.length < (long) Math.min(rows, 4) * columns) {
             throw new IllegalArgumentException("projection buffers or dimensions are invalid");
         }
-        int bound = SPECIES.loopBound(columns);
         for (int rowBase = 0; rowBase < rows; rowBase += 4) {
             int blockRows = Math.min(4, rows - rowBase);
             matMul(activations, activationOffset + rowBase * inner, weights, weightOffset,
                     rowScratch, 0, blockRows, inner, columns);
-            for (int localRow = 0; localRow < blockRows; localRow++) {
-                int row = rowBase + localRow;
-                int scratchBase = localRow * columns;
-                int column = 0;
-                for (; column < bound; column += SPECIES.length()) {
-                    FloatVector.fromArray(SPECIES, rowScratch, scratchBase + column)
-                            .add(FloatVector.fromArray(SPECIES, bias, biasOffset + column))
-                            .intoArray(rowScratch, scratchBase + column);
-                }
-                for (; column < columns; column++) {
-                    rowScratch[scratchBase + column] += bias[biasOffset + column];
-                }
-
-                int best = 0;
-                float maximum = rowScratch[scratchBase];
-                if (!Float.isFinite(maximum)) {
-                    throw new IllegalArgumentException("projection contains non-finite values");
-                }
-                for (column = 1; column < columns; column++) {
-                    float value = rowScratch[scratchBase + column];
-                    if (!Float.isFinite(value)) {
-                        throw new IllegalArgumentException("projection contains non-finite values");
-                    }
-                    if (value > maximum) {
-                        maximum = value;
-                        best = column;
-                    }
-                }
-
-                FloatVector vectorSum = FloatVector.zero(SPECIES);
-                column = 0;
-                for (; column < bound; column += SPECIES.length()) {
-                    FloatVector values = FloatVector.fromArray(SPECIES, rowScratch,
-                                    scratchBase + column)
-                            .sub(maximum).lanewise(VectorOperators.EXP);
-                    values.intoArray(rowScratch, scratchBase + column);
-                    vectorSum = vectorSum.add(values);
-                }
-                float sum = vectorSum.reduceLanes(VectorOperators.ADD);
-                for (; column < columns; column++) {
-                    float value = (float) Math.exp(rowScratch[scratchBase + column] - maximum);
-                    rowScratch[scratchBase + column] = value;
-                    sum += value;
-                }
-                bestIndices[row] = best;
-                bestLogits[row] = maximum;
-                bestProbabilities[row] = rowScratch[scratchBase + best] / sum;
-            }
+            VectorProjectionArgMaxKernel.finish(rowScratch, blockRows, columns, bias, biasOffset,
+                    bestIndices, bestLogits, bestProbabilities, rowBase, SPECIES);
         }
     }
 
@@ -607,15 +437,33 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             return;
         }
         if (strideWidth == 1) {
+            // On the Tiny DET graph this shape is a large, low-channel feature
+            // map.  The vector value objects in the 16-channel kernel are not
+            // scalarized reliably on every JDK 25/AVX configuration, so the
+            // scalar kernel is both lower-allocation and competitive here.
+            // Keep the Vector path for higher-channel layers and for CLS/REC.
+            if (groups == 1 && outputChannels == 16 && channels >= 32
+                    && height >= 64 && width >= 64
+                    && kernelHeight == 3 && kernelWidth == 3 && strideHeight == 1
+                    && dilationHeight == 1 && dilationWidth == 1
+                    && padTop == 1 && padLeft == 1 && padBottom == 1 && padRight == 1
+                    && outputHeight == height && outputWidth == width) {
+                scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                        output, outputOffset, batch, channels, height, width, outputChannels,
+                        kernelHeight, kernelWidth, strideHeight, strideWidth, dilationHeight,
+                        dilationWidth, padTop, padLeft, padBottom, padRight, groups,
+                        outputHeight, outputWidth);
+                return;
+            }
             if (groups == 1 && channels >= 8 && outputChannels >= 8
                     && outputChannels % 8 == 0
                     && kernelHeight == 3 && kernelWidth == 3 && strideHeight == 1
                     && dilationHeight == 1 && dilationWidth == 1
                     && padTop == 1 && padLeft == 1 && padBottom == 1 && padRight == 1
                     && outputHeight == height && outputWidth == width && width >= 3) {
-                threeByThreeStrideOne(input, inputOffset, weights, weightOffset,
+                VectorConv3x3Kernel.strideOne(input, inputOffset, weights, weightOffset,
                         bias, biasOffset, output, outputOffset, batch, channels,
-                        height, width, outputChannels);
+                        height, width, outputChannels, SPECIES);
                 return;
             }
             if (groups == 1 && outputChannels >= 8 && outputChannels % 8 == 0
@@ -623,8 +471,9 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                     && dilationHeight == 1 && dilationWidth == 1
                     && padTop == 0 && padLeft == 0 && padBottom == 1 && padRight == 1
                     && outputHeight == height && outputWidth == width) {
-                twoByTwoStrideOne(input, inputOffset, weights, weightOffset, bias, biasOffset,
-                        output, outputOffset, batch, channels, height, width, outputChannels);
+                VectorConv2x2Kernel.strideOne(input, inputOffset, weights, weightOffset,
+                        bias, biasOffset, output, outputOffset, batch, channels, height, width,
+                        outputChannels, SPECIES);
                 return;
             }
             generalStrideOne(input, inputOffset, weights, weightOffset, bias, biasOffset,
@@ -634,17 +483,19 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             return;
         }
         if (strideWidth == 2) {
+            // REC's short feature maps are faster and create less Vector API
+            // temporary state through the generic path on current JDK 25 builds.
             if (groups == 1 && outputChannels >= 16
                     && outputChannels % 8 == 0
                     && kernelHeight == 3 && kernelWidth == 3
                     && strideHeight == 2 && dilationHeight == 1 && dilationWidth == 1
                     && padTop == 1 && padLeft == 1 && padBottom == 1 && padRight == 1
                     && outputHeight == (height + 1) / 2
-                    && outputWidth == (width + 1) / 2) {
-                threeByThreeStrideTwo(input, inputOffset, weights, weightOffset,
-                        bias, biasOffset,
-                        output, outputOffset, batch, channels, height, width, outputChannels,
-                        outputHeight, outputWidth);
+                    && outputWidth == (width + 1) / 2
+                    && !(height <= 48 && width >= 96)) {
+                VectorConv3x3Stride2Kernel.apply(input, inputOffset, weights, weightOffset,
+                        bias, biasOffset, output, outputOffset, batch, channels, height, width,
+                        outputChannels, outputHeight, outputWidth, SPECIES, STRIDE_TWO_INDEXES);
                 return;
             }
             generalStrideTwo(input, inputOffset, weights, weightOffset, bias, biasOffset,
@@ -725,445 +576,6 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                 }
             }
             output[outputRow + ow] = value;
-        }
-    }
-
-    private static void twoByTwoStrideOne(float[] input, int inputOffset, float[] weights,
-                                           int weightOffset, float[] bias, int biasOffset,
-                                           float[] output, int outputOffset, int batch,
-                                           int channels, int height, int width,
-                                           int outputChannels) {
-        int plane = height * width;
-        int fullColumnEnd = width - 1;
-        int vectorStart = fullColumnEnd >= SPECIES.length() ? 0 : fullColumnEnd;
-        int lastVectorStart = fullColumnEnd - SPECIES.length();
-        for (int n = 0; n < batch; n++) {
-            for (int outputChannel = 0; outputChannel < outputChannels;
-                 outputChannel += 8) {
-                int outputBase0 = outputOffset + (n * outputChannels + outputChannel) * plane;
-                int outputBase1 = outputBase0 + plane;
-                int outputBase2 = outputBase1 + plane;
-                int outputBase3 = outputBase2 + plane;
-                int outputBase4 = outputBase3 + plane;
-                int outputBase5 = outputBase4 + plane;
-                int outputBase6 = outputBase5 + plane;
-                int outputBase7 = outputBase6 + plane;
-                int weightBase0 = weightOffset + outputChannel * channels * 4;
-                int weightBase1 = weightBase0 + channels * 4;
-                int weightBase2 = weightBase1 + channels * 4;
-                int weightBase3 = weightBase2 + channels * 4;
-                int weightBase4 = weightBase3 + channels * 4;
-                int weightBase5 = weightBase4 + channels * 4;
-                int weightBase6 = weightBase5 + channels * 4;
-                int weightBase7 = weightBase6 + channels * 4;
-                float bias0 = bias == null ? 0.0f : bias[biasOffset + outputChannel];
-                float bias1 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 1];
-                float bias2 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 2];
-                float bias3 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 3];
-                float bias4 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 4];
-                float bias5 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 5];
-                float bias6 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 6];
-                float bias7 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 7];
-                for (int oh = 0; oh < height; oh++) {
-                    int outputRow0 = outputBase0 + oh * width;
-                    int outputRow1 = outputBase1 + oh * width;
-                    int outputRow2 = outputBase2 + oh * width;
-                    int outputRow3 = outputBase3 + oh * width;
-                    int outputRow4 = outputBase4 + oh * width;
-                    int outputRow5 = outputBase5 + oh * width;
-                    int outputRow6 = outputBase6 + oh * width;
-                    int outputRow7 = outputBase7 + oh * width;
-                    int ow = vectorStart;
-                    // Shift the final block left to cover the last non-padded column.
-                    while (ow < fullColumnEnd) {
-                        FloatVector sum0 = FloatVector.broadcast(SPECIES, bias0);
-                        FloatVector sum1 = FloatVector.broadcast(SPECIES, bias1);
-                        FloatVector sum2 = FloatVector.broadcast(SPECIES, bias2);
-                        FloatVector sum3 = FloatVector.broadcast(SPECIES, bias3);
-                        FloatVector sum4 = FloatVector.broadcast(SPECIES, bias4);
-                        FloatVector sum5 = FloatVector.broadcast(SPECIES, bias5);
-                        FloatVector sum6 = FloatVector.broadcast(SPECIES, bias6);
-                        FloatVector sum7 = FloatVector.broadcast(SPECIES, bias7);
-                        for (int ic = 0; ic < channels; ic++) {
-                            int inputBase = inputOffset + (n * channels + ic) * plane
-                                    + oh * width + ow;
-                            int kernelIndex = ic * 4;
-                            FloatVector sample = FloatVector.fromArray(SPECIES, input, inputBase);
-                            sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex]));
-                            sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex]));
-                            sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex]));
-                            sum3 = sum3.add(sample.mul(weights[weightBase3 + kernelIndex]));
-                            sum4 = sum4.add(sample.mul(weights[weightBase4 + kernelIndex]));
-                            sum5 = sum5.add(sample.mul(weights[weightBase5 + kernelIndex]));
-                            sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex]));
-                            sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex]));
-                            sample = FloatVector.fromArray(SPECIES, input, inputBase + 1);
-                            sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex + 1]));
-                            sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex + 1]));
-                            sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex + 1]));
-                            sum3 = sum3.add(sample.mul(weights[weightBase3 + kernelIndex + 1]));
-                            sum4 = sum4.add(sample.mul(weights[weightBase4 + kernelIndex + 1]));
-                            sum5 = sum5.add(sample.mul(weights[weightBase5 + kernelIndex + 1]));
-                            sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex + 1]));
-                            sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex + 1]));
-                            if (oh + 1 < height) {
-                                sample = FloatVector.fromArray(SPECIES, input,
-                                        inputBase + width);
-                                sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex + 2]));
-                                sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex + 2]));
-                                sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex + 2]));
-                                sum3 = sum3.add(sample.mul(weights[weightBase3 + kernelIndex + 2]));
-                                sum4 = sum4.add(sample.mul(weights[weightBase4 + kernelIndex + 2]));
-                                sum5 = sum5.add(sample.mul(weights[weightBase5 + kernelIndex + 2]));
-                                sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex + 2]));
-                                sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex + 2]));
-                                sample = FloatVector.fromArray(SPECIES, input,
-                                        inputBase + width + 1);
-                                sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex + 3]));
-                                sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex + 3]));
-                                sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex + 3]));
-                                sum3 = sum3.add(sample.mul(weights[weightBase3 + kernelIndex + 3]));
-                                sum4 = sum4.add(sample.mul(weights[weightBase4 + kernelIndex + 3]));
-                                sum5 = sum5.add(sample.mul(weights[weightBase5 + kernelIndex + 3]));
-                                sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex + 3]));
-                                sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex + 3]));
-                            }
-                        }
-                        sum0.intoArray(output, outputRow0 + ow);
-                        sum1.intoArray(output, outputRow1 + ow);
-                        sum2.intoArray(output, outputRow2 + ow);
-                        sum3.intoArray(output, outputRow3 + ow);
-                        sum4.intoArray(output, outputRow4 + ow);
-                        sum5.intoArray(output, outputRow5 + ow);
-                        sum6.intoArray(output, outputRow6 + ow);
-                        sum7.intoArray(output, outputRow7 + ow);
-                        if (ow == lastVectorStart) break;
-                        ow = Math.min(ow + SPECIES.length(), lastVectorStart);
-                    }
-                    twoByTwoStrideOneScalar(input, inputOffset, weights, weightOffset,
-                            bias, biasOffset, output, outputOffset, n, channels, height, width,
-                            outputChannels, outputChannel, oh, 0, vectorStart);
-                    twoByTwoStrideOneScalar(input, inputOffset, weights, weightOffset,
-                            bias, biasOffset, output, outputOffset, n, channels, height, width,
-                            outputChannels, outputChannel, oh, fullColumnEnd, width);
-                }
-            }
-        }
-    }
-
-    private static void threeByThreeStrideOne(float[] input, int inputOffset,
-                                                float[] weights, int weightOffset,
-                                                float[] bias, int biasOffset,
-                                                float[] output, int outputOffset,
-                                                int batch, int channels, int height,
-                                                int width, int outputChannels) {
-        int plane = height * width;
-        int fullColumnStart = 1;
-        int fullColumnEnd = width - 1;
-        int vectorStart = fullColumnEnd - fullColumnStart >= SPECIES.length()
-                ? fullColumnStart : fullColumnEnd;
-        int lastVectorStart = fullColumnEnd - SPECIES.length();
-        for (int n = 0; n < batch; n++) {
-            for (int outputChannel = 0; outputChannel < outputChannels;
-                 outputChannel += 8) {
-                int outputBase0 = outputOffset
-                        + (n * outputChannels + outputChannel) * plane;
-                int outputBase1 = outputBase0 + plane;
-                int outputBase2 = outputBase1 + plane;
-                int outputBase3 = outputBase2 + plane;
-                int outputBase4 = outputBase3 + plane;
-                int outputBase5 = outputBase4 + plane;
-                int outputBase6 = outputBase5 + plane;
-                int outputBase7 = outputBase6 + plane;
-                int weightBase0 = weightOffset + outputChannel * channels * 9;
-                int weightBase1 = weightBase0 + channels * 9;
-                int weightBase2 = weightBase1 + channels * 9;
-                int weightBase3 = weightBase2 + channels * 9;
-                int weightBase4 = weightBase3 + channels * 9;
-                int weightBase5 = weightBase4 + channels * 9;
-                int weightBase6 = weightBase5 + channels * 9;
-                int weightBase7 = weightBase6 + channels * 9;
-                float bias0 = bias == null ? 0.0f : bias[biasOffset + outputChannel];
-                float bias1 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 1];
-                float bias2 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 2];
-                float bias3 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 3];
-                float bias4 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 4];
-                float bias5 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 5];
-                float bias6 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 6];
-                float bias7 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 7];
-                for (int oh = 0; oh < height; oh++) {
-                    int outputRow0 = outputBase0 + oh * width;
-                    int outputRow1 = outputBase1 + oh * width;
-                    int outputRow2 = outputBase2 + oh * width;
-                    int outputRow3 = outputBase3 + oh * width;
-                    int outputRow4 = outputBase4 + oh * width;
-                    int outputRow5 = outputBase5 + oh * width;
-                    int outputRow6 = outputBase6 + oh * width;
-                    int outputRow7 = outputBase7 + oh * width;
-                    int ow = vectorStart;
-                    // Shift the final block left so only the padded edge columns are scalar.
-                    while (ow < fullColumnEnd) {
-                        FloatVector sum0 = FloatVector.broadcast(SPECIES, bias0);
-                        FloatVector sum1 = FloatVector.broadcast(SPECIES, bias1);
-                        FloatVector sum2 = FloatVector.broadcast(SPECIES, bias2);
-                        FloatVector sum3 = FloatVector.broadcast(SPECIES, bias3);
-                        FloatVector sum4 = FloatVector.broadcast(SPECIES, bias4);
-                        FloatVector sum5 = FloatVector.broadcast(SPECIES, bias5);
-                        FloatVector sum6 = FloatVector.broadcast(SPECIES, bias6);
-                        FloatVector sum7 = FloatVector.broadcast(SPECIES, bias7);
-                        for (int ic = 0; ic < channels; ic++) {
-                            int inputBase = inputOffset + (n * channels + ic) * plane;
-                            int kernelIndex = ic * 9;
-                            for (int kh = 0; kh < 3; kh++) {
-                                int ih = oh - 1 + kh;
-                                if (ih < 0 || ih >= height) continue;
-                                int inputRow = inputBase + ih * width + ow - 1;
-                                for (int kw = 0; kw < 3; kw++) {
-                                    FloatVector sample = FloatVector.fromArray(
-                                            SPECIES, input, inputRow + kw);
-                                    int weightIndex = kernelIndex + kh * 3 + kw;
-                                    sum0 = sum0.add(sample.mul(weights[weightBase0 + weightIndex]));
-                                    sum1 = sum1.add(sample.mul(weights[weightBase1 + weightIndex]));
-                                    sum2 = sum2.add(sample.mul(weights[weightBase2 + weightIndex]));
-                                    sum3 = sum3.add(sample.mul(weights[weightBase3 + weightIndex]));
-                                    sum4 = sum4.add(sample.mul(weights[weightBase4 + weightIndex]));
-                                    sum5 = sum5.add(sample.mul(weights[weightBase5 + weightIndex]));
-                                    sum6 = sum6.add(sample.mul(weights[weightBase6 + weightIndex]));
-                                    sum7 = sum7.add(sample.mul(weights[weightBase7 + weightIndex]));
-                                }
-                            }
-                        }
-                        sum0.intoArray(output, outputRow0 + ow);
-                        sum1.intoArray(output, outputRow1 + ow);
-                        sum2.intoArray(output, outputRow2 + ow);
-                        sum3.intoArray(output, outputRow3 + ow);
-                        sum4.intoArray(output, outputRow4 + ow);
-                        sum5.intoArray(output, outputRow5 + ow);
-                        sum6.intoArray(output, outputRow6 + ow);
-                        sum7.intoArray(output, outputRow7 + ow);
-                        if (ow == lastVectorStart) break;
-                        ow = Math.min(ow + SPECIES.length(), lastVectorStart);
-                    }
-                    threeByThreeStrideOneScalar(input, inputOffset, weights, weightOffset,
-                            bias, biasOffset, output, outputOffset, n, channels, height,
-                            width, outputChannels, outputChannel, oh, 0, vectorStart);
-                    threeByThreeStrideOneScalar(input, inputOffset, weights, weightOffset,
-                            bias, biasOffset, output, outputOffset, n, channels, height,
-                            width, outputChannels, outputChannel, oh, fullColumnEnd, width);
-                }
-            }
-        }
-    }
-
-    private static void threeByThreeStrideOneScalar(float[] input, int inputOffset,
-                                                      float[] weights, int weightOffset,
-                                                      float[] bias, int biasOffset,
-                                                      float[] output, int outputOffset,
-                                                      int n, int channels, int height,
-                                                      int width, int outputChannels,
-                                                      int firstOutputChannel, int oh,
-                                                      int firstColumn, int lastColumn) {
-        int plane = height * width;
-        for (int oc = 0; oc < 8; oc++) {
-            int outputChannel = firstOutputChannel + oc;
-            int outputRow = outputOffset + (n * outputChannels + outputChannel) * plane
-                    + oh * width;
-            int weightBase = weightOffset + outputChannel * channels * 9;
-            for (int ow = firstColumn; ow < lastColumn; ow++) {
-                float value = bias == null ? 0.0f : bias[biasOffset + outputChannel];
-                for (int ic = 0; ic < channels; ic++) {
-                    int inputBase = inputOffset + (n * channels + ic) * plane;
-                    int kernelBase = weightBase + ic * 9;
-                    for (int kh = 0; kh < 3; kh++) {
-                        int ih = oh - 1 + kh;
-                        if (ih < 0 || ih >= height) continue;
-                        for (int kw = 0; kw < 3; kw++) {
-                            int iw = ow - 1 + kw;
-                            if (iw < 0 || iw >= width) continue;
-                            value += input[inputBase + ih * width + iw]
-                                    * weights[kernelBase + kh * 3 + kw];
-                        }
-                    }
-                }
-                output[outputRow + ow] = value;
-            }
-        }
-    }
-
-    private static void twoByTwoStrideOneScalar(float[] input, int inputOffset,
-                                                 float[] weights, int weightOffset,
-                                                 float[] bias, int biasOffset,
-                                                 float[] output, int outputOffset,
-                                                 int n, int channels, int height, int width,
-                                                 int outputChannels, int firstOutputChannel,
-                                                 int oh, int firstColumn, int lastColumn) {
-        int plane = height * width;
-        for (int oc = 0; oc < 8; oc++) {
-            int outputChannel = firstOutputChannel + oc;
-            int outputRow = outputOffset + (n * outputChannels + outputChannel) * plane
-                    + oh * width;
-            int weightBase = weightOffset + outputChannel * channels * 4;
-            for (int ow = firstColumn; ow < lastColumn; ow++) {
-                float value = bias == null ? 0.0f : bias[biasOffset + outputChannel];
-                for (int ic = 0; ic < channels; ic++) {
-                    int inputBase = inputOffset + (n * channels + ic) * plane;
-                    int kernelBase = weightBase + ic * 4;
-                    for (int kh = 0; kh < 2; kh++) {
-                        int ih = oh + kh;
-                        if (ih >= height) continue;
-                        for (int kw = 0; kw < 2; kw++) {
-                            int iw = ow + kw;
-                            if (iw >= width) continue;
-                            value += input[inputBase + ih * width + iw]
-                                    * weights[kernelBase + kh * 2 + kw];
-                        }
-                    }
-                }
-                output[outputRow + ow] = value;
-            }
-        }
-    }
-
-    private static void threeByThreeStrideTwo(float[] input, int inputOffset, float[] weights,
-                                               int weightOffset, float[] bias, int biasOffset,
-                                               float[] output, int outputOffset, int batch,
-                                               int channels, int height, int width,
-                                               int outputChannels, int outputHeight,
-                                               int outputWidth) {
-        int inputPlane = height * width;
-        int outputPlane = outputHeight * outputWidth;
-        int fullColumnEnd = width / 2;
-        int vectorStart = fullColumnEnd > SPECIES.length() ? 1 : fullColumnEnd;
-        int lastVectorStart = fullColumnEnd - SPECIES.length();
-        for (int n = 0; n < batch; n++) {
-            for (int outputChannel = 0; outputChannel < outputChannels;
-                 outputChannel += 8) {
-                int outputBase0 = outputOffset +
-                        (n * outputChannels + outputChannel) * outputPlane;
-                int outputBase1 = outputBase0 + outputPlane;
-                int outputBase2 = outputBase1 + outputPlane;
-                int outputBase3 = outputBase2 + outputPlane;
-                int outputBase4 = outputBase3 + outputPlane;
-                int outputBase5 = outputBase4 + outputPlane;
-                int outputBase6 = outputBase5 + outputPlane;
-                int outputBase7 = outputBase6 + outputPlane;
-                int weightBase0 = weightOffset + outputChannel * channels * 9;
-                int weightBase1 = weightBase0 + channels * 9;
-                int weightBase2 = weightBase1 + channels * 9;
-                int weightBase3 = weightBase2 + channels * 9;
-                int weightBase4 = weightBase3 + channels * 9;
-                int weightBase5 = weightBase4 + channels * 9;
-                int weightBase6 = weightBase5 + channels * 9;
-                int weightBase7 = weightBase6 + channels * 9;
-                float bias0 = bias == null ? 0.0f : bias[biasOffset + outputChannel];
-                float bias1 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 1];
-                float bias2 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 2];
-                float bias3 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 3];
-                float bias4 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 4];
-                float bias5 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 5];
-                float bias6 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 6];
-                float bias7 = bias == null ? 0.0f : bias[biasOffset + outputChannel + 7];
-                for (int oh = 0; oh < outputHeight; oh++) {
-                    int outputRow0 = outputBase0 + oh * outputWidth;
-                    int outputRow1 = outputBase1 + oh * outputWidth;
-                    int outputRow2 = outputBase2 + oh * outputWidth;
-                    int outputRow3 = outputBase3 + oh * outputWidth;
-                    int outputRow4 = outputBase4 + oh * outputWidth;
-                    int outputRow5 = outputBase5 + oh * outputWidth;
-                    int outputRow6 = outputBase6 + oh * outputWidth;
-                    int outputRow7 = outputBase7 + oh * outputWidth;
-                    int ow = vectorStart;
-                    // Clamp the final block to the last fully valid column. A small overlap
-                    // avoids a scalar tail while keeping padded edge columns out of gathers.
-                    while (ow < fullColumnEnd) {
-                        FloatVector sum0 = FloatVector.broadcast(SPECIES, bias0);
-                        FloatVector sum1 = FloatVector.broadcast(SPECIES, bias1);
-                        FloatVector sum2 = FloatVector.broadcast(SPECIES, bias2);
-                        FloatVector sum3 = FloatVector.broadcast(SPECIES, bias3);
-                        FloatVector sum4 = FloatVector.broadcast(SPECIES, bias4);
-                        FloatVector sum5 = FloatVector.broadcast(SPECIES, bias5);
-                        FloatVector sum6 = FloatVector.broadcast(SPECIES, bias6);
-                        FloatVector sum7 = FloatVector.broadcast(SPECIES, bias7);
-                        for (int ic = 0; ic < channels; ic++) {
-                            int inputBase = inputOffset + (n * channels + ic) * inputPlane;
-                            int kernelBase = ic * 9;
-                            for (int kh = 0; kh < 3; kh++) {
-                                int ih = oh * 2 - 1 + kh;
-                                if (ih < 0 || ih >= height) continue;
-                                int inputRow = inputBase + ih * width + ow * 2 - 1;
-                                for (int kw = 0; kw < 3; kw++) {
-                                    FloatVector sample = FloatVector.fromArray(SPECIES, input,
-                                            inputRow + kw, STRIDE_TWO_INDEXES, 0);
-                                    int kernelIndex = kernelBase + kh * 3 + kw;
-                                    sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex]));
-                                    sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex]));
-                                    sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex]));
-                                    sum3 = sum3.add(sample.mul(weights[weightBase3 + kernelIndex]));
-                                    sum4 = sum4.add(sample.mul(weights[weightBase4 + kernelIndex]));
-                                    sum5 = sum5.add(sample.mul(weights[weightBase5 + kernelIndex]));
-                                    sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex]));
-                                    sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex]));
-                                }
-                            }
-                        }
-                        sum0.intoArray(output, outputRow0 + ow);
-                        sum1.intoArray(output, outputRow1 + ow);
-                        sum2.intoArray(output, outputRow2 + ow);
-                        sum3.intoArray(output, outputRow3 + ow);
-                        sum4.intoArray(output, outputRow4 + ow);
-                        sum5.intoArray(output, outputRow5 + ow);
-                        sum6.intoArray(output, outputRow6 + ow);
-                        sum7.intoArray(output, outputRow7 + ow);
-                        if (ow == lastVectorStart) break;
-                        ow = Math.min(ow + SPECIES.length(), lastVectorStart);
-                    }
-                    threeByThreeStrideTwoScalar(input, inputOffset, weights, weightOffset,
-                            bias, biasOffset, output, outputOffset, n, channels, height, width,
-                            outputChannels, outputHeight,
-                            outputWidth, outputChannel, oh, 0, vectorStart);
-                    threeByThreeStrideTwoScalar(input, inputOffset, weights, weightOffset,
-                            bias, biasOffset, output, outputOffset, n, channels, height, width,
-                            outputChannels, outputHeight, outputWidth, outputChannel, oh,
-                            fullColumnEnd, outputWidth);
-                }
-            }
-        }
-    }
-
-    private static void threeByThreeStrideTwoScalar(float[] input, int inputOffset,
-                                                     float[] weights, int weightOffset,
-                                                     float[] bias, int biasOffset,
-                                                     float[] output, int outputOffset,
-                                                     int n, int channels,
-                                                     int height, int width, int outputChannels,
-                                                     int outputHeight, int outputWidth,
-                                                     int firstOutputChannel, int oh,
-                                                     int firstColumn, int lastColumn) {
-        int inputPlane = height * width;
-        int outputPlane = outputHeight * outputWidth;
-        for (int oc = 0; oc < 8; oc++) {
-            int outputChannel = firstOutputChannel + oc;
-            int outputRow = outputOffset
-                    + (n * outputChannels + outputChannel) * outputPlane + oh * outputWidth;
-            int weightBase = weightOffset + outputChannel * channels * 9;
-            for (int ow = firstColumn; ow < lastColumn; ow++) {
-                float value = bias == null ? 0.0f : bias[biasOffset + outputChannel];
-                for (int ic = 0; ic < channels; ic++) {
-                    int inputBase = inputOffset + (n * channels + ic) * inputPlane;
-                    int kernelBase = weightBase + ic * 9;
-                    for (int kh = 0; kh < 3; kh++) {
-                        int ih = oh * 2 - 1 + kh;
-                        if (ih < 0 || ih >= height) continue;
-                        for (int kw = 0; kw < 3; kw++) {
-                            int iw = ow * 2 - 1 + kw;
-                            if (iw < 0 || iw >= width) continue;
-                            value += input[inputBase + ih * width + iw]
-                                    * weights[kernelBase + kh * 3 + kw];
-                        }
-                    }
-                }
-                output[outputRow + ow] = value;
-            }
         }
     }
 

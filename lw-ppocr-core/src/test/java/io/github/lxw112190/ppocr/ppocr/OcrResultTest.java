@@ -1,6 +1,8 @@
 package io.github.lxw112190.ppocr.ppocr;
 
 import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.List;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -27,6 +29,34 @@ public final class OcrResultTest {
         } catch (UnsupportedOperationException expected) {
             // expected
         }
+    }
+
+    @Test
+    public void keepsSortedLineListImmutable() {
+        OcrResult result = new OcrResult(Arrays.asList(
+                new OcrLineResult(box(5, 0), "right", 1.0f, null, false),
+                new OcrLineResult(box(0, 0), "left", 1.0f, null, false)))
+                .sorted(ReadingOrder.HORIZONTAL_LTR);
+        try {
+            result.getLines().clear();
+            Assert.fail("expected immutable sorted OCR result");
+        } catch (UnsupportedOperationException expected) {
+            // expected
+        }
+    }
+
+    @Test
+    public void internalHorizontalSortMutatesOnlyTheStagingOrder() {
+        OcrLineResult right = new OcrLineResult(box(20, 0), "右", 1.0f, null, false);
+        OcrLineResult left = new OcrLineResult(box(0, 0), "左", 1.0f, null, false);
+        List<OcrLineResult> staging = new ArrayList<OcrLineResult>();
+        staging.add(right);
+        staging.add(left);
+
+        ReadingOrder.sortLinesInPlace(staging, ReadingOrder.HORIZONTAL_LTR);
+
+        Assert.assertSame(left, staging.get(0));
+        Assert.assertSame(right, staging.get(1));
     }
 
     @Test

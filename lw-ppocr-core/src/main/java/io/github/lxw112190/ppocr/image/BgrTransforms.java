@@ -31,4 +31,33 @@ public final class BgrTransforms {
         }
         return new BgrImage(rotated, source.width(), source.height(), (int) rowBytes);
     }
+
+    /**
+     * Rotates a writable BGR image view in place. This is intended for
+     * pipeline-owned crop buffers after classification has completed.
+     */
+    public static void rotate180InPlace(BgrImage source) {
+        if (source == null) {
+            throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "source image is required");
+        }
+        byte[] pixels = source.pixels();
+        int pixelCount = source.width() * source.height();
+        for (int first = 0, last = pixelCount - 1; first < last; first++, last--) {
+            int firstRow = first / source.width();
+            int firstColumn = first - firstRow * source.width();
+            int lastRow = last / source.width();
+            int lastColumn = last - lastRow * source.width();
+            int firstOffset = source.offset() + firstRow * source.stride() + firstColumn * 3;
+            int lastOffset = source.offset() + lastRow * source.stride() + lastColumn * 3;
+            byte channel = pixels[firstOffset];
+            pixels[firstOffset] = pixels[lastOffset];
+            pixels[lastOffset] = channel;
+            channel = pixels[firstOffset + 1];
+            pixels[firstOffset + 1] = pixels[lastOffset + 1];
+            pixels[lastOffset + 1] = channel;
+            channel = pixels[firstOffset + 2];
+            pixels[firstOffset + 2] = pixels[lastOffset + 2];
+            pixels[lastOffset + 2] = channel;
+        }
+    }
 }
