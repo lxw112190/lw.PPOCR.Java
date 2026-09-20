@@ -437,23 +437,6 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             return;
         }
         if (strideWidth == 1) {
-            // On large Tiny DET feature maps, the Vector value objects in the
-            // channel-tiled kernel are not scalarized reliably on every JDK 25
-            // runner. Keep this path allocation-free until a no-allocation
-            // channel kernel is available.
-            if (groups == 1 && outputChannels == 16 && channels >= 32
-                    && height >= 64 && width >= 64
-                    && kernelHeight == 3 && kernelWidth == 3 && strideHeight == 1
-                    && dilationHeight == 1 && dilationWidth == 1
-                    && padTop == 1 && padLeft == 1 && padBottom == 1 && padRight == 1
-                    && outputHeight == height && outputWidth == width) {
-                scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
-                        output, outputOffset, batch, channels, height, width, outputChannels,
-                        kernelHeight, kernelWidth, strideHeight, strideWidth, dilationHeight,
-                        dilationWidth, padTop, padLeft, padBottom, padRight, groups,
-                        outputHeight, outputWidth);
-                return;
-            }
             if (groups == 1 && channels >= 8 && outputChannels >= 8
                     && outputChannels % 8 == 0
                     && kernelHeight == 3 && kernelWidth == 3 && strideHeight == 1
