@@ -101,6 +101,48 @@ jobs:
             | tee benchmark-results/rec-hot-kernel.jsonl
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.VectorCapabilitiesMain \
+            | tee benchmark-results/vector-capabilities.json
+          for block in 4 8 12; do
+            java -Dlwppocr.vectorBits=256 -Dlwppocr.vectorPointwiseBlock=$block \
+              --add-modules jdk.incubator.vector \
+              -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+              io.github.lxw112190.ppocr.benchmark.RecHotKernelPerformanceMain vector 30 30 pointwise \
+              | tee benchmark-results/rec-pointwise-vector256-block${block}.jsonl
+          done
+          for block in 4 8 12; do
+            java -Xms64m -Xmx512m -Dlwppocr.vectorBits=256 \
+              -Dlwppocr.vectorPointwiseBlock=$block --add-modules jdk.incubator.vector \
+              -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+              io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 10 5 320 vector auto \
+              | tee benchmark-results/full-ocr-vector256-block${block}.json
+          done
+          python scripts/compare-pointwise-blocks.py --bits 256 \
+            | tee benchmark-results/pointwise-block-comparison-256.txt
+          PREFERRED_BITS=$(python -c "import json; print(json.load(open('benchmark-results/vector-capabilities.json'))['preferred_bits'])")
+          if [ "$PREFERRED_BITS" -ge 512 ]; then
+            for block in 4 8 12; do
+              java -Dlwppocr.vectorBits=512 -Dlwppocr.vectorPointwiseBlock=$block \
+                --add-modules jdk.incubator.vector \
+                -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+                io.github.lxw112190.ppocr.benchmark.RecHotKernelPerformanceMain vector 30 30 pointwise \
+                | tee benchmark-results/rec-pointwise-vector512-block${block}.jsonl
+            done
+            for block in 4 8 12; do
+              java -Xms64m -Xmx512m -Dlwppocr.vectorBits=512 \
+                -Dlwppocr.vectorPointwiseBlock=$block --add-modules jdk.incubator.vector \
+                -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+                io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain 10 5 320 vector auto \
+                | tee benchmark-results/full-ocr-vector512-block${block}.json
+            done
+            python scripts/compare-pointwise-blocks.py --bits 512 \
+              | tee benchmark-results/pointwise-block-comparison-512.txt
+          else
+            echo "preferred Vector species is ${PREFERRED_BITS}-bit; skipping fixed 512-bit matrix" \
+              | tee benchmark-results/pointwise-block-comparison-512.txt
+          fi
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.ProjectionArgMaxPerformanceMain vector \
             | tee benchmark-results/rec-projection-argmax.json
           for cpu in 1 2 4 8; do
@@ -230,6 +272,20 @@ jobs:
           echo '```jsonl' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/rec-hot-kernel.jsonl >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Vector API capabilities' >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/vector-capabilities.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### Pointwise output-block comparison (fixed 256-bit species)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/pointwise-block-comparison-256.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          if [ -f benchmark-results/pointwise-block-summary-512.json ]; then
+            echo '### Pointwise output-block comparison (fixed 512-bit species)' >> "$GITHUB_STEP_SUMMARY"
+            echo '```text' >> "$GITHUB_STEP_SUMMARY"
+            cat benchmark-results/pointwise-block-comparison-512.txt >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
           echo '### REC terminal fusion performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/rec-projection-argmax.json >> "$GITHUB_STEP_SUMMARY"

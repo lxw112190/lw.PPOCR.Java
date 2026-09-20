@@ -49,6 +49,9 @@ All notable changes to this project are documented in this file.
   filters for focused kernel experiments.
 - Added the experimental \`lwppocr.vectorPointwiseBlock\` property for
   pointwise block 4/8/12 comparisons; the default remains block 12.
+- Added fixed-species pointwise block matrices, Vector API capability reporting,
+  and an eligibility-gated comparison summary for 256-bit and (when supported)
+  512-bit CI hosts; experimental results never change the production default.
 
 ### Changed
 

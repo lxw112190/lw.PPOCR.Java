@@ -16,19 +16,26 @@ final class VectorPointwiseKernel {
     private static final int OUTPUT_BLOCK = configuredOutputBlock();
 
     private static int configuredOutputBlock() {
-        String value = System.getProperty(BLOCK_PROPERTY, "12");
+        String value = System.getProperty(BLOCK_PROPERTY, "auto");
+        if ("auto".equalsIgnoreCase(value)) return defaultOutputBlock();
         final int block;
         try {
             block = Integer.parseInt(value);
         } catch (NumberFormatException ex) {
-            throw new IllegalArgumentException(BLOCK_PROPERTY + " must be 4, 8 or 12", ex);
+            throw new IllegalArgumentException(BLOCK_PROPERTY + " must be auto, 4, 8 or 12", ex);
         }
         return validateOutputBlock(block);
     }
 
+    private static int defaultOutputBlock() {
+        // Keep the production default stable until a fixed-species CI matrix proves
+        // that another block is consistently better across the full OCR pipeline.
+        return 12;
+    }
+
     private static int validateOutputBlock(int block) {
         if (block != 4 && block != 8 && block != 12) {
-            throw new IllegalArgumentException(BLOCK_PROPERTY + " must be 4, 8 or 12");
+            throw new IllegalArgumentException(BLOCK_PROPERTY + " must be auto, 4, 8 or 12");
         }
         return block;
     }

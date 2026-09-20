@@ -58,7 +58,7 @@ public final class RecHotKernelPerformanceMain {
         String vectorBits = "vector".equals(backendName)
                 ? System.getProperty("lwppocr.vectorBits", "preferred") : "n/a";
         String pointwiseBlock = "vector".equals(backendName)
-                ? System.getProperty("lwppocr.vectorPointwiseBlock", "default") : "n/a";
+                ? System.getProperty("lwppocr.vectorPointwiseBlock", "auto") : "n/a";
         System.out.printf(Locale.ROOT,
                 "{\"benchmark\":\"rec-hot-kernel\",\"backend\":\"%s\","
                         + "\"vector_bits\":\"%s\",\"pointwise_block\":\"%s\","

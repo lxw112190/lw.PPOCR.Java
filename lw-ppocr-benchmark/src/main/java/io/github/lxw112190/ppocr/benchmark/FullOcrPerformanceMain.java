@@ -130,9 +130,11 @@ public final class FullOcrPerformanceMain {
                     ? "full-ocr-default" : "full-ocr-det" + detectorLimit;
             String profileScope = "stable-live-threads";
             String vectorBits = vectorBitsSetting(backendName);
+            String pointwiseBlock = pointwiseBlockSetting(backendName);
             System.out.printf(Locale.ROOT,
                     "{\"schema\":5,\"benchmark\":\"%s\",\"backend\":\"%s\","
                             + "\"vector_bits\":\"%s\","
+                            + "\"pointwise_block\":\"%s\","
                             + "\"features\":{\"rec_projection_fusion\":%s,"
                             + "\"auto_parallelism\":%s},"
                             + "\"parallelism_policy\":\"%s\","
@@ -176,7 +178,7 @@ public final class FullOcrPerformanceMain {
                             + "\"rotation\":%d,\"recognition\":%d,\"sorting\":%d},"
                             + "\"operators\":%s,"
                             + "\"stage_operators\":%s,\"stage_hot_nodes\":%s}%n",
-                    benchmark, backendName, vectorBits,
+                    benchmark, backendName, vectorBits, pointwiseBlock,
                     Boolean.toString(pipeline.isProjectionFusionActive()),
                     Boolean.toString(automaticParallelism), parallelismPolicy,
                     classificationParallelism,
@@ -233,6 +235,11 @@ public final class FullOcrPerformanceMain {
             return value;
         }
         return "unknown";
+    }
+
+    private static String pointwiseBlockSetting(String backendName) {
+        if (!"vector".equals(backendName)) return "n/a";
+        return System.getProperty("lwppocr.vectorPointwiseBlock", "auto");
     }
 
     private static ProfiledPipeline loadPipeline(int detectorLimit, KernelBackend backend,
