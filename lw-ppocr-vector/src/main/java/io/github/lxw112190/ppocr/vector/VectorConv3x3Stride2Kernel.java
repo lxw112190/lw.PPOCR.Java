@@ -5,18 +5,28 @@ import jdk.incubator.vector.VectorSpecies;
 
 /** Vector microkernel for the common 3x3, same-padding, stride-two convolution. */
 final class VectorConv3x3Stride2Kernel {
+    private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
+    private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
+
     private VectorConv3x3Stride2Kernel() { }
+
+    private static int[] strideIndexes(int stride) {
+        int[] indexes = new int[SPECIES.length()];
+        for (int i = 0; i < indexes.length; i++) {
+            indexes[i] = i * stride;
+        }
+        return indexes;
+    }
 
     static void apply(float[] input, int inputOffset, float[] weights, int weightOffset,
                       float[] bias, int biasOffset, float[] output, int outputOffset,
                       int batch, int channels, int height, int width, int outputChannels,
-                      int outputHeight, int outputWidth, VectorSpecies<Float> species,
-                      int[] strideIndexes) {
+                      int outputHeight, int outputWidth) {
         int inputPlane = height * width;
         int outputPlane = outputHeight * outputWidth;
         int fullColumnEnd = width / 2;
-        int vectorStart = fullColumnEnd > species.length() ? 1 : fullColumnEnd;
-        int lastVectorStart = fullColumnEnd - species.length();
+        int vectorStart = fullColumnEnd > SPECIES.length() ? 1 : fullColumnEnd;
+        int lastVectorStart = fullColumnEnd - SPECIES.length();
         for (int n = 0; n < batch; n++) {
             for (int outputChannel = 0; outputChannel < outputChannels; outputChannel += 8) {
                 int outputBase0 = outputOffset
@@ -56,14 +66,14 @@ final class VectorConv3x3Stride2Kernel {
                     int ow = vectorStart;
                     // Keep padded edge columns on the scalar path.
                     while (ow < fullColumnEnd) {
-                        FloatVector sum0 = FloatVector.broadcast(species, bias0);
-                        FloatVector sum1 = FloatVector.broadcast(species, bias1);
-                        FloatVector sum2 = FloatVector.broadcast(species, bias2);
-                        FloatVector sum3 = FloatVector.broadcast(species, bias3);
-                        FloatVector sum4 = FloatVector.broadcast(species, bias4);
-                        FloatVector sum5 = FloatVector.broadcast(species, bias5);
-                        FloatVector sum6 = FloatVector.broadcast(species, bias6);
-                        FloatVector sum7 = FloatVector.broadcast(species, bias7);
+                        FloatVector sum0 = FloatVector.broadcast(SPECIES, bias0);
+                        FloatVector sum1 = FloatVector.broadcast(SPECIES, bias1);
+                        FloatVector sum2 = FloatVector.broadcast(SPECIES, bias2);
+                        FloatVector sum3 = FloatVector.broadcast(SPECIES, bias3);
+                        FloatVector sum4 = FloatVector.broadcast(SPECIES, bias4);
+                        FloatVector sum5 = FloatVector.broadcast(SPECIES, bias5);
+                        FloatVector sum6 = FloatVector.broadcast(SPECIES, bias6);
+                        FloatVector sum7 = FloatVector.broadcast(SPECIES, bias7);
                         for (int ic = 0; ic < channels; ic++) {
                             int inputBase = inputOffset + (n * channels + ic) * inputPlane;
                             int kernelBase = ic * 9;
@@ -73,7 +83,7 @@ final class VectorConv3x3Stride2Kernel {
                                 int inputRow = inputBase + ih * width + ow * 2 - 1;
                                 for (int kw = 0; kw < 3; kw++) {
                                     FloatVector sample = FloatVector.fromArray(
-                                            species, input, inputRow + kw, strideIndexes, 0);
+                                            SPECIES, input, inputRow + kw, STRIDE_TWO_INDEXES, 0);
                                     int kernelIndex = kernelBase + kh * 3 + kw;
                                     sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex]));
                                     sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex]));
@@ -95,7 +105,7 @@ final class VectorConv3x3Stride2Kernel {
                         sum6.intoArray(output, outputRow6 + ow);
                         sum7.intoArray(output, outputRow7 + ow);
                         if (ow == lastVectorStart) break;
-                        ow = Math.min(ow + species.length(), lastVectorStart);
+                        ow = Math.min(ow + SPECIES.length(), lastVectorStart);
                     }
                     scalarEdge(input, inputOffset, weights, weightOffset, bias, biasOffset,
                             output, outputOffset, n, channels, height, width, outputChannels,

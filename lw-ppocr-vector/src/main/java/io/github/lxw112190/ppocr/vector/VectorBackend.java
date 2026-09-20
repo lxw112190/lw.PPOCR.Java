@@ -359,7 +359,7 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
     public void matMul(float[] left, int leftOffset, float[] right, int rightOffset,
                        float[] output, int outputOffset, int rows, int inner, int columns) {
         VectorMatMulKernel.multiply(left, leftOffset, right, rightOffset,
-                output, outputOffset, rows, inner, columns, SPECIES);
+                output, outputOffset, rows, inner, columns);
     }
 
     @Override
@@ -390,7 +390,7 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             matMul(activations, activationOffset + rowBase * inner, weights, weightOffset,
                     rowScratch, 0, blockRows, inner, columns);
             VectorProjectionArgMaxKernel.finish(rowScratch, blockRows, columns, bias, biasOffset,
-                    bestIndices, bestLogits, bestProbabilities, rowBase, SPECIES);
+                    bestIndices, bestLogits, bestProbabilities, rowBase);
         }
     }
 
@@ -463,7 +463,7 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                     && outputHeight == height && outputWidth == width && width >= 3) {
                 VectorConv3x3Kernel.strideOne(input, inputOffset, weights, weightOffset,
                         bias, biasOffset, output, outputOffset, batch, channels,
-                        height, width, outputChannels, SPECIES);
+                        height, width, outputChannels);
                 return;
             }
             if (groups == 1 && outputChannels >= 8 && outputChannels % 8 == 0
@@ -473,7 +473,7 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                     && outputHeight == height && outputWidth == width) {
                 VectorConv2x2Kernel.strideOne(input, inputOffset, weights, weightOffset,
                         bias, biasOffset, output, outputOffset, batch, channels, height, width,
-                        outputChannels, SPECIES);
+                        outputChannels);
                 return;
             }
             generalStrideOne(input, inputOffset, weights, weightOffset, bias, biasOffset,
@@ -495,7 +495,7 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                     && !(height <= 48 && width >= 96)) {
                 VectorConv3x3Stride2Kernel.apply(input, inputOffset, weights, weightOffset,
                         bias, biasOffset, output, outputOffset, batch, channels, height, width,
-                        outputChannels, outputHeight, outputWidth, SPECIES, STRIDE_TWO_INDEXES);
+                        outputChannels, outputHeight, outputWidth);
                 return;
             }
             generalStrideTwo(input, inputOffset, weights, weightOffset, bias, biasOffset,

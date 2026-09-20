@@ -6,19 +6,21 @@ import jdk.incubator.vector.VectorSpecies;
 
 /** Finishes a small batch of dense projection rows without materializing softmax output. */
 final class VectorProjectionArgMaxKernel {
+    private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
+
     private VectorProjectionArgMaxKernel() { }
 
     static void finish(float[] rowScratch, int rows, int columns, float[] bias, int biasOffset,
                        int[] bestIndices, float[] bestLogits, float[] bestProbabilities,
-                       int rowOffset, VectorSpecies<Float> species) {
-        int bound = species.loopBound(columns);
+                       int rowOffset) {
+        int bound = SPECIES.loopBound(columns);
         for (int localRow = 0; localRow < rows; localRow++) {
             int row = rowOffset + localRow;
             int scratchBase = localRow * columns;
             int column = 0;
-            for (; column < bound; column += species.length()) {
-                FloatVector.fromArray(species, rowScratch, scratchBase + column)
-                        .add(FloatVector.fromArray(species, bias, biasOffset + column))
+            for (; column < bound; column += SPECIES.length()) {
+                FloatVector.fromArray(SPECIES, rowScratch, scratchBase + column)
+                        .add(FloatVector.fromArray(SPECIES, bias, biasOffset + column))
                         .intoArray(rowScratch, scratchBase + column);
             }
             for (; column < columns; column++) {
@@ -41,10 +43,10 @@ final class VectorProjectionArgMaxKernel {
                 }
             }
 
-            FloatVector vectorSum = FloatVector.zero(species);
+            FloatVector vectorSum = FloatVector.zero(SPECIES);
             column = 0;
-            for (; column < bound; column += species.length()) {
-                FloatVector values = FloatVector.fromArray(species,
+            for (; column < bound; column += SPECIES.length()) {
+                FloatVector values = FloatVector.fromArray(SPECIES,
                                 rowScratch, scratchBase + column)
                         .sub(maximum).lanewise(VectorOperators.EXP);
                 vectorSum = vectorSum.add(values);

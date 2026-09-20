@@ -5,18 +5,19 @@ import jdk.incubator.vector.VectorSpecies;
 
 /** Vector microkernel for the common 3x3, same-padding, unit-stride convolution. */
 final class VectorConv3x3Kernel {
+    private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
+
     private VectorConv3x3Kernel() { }
 
     static void strideOne(float[] input, int inputOffset, float[] weights, int weightOffset,
                           float[] bias, int biasOffset, float[] output, int outputOffset,
-                          int batch, int channels, int height, int width, int outputChannels,
-                          VectorSpecies<Float> species) {
+                          int batch, int channels, int height, int width, int outputChannels) {
         int plane = height * width;
         int fullColumnStart = 1;
         int fullColumnEnd = width - 1;
-        int vectorStart = fullColumnEnd - fullColumnStart >= species.length()
+        int vectorStart = fullColumnEnd - fullColumnStart >= SPECIES.length()
                 ? fullColumnStart : fullColumnEnd;
-        int lastVectorStart = fullColumnEnd - species.length();
+        int lastVectorStart = fullColumnEnd - SPECIES.length();
         for (int n = 0; n < batch; n++) {
             for (int outputChannel = 0; outputChannel < outputChannels; outputChannel += 8) {
                 int outputBase0 = outputOffset + (n * outputChannels + outputChannel) * plane;
@@ -55,14 +56,14 @@ final class VectorConv3x3Kernel {
                     int ow = vectorStart;
                     // Shift the final block left so only padded edge columns are scalar.
                     while (ow < fullColumnEnd) {
-                        FloatVector sum0 = FloatVector.broadcast(species, bias0);
-                        FloatVector sum1 = FloatVector.broadcast(species, bias1);
-                        FloatVector sum2 = FloatVector.broadcast(species, bias2);
-                        FloatVector sum3 = FloatVector.broadcast(species, bias3);
-                        FloatVector sum4 = FloatVector.broadcast(species, bias4);
-                        FloatVector sum5 = FloatVector.broadcast(species, bias5);
-                        FloatVector sum6 = FloatVector.broadcast(species, bias6);
-                        FloatVector sum7 = FloatVector.broadcast(species, bias7);
+                        FloatVector sum0 = FloatVector.broadcast(SPECIES, bias0);
+                        FloatVector sum1 = FloatVector.broadcast(SPECIES, bias1);
+                        FloatVector sum2 = FloatVector.broadcast(SPECIES, bias2);
+                        FloatVector sum3 = FloatVector.broadcast(SPECIES, bias3);
+                        FloatVector sum4 = FloatVector.broadcast(SPECIES, bias4);
+                        FloatVector sum5 = FloatVector.broadcast(SPECIES, bias5);
+                        FloatVector sum6 = FloatVector.broadcast(SPECIES, bias6);
+                        FloatVector sum7 = FloatVector.broadcast(SPECIES, bias7);
                         for (int ic = 0; ic < channels; ic++) {
                             int inputBase = inputOffset + (n * channels + ic) * plane;
                             int kernelIndex = ic * 9;
@@ -72,7 +73,7 @@ final class VectorConv3x3Kernel {
                                 int inputRow = inputBase + ih * width + ow - 1;
                                 for (int kw = 0; kw < 3; kw++) {
                                     FloatVector sample = FloatVector.fromArray(
-                                            species, input, inputRow + kw);
+                                            SPECIES, input, inputRow + kw);
                                     int weightIndex = kernelIndex + kh * 3 + kw;
                                     sum0 = sum0.add(sample.mul(weights[weightBase0 + weightIndex]));
                                     sum1 = sum1.add(sample.mul(weights[weightBase1 + weightIndex]));
@@ -94,7 +95,7 @@ final class VectorConv3x3Kernel {
                         sum6.intoArray(output, outputRow6 + ow);
                         sum7.intoArray(output, outputRow7 + ow);
                         if (ow == lastVectorStart) break;
-                        ow = Math.min(ow + species.length(), lastVectorStart);
+                        ow = Math.min(ow + SPECIES.length(), lastVectorStart);
                     }
                     scalarEdge(input, inputOffset, weights, weightOffset, bias, biasOffset,
                             output, outputOffset, n, channels, height, width, outputChannels,

@@ -5,13 +5,14 @@ import jdk.incubator.vector.VectorSpecies;
 
 /** Vector microkernel for row-major matrix multiplication. */
 final class VectorMatMulKernel {
+    private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
+
     private VectorMatMulKernel() { }
 
     static void multiply(float[] left, int leftOffset, float[] right, int rightOffset,
-                         float[] output, int outputOffset, int rows, int inner, int columns,
-                         VectorSpecies<Float> species) {
-        int bound = species.loopBound(columns);
-        int vectorWidth = species.length();
+                         float[] output, int outputOffset, int rows, int inner, int columns) {
+        int bound = SPECIES.loopBound(columns);
+        int vectorWidth = SPECIES.length();
         int pairedBound = columns - columns % (vectorWidth * 2);
         int blockWidth = vectorWidth * 4;
         int blockBound = columns - columns % blockWidth;
@@ -27,19 +28,19 @@ final class VectorMatMulKernel {
             int outputRow3 = outputRow2 + columns;
             int column = 0;
             for (; column < pairedBound; column += vectorWidth * 2) {
-                FloatVector sum00 = FloatVector.zero(species);
-                FloatVector sum01 = FloatVector.zero(species);
-                FloatVector sum10 = FloatVector.zero(species);
-                FloatVector sum11 = FloatVector.zero(species);
-                FloatVector sum20 = FloatVector.zero(species);
-                FloatVector sum21 = FloatVector.zero(species);
-                FloatVector sum30 = FloatVector.zero(species);
-                FloatVector sum31 = FloatVector.zero(species);
+                FloatVector sum00 = FloatVector.zero(SPECIES);
+                FloatVector sum01 = FloatVector.zero(SPECIES);
+                FloatVector sum10 = FloatVector.zero(SPECIES);
+                FloatVector sum11 = FloatVector.zero(SPECIES);
+                FloatVector sum20 = FloatVector.zero(SPECIES);
+                FloatVector sum21 = FloatVector.zero(SPECIES);
+                FloatVector sum30 = FloatVector.zero(SPECIES);
+                FloatVector sum31 = FloatVector.zero(SPECIES);
                 int rightRow = rightOffset + column;
                 for (int k = 0; k < inner; k++) {
-                    FloatVector values0 = FloatVector.fromArray(species, right, rightRow);
+                    FloatVector values0 = FloatVector.fromArray(SPECIES, right, rightRow);
                     FloatVector values1 = FloatVector.fromArray(
-                            species, right, rightRow + vectorWidth);
+                            SPECIES, right, rightRow + vectorWidth);
                     float left0 = left[leftRow0 + k];
                     float left1 = left[leftRow1 + k];
                     float left2 = left[leftRow2 + k];
@@ -64,13 +65,13 @@ final class VectorMatMulKernel {
                 sum31.intoArray(output, outputRow3 + column + vectorWidth);
             }
             for (; column < bound; column += vectorWidth) {
-                FloatVector sum0 = FloatVector.zero(species);
-                FloatVector sum1 = FloatVector.zero(species);
-                FloatVector sum2 = FloatVector.zero(species);
-                FloatVector sum3 = FloatVector.zero(species);
+                FloatVector sum0 = FloatVector.zero(SPECIES);
+                FloatVector sum1 = FloatVector.zero(SPECIES);
+                FloatVector sum2 = FloatVector.zero(SPECIES);
+                FloatVector sum3 = FloatVector.zero(SPECIES);
                 int rightRow = rightOffset + column;
                 for (int k = 0; k < inner; k++) {
-                    FloatVector values = FloatVector.fromArray(species, right, rightRow);
+                    FloatVector values = FloatVector.fromArray(SPECIES, right, rightRow);
                     sum0 = sum0.add(values.mul(left[leftRow0 + k]));
                     sum1 = sum1.add(values.mul(left[leftRow1 + k]));
                     sum2 = sum2.add(values.mul(left[leftRow2 + k]));
@@ -107,20 +108,20 @@ final class VectorMatMulKernel {
             int leftRow = leftOffset + row * inner;
             int column = 0;
             for (; column < blockBound; column += blockWidth) {
-                FloatVector sum0 = FloatVector.zero(species);
-                FloatVector sum1 = FloatVector.zero(species);
-                FloatVector sum2 = FloatVector.zero(species);
-                FloatVector sum3 = FloatVector.zero(species);
+                FloatVector sum0 = FloatVector.zero(SPECIES);
+                FloatVector sum1 = FloatVector.zero(SPECIES);
+                FloatVector sum2 = FloatVector.zero(SPECIES);
+                FloatVector sum3 = FloatVector.zero(SPECIES);
                 int rightRow = rightOffset + column;
                 for (int k = 0; k < inner; k++) {
                     float value = left[leftRow + k];
-                    sum0 = sum0.add(FloatVector.fromArray(species, right, rightRow).mul(value));
+                    sum0 = sum0.add(FloatVector.fromArray(SPECIES, right, rightRow).mul(value));
                     sum1 = sum1.add(FloatVector.fromArray(
-                            species, right, rightRow + vectorWidth).mul(value));
+                            SPECIES, right, rightRow + vectorWidth).mul(value));
                     sum2 = sum2.add(FloatVector.fromArray(
-                            species, right, rightRow + vectorWidth * 2).mul(value));
+                            SPECIES, right, rightRow + vectorWidth * 2).mul(value));
                     sum3 = sum3.add(FloatVector.fromArray(
-                            species, right, rightRow + vectorWidth * 3).mul(value));
+                            SPECIES, right, rightRow + vectorWidth * 3).mul(value));
                     rightRow += columns;
                 }
                 sum0.intoArray(output, outputRow + column);
@@ -129,10 +130,10 @@ final class VectorMatMulKernel {
                 sum3.intoArray(output, outputRow + column + vectorWidth * 3);
             }
             for (; column < bound; column += vectorWidth) {
-                FloatVector sum = FloatVector.zero(species);
+                FloatVector sum = FloatVector.zero(SPECIES);
                 int rightRow = rightOffset + column;
                 for (int k = 0; k < inner; k++) {
-                    sum = sum.add(FloatVector.fromArray(species, right, rightRow)
+                    sum = sum.add(FloatVector.fromArray(SPECIES, right, rightRow)
                             .mul(left[leftRow + k]));
                     rightRow += columns;
                 }

@@ -5,16 +5,17 @@ import jdk.incubator.vector.VectorSpecies;
 
 /** Vector microkernel for the common 2x2, bottom/right-padded convolution. */
 final class VectorConv2x2Kernel {
+    private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
+
     private VectorConv2x2Kernel() { }
 
     static void strideOne(float[] input, int inputOffset, float[] weights, int weightOffset,
                           float[] bias, int biasOffset, float[] output, int outputOffset,
-                          int batch, int channels, int height, int width, int outputChannels,
-                          VectorSpecies<Float> species) {
+                          int batch, int channels, int height, int width, int outputChannels) {
         int plane = height * width;
         int fullColumnEnd = width - 1;
-        int vectorStart = fullColumnEnd >= species.length() ? 0 : fullColumnEnd;
-        int lastVectorStart = fullColumnEnd - species.length();
+        int vectorStart = fullColumnEnd >= SPECIES.length() ? 0 : fullColumnEnd;
+        int lastVectorStart = fullColumnEnd - SPECIES.length();
         for (int n = 0; n < batch; n++) {
             for (int outputChannel = 0; outputChannel < outputChannels; outputChannel += 8) {
                 int outputBase0 = outputOffset + (n * outputChannels + outputChannel) * plane;
@@ -52,19 +53,19 @@ final class VectorConv2x2Kernel {
                     int outputRow7 = outputBase7 + oh * width;
                     int ow = vectorStart;
                     while (ow < fullColumnEnd) {
-                        FloatVector sum0 = FloatVector.broadcast(species, bias0);
-                        FloatVector sum1 = FloatVector.broadcast(species, bias1);
-                        FloatVector sum2 = FloatVector.broadcast(species, bias2);
-                        FloatVector sum3 = FloatVector.broadcast(species, bias3);
-                        FloatVector sum4 = FloatVector.broadcast(species, bias4);
-                        FloatVector sum5 = FloatVector.broadcast(species, bias5);
-                        FloatVector sum6 = FloatVector.broadcast(species, bias6);
-                        FloatVector sum7 = FloatVector.broadcast(species, bias7);
+                        FloatVector sum0 = FloatVector.broadcast(SPECIES, bias0);
+                        FloatVector sum1 = FloatVector.broadcast(SPECIES, bias1);
+                        FloatVector sum2 = FloatVector.broadcast(SPECIES, bias2);
+                        FloatVector sum3 = FloatVector.broadcast(SPECIES, bias3);
+                        FloatVector sum4 = FloatVector.broadcast(SPECIES, bias4);
+                        FloatVector sum5 = FloatVector.broadcast(SPECIES, bias5);
+                        FloatVector sum6 = FloatVector.broadcast(SPECIES, bias6);
+                        FloatVector sum7 = FloatVector.broadcast(SPECIES, bias7);
                         for (int ic = 0; ic < channels; ic++) {
                             int inputBase = inputOffset + (n * channels + ic) * plane
                                     + oh * width + ow;
                             int kernelIndex = ic * 4;
-                            FloatVector sample = FloatVector.fromArray(species, input, inputBase);
+                            FloatVector sample = FloatVector.fromArray(SPECIES, input, inputBase);
                             sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex]));
                             sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex]));
                             sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex]));
@@ -73,7 +74,7 @@ final class VectorConv2x2Kernel {
                             sum5 = sum5.add(sample.mul(weights[weightBase5 + kernelIndex]));
                             sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex]));
                             sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex]));
-                            sample = FloatVector.fromArray(species, input, inputBase + 1);
+                            sample = FloatVector.fromArray(SPECIES, input, inputBase + 1);
                             sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex + 1]));
                             sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex + 1]));
                             sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex + 1]));
@@ -83,7 +84,7 @@ final class VectorConv2x2Kernel {
                             sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex + 1]));
                             sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex + 1]));
                             if (oh + 1 < height) {
-                                sample = FloatVector.fromArray(species, input, inputBase + width);
+                                sample = FloatVector.fromArray(SPECIES, input, inputBase + width);
                                 sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex + 2]));
                                 sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex + 2]));
                                 sum2 = sum2.add(sample.mul(weights[weightBase2 + kernelIndex + 2]));
@@ -92,7 +93,7 @@ final class VectorConv2x2Kernel {
                                 sum5 = sum5.add(sample.mul(weights[weightBase5 + kernelIndex + 2]));
                                 sum6 = sum6.add(sample.mul(weights[weightBase6 + kernelIndex + 2]));
                                 sum7 = sum7.add(sample.mul(weights[weightBase7 + kernelIndex + 2]));
-                                sample = FloatVector.fromArray(species, input,
+                                sample = FloatVector.fromArray(SPECIES, input,
                                         inputBase + width + 1);
                                 sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex + 3]));
                                 sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex + 3]));
@@ -113,7 +114,7 @@ final class VectorConv2x2Kernel {
                         sum6.intoArray(output, outputRow6 + ow);
                         sum7.intoArray(output, outputRow7 + ow);
                         if (ow == lastVectorStart) break;
-                        ow = Math.min(ow + species.length(), lastVectorStart);
+                        ow = Math.min(ow + SPECIES.length(), lastVectorStart);
                     }
                     scalarEdge(input, inputOffset, weights, weightOffset, bias, biasOffset,
                             output, outputOffset, n, channels, height, width, outputChannels,
