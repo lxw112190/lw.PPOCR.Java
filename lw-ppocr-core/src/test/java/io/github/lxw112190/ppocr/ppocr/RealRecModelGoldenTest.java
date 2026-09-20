@@ -97,6 +97,7 @@ public final class RealRecModelGoldenTest {
                      CtcProjectionSession compact = CtcProjectionSession.tryCreate(
                              model, shapes, new ScalarBackend(), CLASS_COUNT)) {
                     Assert.assertNotNull("fusion must support width=" + width, compact);
+                    Assert.assertEquals(80L * CLASS_COUNT * Float.BYTES, compact.getPackedWeightBytes());
                     int timeSteps = compact.getTimeSteps();
                     float[] input = new float[3 * 48 * width];
                     for (int i = 0; i < input.length; i++) {

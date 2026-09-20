@@ -22,6 +22,7 @@ final class CompiledModel {
     private final int[][] nodeOutputs;
     private final ByteBuffer[] parameters;
     private final ConstantTensor[] constants;
+    private final PreparedMatMulWeights[] preparedMatMulWeights;
     private final int[] tensorConsumerCounts;
     private final int[] tensorLastUses;
 
@@ -38,6 +39,7 @@ final class CompiledModel {
             parameters[i] = model.parameterData(i);
         }
         this.constants = prepareConstants(model);
+        this.preparedMatMulWeights = new PreparedMatMulWeights[constants.length];
         this.tensorConsumerCounts = new int[model.getTensors().size()];
         this.tensorLastUses = new int[tensorConsumerCounts.length];
         Arrays.fill(tensorLastUses, -1);
@@ -78,6 +80,47 @@ final class CompiledModel {
     ByteBuffer constantRaw(int tensorIndex) {
         ConstantTensor constant = constants[tensorIndex];
         return constant == null ? null : constant.raw();
+    }
+
+    PreparedMatMulWeights preparedMatMulWeights(int tensorIndex, int inner, int columns) {
+        if (tensorIndex < 0 || tensorIndex >= constants.length || inner <= 0 || columns <= 0) {
+            throw new IllegalArgumentException("prepared MatMul weight request is invalid");
+        }
+        PreparedMatMulWeights value = preparedMatMulWeights[tensorIndex];
+        if (value != null) {
+            verifyPreparedMatMulShape(value, inner, columns, tensorIndex);
+            return value;
+        }
+        synchronized (this) {
+            value = preparedMatMulWeights[tensorIndex];
+            if (value == null) {
+                ConstantTensor constant = constants[tensorIndex];
+                if (constant == null) {
+                    throw new IllegalArgumentException(
+                            "MatMul weight tensor is not constant: " + tensorIndex);
+                }
+                value = PreparedMatMulWeights.fromLittleEndian(constant.raw(), inner, columns);
+                preparedMatMulWeights[tensorIndex] = value;
+            }
+            verifyPreparedMatMulShape(value, inner, columns, tensorIndex);
+            return value;
+        }
+    }
+
+    long preparedMatMulWeightBytes() {
+        long total = 0L;
+        for (PreparedMatMulWeights value : preparedMatMulWeights) {
+            if (value != null) total += value.packedBytes();
+        }
+        return total;
+    }
+
+    private static void verifyPreparedMatMulShape(PreparedMatMulWeights value, int inner,
+                                                   int columns, int tensorIndex) {
+        if (value.getInner() != inner || value.getColumns() != columns) {
+            throw new IllegalStateException(
+                    "prepared MatMul weight shape changed for tensor " + tensorIndex);
+        }
     }
     boolean isConstantMaterialized(int tensorIndex) {
         ConstantTensor constant = constants[tensorIndex];

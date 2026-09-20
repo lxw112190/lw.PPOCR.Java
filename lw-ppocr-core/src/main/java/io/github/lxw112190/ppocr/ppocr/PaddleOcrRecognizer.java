@@ -125,15 +125,13 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         return fallbackSession == null ? 0L : fallbackSession.decodedConstantBytes();
     }
 
-    /** Returns prepared projection matrices retained by REC sessions in bytes. */
+    /** Returns the model-wide prepared projection matrices retained by REC in bytes. */
     public long packedWeightBytes() {
         ensureOpen();
-        long total = 0L;
         for (RecSessionContext context : sessions) {
-            if (context != null) total += context.packedWeightBytes();
+            if (context != null) return context.packedWeightBytes();
         }
-        if (fallbackSession != null) total += fallbackSession.packedWeightBytes();
-        return total;
+        return fallbackSession == null ? 0L : fallbackSession.packedWeightBytes();
     }
 
     /** Returns workspace bytes for the fixed REC buckets in policy order. */

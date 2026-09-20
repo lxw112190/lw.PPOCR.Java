@@ -1,5 +1,6 @@
 package io.github.lxw112190.ppocr.runtime;
 
+import io.github.lxw112190.ppocr.golden.GoldenTestSupport;
 import io.github.lxw112190.ppocr.model.LwmLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
@@ -7,6 +8,7 @@ import io.github.lxw112190.ppocr.model.OcrException;
 import java.io.ByteArrayInputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Collections;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -129,6 +131,28 @@ public final class InferenceSessionTest {
         first.close();
         second.close();
         model.close();
+    }
+
+    @Test
+    public void sharesPreparedProjectionWeightsAcrossDynamicSessions() throws Exception {
+        try (LwmModel model = LwmLoader.load(GoldenTestSupport.resource(
+                InferenceSessionTest.class, "/golden/rec/rec.lwm"))) {
+            CompiledModel compiled = CompiledModel.acquire(model);
+            int projectionIndex = compiled.nodeCount() - 3;
+            int weightTensor = compiled.nodeInputs(projectionIndex)[1];
+            try (InferenceSession first = new InferenceSession(model,
+                         Collections.singletonList(new TensorShape(1, 3, 48, 192)));
+                 InferenceSession second = new InferenceSession(model,
+                         Collections.singletonList(new TensorShape(1, 3, 48, 960)))) {
+                PreparedMatMulWeights firstWeights = first.execution().preparedMatMulWeights(
+                        weightTensor, 80, 6906);
+                PreparedMatMulWeights secondWeights = second.execution().preparedMatMulWeights(
+                        weightTensor, 80, 6906);
+                Assert.assertSame(firstWeights, secondWeights);
+                Assert.assertEquals(80L * 6906L * Float.BYTES,
+                        first.execution().preparedMatMulWeightBytes());
+            }
+        }
     }
 
     private static byte[] addModel() {

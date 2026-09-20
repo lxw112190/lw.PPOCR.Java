@@ -49,14 +49,13 @@ public final class CtcProjectionSession implements AutoCloseable {
                 tail.projectionNodeIndex, tail.activationTensor);
         try {
             PreparedExecution execution = prefix.execution();
-            ByteBuffer rawWeights = execution.constantRaw(tail.weightTensor);
             float[] bias = execution.constant(tail.biasTensor);
-            if (rawWeights == null || bias == null) {
+            PreparedMatMulWeights prepared = execution.preparedMatMulWeights(
+                    tail.weightTensor, tail.inner, tail.columns);
+            if (prepared == null || bias == null) {
                 prefix.close();
                 return null;
             }
-            PreparedMatMulWeights prepared = PreparedMatMulWeights.fromLittleEndian(
-                    rawWeights, tail.inner, tail.columns);
             return new CtcProjectionSession(prefix, projection, prepared, bias,
                     tail.rows);
         } catch (RuntimeException e) {
@@ -114,8 +113,11 @@ public final class CtcProjectionSession implements AutoCloseable {
     public int getClassCount() { return weights.getColumns(); }
     public long getDenseOutputBytesAvoided() { return (long) rows * weights.getColumns() * 4L; }
     public long getWorkspaceBytes() { ensureOpen(); return prefix.execution().workspacePlan().getTotalBytes(); }
-    /** Returns the prepared projection matrix capacity in bytes. */
-    public long getPackedWeightBytes() { ensureOpen(); return weights.packedBytes(); }
+    /** Returns the model-wide retained prepared projection matrix bytes. */
+    public long getPackedWeightBytes() {
+        ensureOpen();
+        return prefix.execution().preparedMatMulWeightBytes();
+    }
     /** Returns canonical FP32 constants materialized by the prefix graph. */
     public long getDecodedConstantBytes() { ensureOpen(); return prefix.decodedConstantBytes(); }
     public WorkspaceDiagnostics workspaceDiagnostics() {

@@ -92,6 +92,10 @@ public final class PreparedExecution {
     public WorkspacePlan workspacePlan() { return workspacePlan; }
     public float[] constant(int tensorIndex) { return compiledModel.constant(tensorIndex); }
     ByteBuffer constantRaw(int tensorIndex) { return compiledModel.constantRaw(tensorIndex); }
+    PreparedMatMulWeights preparedMatMulWeights(int tensorIndex, int inner, int columns) {
+        return compiledModel.preparedMatMulWeights(tensorIndex, inner, columns);
+    }
+    long preparedMatMulWeightBytes() { return compiledModel.preparedMatMulWeightBytes(); }
     /** Returns the currently materialized canonical constant storage in bytes. */
     public long decodedConstantBytes() { return compiledModel.decodedConstantBytes(); }
     public int offset(int tensorIndex) { return offsets[tensorIndex]; }
