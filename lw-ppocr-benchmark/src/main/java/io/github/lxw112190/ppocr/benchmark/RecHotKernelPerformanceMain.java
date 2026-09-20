@@ -14,41 +14,54 @@ public final class RecHotKernelPerformanceMain {
 
     public static void main(String[] args) throws Exception {
         String backendName = args.length > 0 ? args[0] : "vector";
-        int warmup = args.length > 1 ? positive(args[1], "warmup") : 10;
+        int warmupRounds = args.length > 1 ? positive(args[1], "warmup") : 30;
         int iterations = args.length > 2 ? positive(args[2], "iterations") : 30;
+        String filter = args.length > 3 ? args[3] : "all";
         KernelBackend backend = createBackend(backendName);
-        for (Shape shape : SHAPES) {
-            runShape(backendName, backend, shape, warmup, iterations);
+        PreparedShape[] cases = prepareShapes(filter);
+
+        /*
+         * Warm every selected shape before measuring allocations. This keeps
+         * early shapes from absorbing Vector API C2 compilation and escape
+         * analysis that belongs to the shared kernel.
+         */
+        for (int round = 0; round < warmupRounds; round++) {
+            for (int i = 0; i < cases.length; i++) {
+                PreparedShape testCase = cases[i];
+                run(backend, testCase.shape, testCase.input, testCase.weights,
+                        testCase.bias, testCase.output);
+                consume(testCase.output, round + i);
+            }
+        }
+
+        for (PreparedShape testCase : cases) {
+            measureShape(backendName, backend, testCase, warmupRounds, iterations);
         }
     }
 
-    private static void runShape(String backendName, KernelBackend backend, Shape shape,
-                                 int warmup, int iterations) {
-        float[] input = fixture(shape.channels * shape.height * shape.width, 101,
-                0.001953125f);
-        float[] weights = fixture(shape.outputChannels * shape.channels * shape.kernelArea,
-                67, 0.0009765625f);
-        float[] bias = fixture(shape.outputChannels, 31, 0.00390625f);
-        float[] output = new float[shape.outputChannels * shape.outputHeight * shape.outputWidth];
-
-        for (int i = 0; i < warmup; i++) {
-            run(backend, shape, input, weights, bias, output);
-            consume(output, i);
-        }
-        long allocatedBefore = ALLOCATION.snapshot();
+    private static void measureShape(String backendName, KernelBackend backend,
+                                     PreparedShape testCase, int warmup, int iterations) {
+        Shape shape = testCase.shape;
         long[] samples = new long[iterations];
+        long allocatedBefore = ALLOCATION.snapshot();
         for (int i = 0; i < iterations; i++) {
             long start = System.nanoTime();
-            run(backend, shape, input, weights, bias, output);
+            run(backend, shape, testCase.input, testCase.weights, testCase.bias,
+                    testCase.output);
             samples[i] = System.nanoTime() - start;
-            consume(output, i + warmup);
+            consume(testCase.output, i + warmup);
         }
         long allocatedAfter = ALLOCATION.snapshot();
         Arrays.sort(samples);
         long allocatedPerOp = allocatedBefore < 0 || allocatedAfter < allocatedBefore
                 ? -1 : (allocatedAfter - allocatedBefore) / iterations;
+        String vectorBits = "vector".equals(backendName)
+                ? System.getProperty("lwppocr.vectorBits", "preferred") : "n/a";
+        String pointwiseBlock = "vector".equals(backendName)
+                ? System.getProperty("lwppocr.vectorPointwiseBlock", "default") : "n/a";
         System.out.printf(Locale.ROOT,
                 "{\"benchmark\":\"rec-hot-kernel\",\"backend\":\"%s\","
+                        + "\"vector_bits\":\"%s\",\"pointwise_block\":\"%s\","
                         + "\"operator\":\"%s\",\"input_channels\":%d,"
                         + "\"output_channels\":%d,\"height\":%d,\"width\":%d,"
                         + "\"output_height\":%d,\"output_width\":%d,"
@@ -56,14 +69,15 @@ public final class RecHotKernelPerformanceMain {
                         + "\"warmup\":%d,\"iterations\":%d,"
                         + "\"mean_ms\":%.3f,\"median_ms\":%.3f,\"p95_ms\":%.3f,"
                         + "\"allocated_bytes_per_op\":%d,\"checksum\":\"%s\"}%n",
-                backendName, shape.operator, shape.channels, shape.outputChannels,
-                shape.height, shape.width, shape.outputHeight, shape.outputWidth,
-                shape.kernelHeight, shape.kernelWidth, shape.stride, warmup, iterations,
+                backendName, vectorBits, pointwiseBlock, shape.operator,
+                shape.channels, shape.outputChannels, shape.height, shape.width,
+                shape.outputHeight, shape.outputWidth, shape.kernelHeight,
+                shape.kernelWidth, shape.stride, warmup, iterations,
                 mean(samples) / 1_000_000.0,
                 samples[samples.length / 2] / 1_000_000.0,
                 samples[(int) Math.min(samples.length - 1,
                         Math.ceil(samples.length * 0.95) - 1)] / 1_000_000.0,
-                allocatedPerOp, checksum(output));
+                allocatedPerOp, checksum(testCase.output));
     }
 
     private static void run(KernelBackend backend, Shape shape, float[] input,
@@ -134,6 +148,44 @@ public final class RecHotKernelPerformanceMain {
                     3, 3, 2, 1);
         }
         return shapes;
+    }
+
+    private static PreparedShape[] prepareShapes(String filter) {
+        int count = 0;
+        for (Shape shape : SHAPES) {
+            if (matchesFilter(shape, filter)) count++;
+        }
+        PreparedShape[] result = new PreparedShape[count];
+        int index = 0;
+        for (Shape shape : SHAPES) {
+            if (matchesFilter(shape, filter)) result[index++] = new PreparedShape(shape);
+        }
+        return result;
+    }
+
+    private static boolean matchesFilter(Shape shape, String filter) {
+        if ("all".equals(filter)) return true;
+        if ("pointwise".equals(filter)) return "pointwise".equals(shape.operator);
+        if ("stride-two".equals(filter)) return "stride-two".equals(shape.operator);
+        throw new IllegalArgumentException("filter must be all, pointwise or stride-two");
+    }
+
+    private static final class PreparedShape {
+        final Shape shape;
+        final float[] input;
+        final float[] weights;
+        final float[] bias;
+        final float[] output;
+
+        PreparedShape(Shape shape) {
+            this.shape = shape;
+            this.input = fixture(shape.channels * shape.height * shape.width,
+                    101, 0.001953125f);
+            this.weights = fixture(shape.outputChannels * shape.channels * shape.kernelArea,
+                    67, 0.0009765625f);
+            this.bias = fixture(shape.outputChannels, 31, 0.00390625f);
+            this.output = new float[shape.outputChannels * shape.outputHeight * shape.outputWidth];
+        }
     }
 
     private static final class Shape {
