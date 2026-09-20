@@ -47,6 +47,9 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Isolated the Vector API 1x1 convolution hot path in `VectorPointwiseKernel`
+  while preserving its NCHW layout, output blocking, dispatch behavior, and
+  numerical results.
 - Vector split microkernels now keep their JDK 25 `VectorSpecies` specialization local
   to each hot compilation unit, including static stride-two gather indexes, restoring
   stable JIT specialization without changing the Scalar correctness path.
