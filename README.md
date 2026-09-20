@@ -211,7 +211,10 @@ benchmarks cover the same-size 2x2 DET layers with `16 -> 8` and `8 -> 16`
 channels. A same-run Scalar and Vector benchmark also covers the repeated 5x5
 depthwise CLS layer (`[1,64,5,80]`), so runner-wide load changes can be
 separated from backend speedups.
-Performance output is a development signal only; v0.x does not use it as a release gate.
+Performance output remains a development signal, and Linux CI now applies a conservative
+regression gate to the focused Vector kernels and steady-state Full OCR. The gate is
+intended to catch catastrophic regressions in latency, allocation, GC, and retained
+prepared weights; it is not a promise of a fixed runtime across different machines.
 
 For a local comparison against the metadata-backed corpus from `lw.PPOCR.C`,
 build the benchmark module and run `DatasetOcrPerformanceMain` with the three
