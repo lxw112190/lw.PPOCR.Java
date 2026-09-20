@@ -15,7 +15,7 @@ body:
     attributes:
       label: Version / 版本
       description: Release tag or commit SHA.
-      placeholder: v0.1.0 or c6124d3
+      placeholder: v0.2.0 or commit SHA
     validations:
       required: true
   - type: dropdown

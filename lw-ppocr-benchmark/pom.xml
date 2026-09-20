@@ -6,7 +6,7 @@
     <parent>
         <groupId>io.github.lxw112190</groupId>
         <artifactId>lw-ppocr-parent</artifactId>
-        <version>0.2.0-SNAPSHOT</version>
+        <version>0.2.0</version>
     </parent>
     <artifactId>lw-ppocr-benchmark</artifactId>
     <name>lw.PPOCR.Java Benchmark</name>

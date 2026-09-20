@@ -9,7 +9,7 @@
 
 GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windows 和 macOS。
 
-## 获取 0.1.0 构件
+## 获取 0.2.0 构件
 
 当前版本尚未发布到 Maven Central。可以从源码将构件安装到本机 Maven 仓库：
 
@@ -18,8 +18,8 @@ mvn --batch-mode --no-transfer-progress clean install
 ```
 
 完整 Reactor（包括可选 Vector 模块）需要 JDK 25。Tag 构建生成的 GitHub Release
-会提供 `lw-ppocr-core-0.1.0.jar`、`lw-ppocr-imageio-0.1.0.jar` 和
-`lw-ppocr-vector-0.1.0.jar`，以及 Tiny 模型、字典、示例图片和许可证文件。
+会提供 `lw-ppocr-core-0.2.0.jar`、`lw-ppocr-imageio-0.2.0.jar` 和
+`lw-ppocr-vector-0.2.0.jar`，以及 Tiny 模型、字典、示例图片和许可证文件。
 
 ## Maven 模块
 
@@ -29,7 +29,7 @@ mvn --batch-mode --no-transfer-progress clean install
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-core</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -39,7 +39,7 @@ mvn --batch-mode --no-transfer-progress clean install
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-imageio</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -52,7 +52,7 @@ DET 的 2 倍上采样 ConvTranspose、广播、激活、归约和 MatMul；其�
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-vector</artifactId>
-    <version>0.1.0</version>
+    <version>0.2.0</version>
 </dependency>
 ```
 
@@ -94,7 +94,7 @@ PaddleOcrOptions options = PaddleOcrOptions.builder()
 
 `setParallelism(0)` 是 AUTO 的简写。AUTO 的行级 Worker 最多为 4，并会按检测行数
 收缩；低核环境不会产生独立配置 `CLS=4`、`REC=4` 的超额线程计划。默认仍为
-MANUAL/1，以保持 0.1 的线程与内存行为；`setParallelism(n)` 可同时设置两个手动上限。
+MANUAL/1，以保持已有同步调用的线程与内存行为；`setParallelism(n)` 可同时设置两个手动上限。
 
 启动应用时加入：
 
@@ -238,7 +238,7 @@ schema 5 另外报告 DB scratch、crop arena、已物化 FP32 常量和预备 p
 
 ## 当前范围
 
-v0.1.0 当前验证的是动态形状 FP32 PP-OCRv6 Tiny 合同，Scalar 是稳定参考
+v0.2.0 当前验证的是动态形状 FP32 PP-OCRv6 Tiny 合同，Scalar 是稳定参考
 路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU 或 Android；Vector API
 后端是 JDK 25 可选加速路径，对优化范围外的通用形状回退 Scalar。性能数字仅
 用于同机研发比较，不构成发布性能承诺。

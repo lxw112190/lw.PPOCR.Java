@@ -2,7 +2,24 @@
 
 All notable changes to this project are documented in this file.
 
-## [Unreleased]
+## [0.2.0] - 2026-09-20
+
+### Highlights
+
+- Significantly reduced steady-state heap usage and OCR allocation through
+  zero-copy execution, reusable PP-OCR staging buffers, workspace aliasing,
+  lazy constants, and shared prepared REC projection weights.
+- Added fused REC projection, winning Softmax probability, ArgMax, and compact
+  CTC decoding, avoiding the retained dense `[T,C]` probability matrix on
+  supported PP-OCRv6 Tiny REC graphs.
+- Added AUTO CPU budgeting for CLS/REC workers while preserving MANUAL
+  controls for compatibility.
+- Hardened and specialized the JDK 25 Vector API backend, including REC
+  stride-two convolution and fixed-species pointwise tuning for 256-bit and
+  512-bit Vector API hosts.
+- Added steady-state allocation/JFR diagnostics and conservative CI performance
+  regression gates for latency, allocation, GC, workspace efficiency, and
+  retained prepared weights.
 
 ### Download
 
@@ -106,4 +123,5 @@ All notable changes to this project are documented in this file.
 - This is a pre-1.0 release; public APIs may still evolve in later minor
   versions.
 
+[0.2.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.2.0
 [0.1.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.1.0

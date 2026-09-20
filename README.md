@@ -23,6 +23,20 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - Shared LWM v0.1 model format with `lw.PPOCR.C`
 - Scalar correctness path plus an optional JDK 25 Vector API backend
 
+## What's new in 0.2.0
+
+- Lower steady-state heap and allocation through zero-copy execution, reusable
+  OCR staging storage, workspace aliasing, and lazy/shared model data.
+- Fused REC projection, winning Softmax probability, ArgMax, and compact CTC
+  decoding for the supported PP-OCRv6 Tiny terminal graph.
+- Shared prepared REC projection weights across dynamic-width recognition
+  sessions.
+- AUTO CPU budgeting for CLS/REC workers.
+- More stable Vector API microkernels, including a specialized REC stride-two
+  convolution path.
+- Allocation/JFR diagnostics and conservative performance regression checks in
+  CI.
+
 ## 🚀 Quick start
 
 ### 1. Download a Release
@@ -156,10 +170,19 @@ mvn verify
 
 ## Release
 
-`0.1.0` is the first pre-1.0 release. Tagged builds produce a release-candidate
-bundle containing the three runtime JARs, PP-OCRv6 Tiny LWM models, dictionary,
-sample image, root-level `QUICKSTART.md`, documentation, and license notices.
-Each ZIP has a SHA-256
+`0.2.0` is the current pre-1.0 release. It focuses on lower steady-state
+memory, lower allocation, fused REC execution, CPU-budgeted AUTO parallelism,
+and a more mature JDK 25 Vector API backend.
+
+Compared with `0.1.0`, the runtime now reuses more inference and PP-OCR working
+storage, shares prepared REC projection weights across dynamic-width sessions,
+avoids the dense REC `[T,C]` probability output on supported terminal graphs,
+and applies conservative CI regression gates to latency, allocation, GC,
+workspace efficiency, and retained prepared weights.
+
+Tagged builds produce a release-candidate bundle containing the three runtime
+JARs, PP-OCRv6 Tiny LWM models, dictionary, sample image, root-level
+`QUICKSTART.md`, documentation, and license notices. Each ZIP has a SHA-256
 sidecar, and CI runs full OCR from the extracted bundle before publishing it
 to GitHub Releases and retaining the same files as an Actions artifact.
 
@@ -256,8 +279,8 @@ model layout, BGR/ImageIO usage, lifecycle, and concurrency guidance.
 
 ## Scope boundaries
 
-The currently verified contract is the committed dynamic-shape FP32 PP-OCRv6
-Tiny model set. The runtime does not claim arbitrary ONNX topology
+For `0.2.0`, the currently verified contract is the committed dynamic-shape FP32
+PP-OCRv6 Tiny model set. The runtime does not claim arbitrary ONNX topology
 compatibility, automatic model discovery, GPU, or Android support. The Vector
 API backend is optional and keeps Scalar fallbacks for shapes outside its
 optimized paths. Image decoding is available separately through the optional

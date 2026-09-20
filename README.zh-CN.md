@@ -23,6 +23,16 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - 与 `lw.PPOCR.C` 共用 LWM v0.1 模型格式
 - 提供 Scalar 正确性路径，以及可选的 JDK 25 Vector API 后端
 
+## 0.2.0 新增内容
+
+- 通过零拷贝执行、OCR 临时空间复用、Workspace alias、Lazy constants 等机制进一步
+  降低稳态堆内存和对象分配；
+- 支持 REC 投影、winning Softmax probability、ArgMax 与紧凑 CTC 解码融合；
+- 多个动态宽度 REC Session 共享同一份准备后的投影权重；
+- 新增面向 CLS/REC Worker 的 AUTO CPU 预算策略；
+- 提升 Vector API microkernel 稳定性，并加入 REC stride-two 专用 Vector 路径；
+- CI 新增 allocation/JFR 诊断及延迟、GC、Workspace、prepared weights 性能回归门禁。
+
 ## 🚀 快速开始
 
 ### 1. 下载 Release
@@ -144,9 +154,15 @@ mvn verify
 
 ## 发布版本
 
-`0.1.0` 是首个 1.0 之前的正式版本。Tag 构建会生成发布候选包，其中包含三个运行时
-JAR、PP-OCRv6 Tiny LWM 模型、字典、示例图片、根目录 `QUICKSTART.md`、文档和
-许可证声明。每个 ZIP 都附带
+`0.2.0` 是当前 1.0 之前的正式版本。本版本重点优化稳态内存占用、单次 OCR
+分配、REC 末端融合、CPU 预算 AUTO 并行策略以及 JDK 25 Vector API 后端。
+
+相比 `0.1.0`，运行时会复用更多推理和 PP-OCR 工作缓存；动态宽度 REC Session
+共享同一份已准备的投影权重；受支持的 REC 末端图不再保留完整 `[T,C]` 概率矩阵；
+CI 还加入了针对延迟、对象分配、GC、工作区效率和已准备权重占用的保守性能回归门禁。
+
+Tag 构建会生成发布候选包，其中包含三个运行时 JAR、PP-OCRv6 Tiny LWM 模型、
+字典、示例图片、根目录 `QUICKSTART.md`、文档和许可证声明。每个 ZIP 都附带
 SHA-256 文件；CI 会先解压候选包并运行一次完整 OCR，再发布到 GitHub Releases，
 同时保留相同文件作为 Actions Artifact。
 
@@ -221,10 +237,10 @@ Maven 依赖、模型目录、BGR/ImageIO 用法、生命周期和并发指导�
 
 ## 使用边界
 
-`0.1.0` 当前经过验证的范围是仓库内动态形状 FP32 PP-OCRv6 Tiny 模型集。运行时不承诺
-兼容任意 ONNX 拓扑，也不提供自动模型发现、GPU 或 Android 支持。Vector API
-后端是可选组件，对于专门优化范围之外的形状仍会保留 Scalar 回退路径。
-图像解码由可选的 `lw-ppocr-imageio` 模块单独提供。
+`0.2.0` 当前经过验证的范围仍是仓库内动态形状 FP32 PP-OCRv6 Tiny 模型集。
+运行时不承诺兼容任意 ONNX 拓扑，也不提供自动模型发现、GPU 或 Android 支持。
+Vector API 后端是可选组件，对于专门优化范围之外的形状仍会保留 Scalar 正确性
+回退路径。图像解码由可选的 `lw-ppocr-imageio` 模块单独提供。
 
 ## 许可证
 
