@@ -97,6 +97,10 @@ jobs:
             | tee benchmark-results/rec-pointwise-conv-scalar.json
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.RecHotKernelPerformanceMain vector 10 30 \
+            | tee benchmark-results/rec-hot-kernel.jsonl
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.ProjectionArgMaxPerformanceMain vector \
             | tee benchmark-results/rec-projection-argmax.json
           for cpu in 1 2 4 8; do
@@ -221,6 +225,10 @@ jobs:
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/rec-pointwise-conv-scalar.json >> "$GITHUB_STEP_SUMMARY"
           cat benchmark-results/rec-pointwise-conv-vector.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo '### REC hot-shape kernel matrix (Vector API)' >> "$GITHUB_STEP_SUMMARY"
+          echo '```jsonl' >> "$GITHUB_STEP_SUMMARY"
+          cat benchmark-results/rec-hot-kernel.jsonl >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           echo '### REC terminal fusion performance (Vector API)' >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"

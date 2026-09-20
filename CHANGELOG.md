@@ -42,6 +42,8 @@ All notable changes to this project are documented in this file.
   files, model manifest, and SHA-256 values before packaging.
 - An external metadata-backed dataset runner and CER evaluator for comparing
   the Java pipeline with the local `lw.PPOCR.C` reference corpus.
+- A REC hot-shape Vector benchmark matrix covering pointwise and stride-two
+  convolution widths, including steady-state allocation per operation.
 
 ### Changed
 
