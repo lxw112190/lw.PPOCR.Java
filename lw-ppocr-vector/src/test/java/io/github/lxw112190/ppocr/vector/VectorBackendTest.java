@@ -162,6 +162,38 @@ public final class VectorBackendTest {
     }
 
     @Test
+    public void pointwiseOutputBlocksMatchScalarForAllExperimentalBlocks() {
+        int batch = 2;
+        int channels = 7;
+        int plane = 23;
+        int outputChannels = 29;
+        int inputOffset = 5;
+        int weightOffset = 7;
+        int biasOffset = 3;
+        int outputOffset = 11;
+        float[] input = values(inputOffset + batch * channels * plane + 3,
+                0.001953125f, -0.375f);
+        float[] weights = values(weightOffset + outputChannels * channels + 3,
+                0.00390625f, -0.25f);
+        float[] bias = values(biasOffset + outputChannels + 3,
+                0.015625f, -0.125f);
+        float[] expected = new float[outputOffset + batch * outputChannels * plane + 7];
+        Arrays.fill(expected, -17.0f);
+        scalar.conv(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                expected, outputOffset, batch, channels, 1, plane, outputChannels,
+                1, 1, 1, 1, 1, 1, 0, 0, 1, 1, plane);
+
+        for (int block : new int[] {4, 8, 12}) {
+            float[] actual = new float[expected.length];
+            Arrays.fill(actual, -17.0f);
+            VectorPointwiseKernel.applyForTesting(block, input, inputOffset,
+                    weights, weightOffset, bias, biasOffset, actual, outputOffset,
+                    batch, channels, plane, outputChannels, 1);
+            Assert.assertArrayEquals("block=" + block, expected, actual, 0.000001f);
+        }
+    }
+
+    @Test
     public void matchesScalarLargeLowChannelStrideOneConvolution() {
         int channels = 64;
         int height = 80;

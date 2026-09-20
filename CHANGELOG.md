@@ -47,6 +47,8 @@ All notable changes to this project are documented in this file.
 - REC hot-shape measurements now prepare all selected shapes and complete a
   global warmup before allocation sampling, with pointwise and stride-two
   filters for focused kernel experiments.
+- Added the experimental \`lwppocr.vectorPointwiseBlock\` property for
+  pointwise block 4/8/12 comparisons; the default remains block 12.
 
 ### Changed
 
