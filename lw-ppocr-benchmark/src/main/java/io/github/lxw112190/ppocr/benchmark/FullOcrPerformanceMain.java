@@ -84,21 +84,31 @@ public final class FullOcrPerformanceMain {
             processMemory.refresh();
             long processRssLoaded = processMemory.rssBytes();
             long processRssSampledPeak = processRssLoaded;
+            long processRssWarmupPeak = processRssLoaded;
             long heapAfterLoad = stabilizedHeap(memory);
             processMemory.refresh();
             long processRssLoadedAfterGc = processMemory.rssBytes();
             processRssSampledPeak = maxSupported(processRssSampledPeak,
                     processRssLoadedAfterGc);
+            processRssWarmupPeak = maxSupported(processRssWarmupPeak,
+                    processRssLoadedAfterGc);
             StageSample cold = pipeline.recognize(image);
             processMemory.refresh();
-            processRssSampledPeak = maxSupported(processRssSampledPeak,
-                    processMemory.rssBytes());
+            long warmupRss = processMemory.rssBytes();
+            processRssSampledPeak = maxSupported(processRssSampledPeak, warmupRss);
+            processRssWarmupPeak = maxSupported(processRssWarmupPeak, warmupRss);
             for (int i = 1; i < warmup; i++) {
                 pipeline.recognize(image);
                 processMemory.refresh();
-                processRssSampledPeak = maxSupported(processRssSampledPeak,
-                        processMemory.rssBytes());
+                warmupRss = processMemory.rssBytes();
+                processRssSampledPeak = maxSupported(processRssSampledPeak, warmupRss);
+                processRssWarmupPeak = maxSupported(processRssWarmupPeak, warmupRss);
             }
+
+            processMemory.refresh();
+            long processRssTimedStart = processMemory.rssBytes();
+            long processRssTimedPeak = processRssTimedStart;
+            processRssSampledPeak = maxSupported(processRssSampledPeak, processRssTimedStart);
 
             resetHeapPeaks();
             long gcCountBefore = gcCount();
@@ -123,13 +133,18 @@ public final class FullOcrPerformanceMain {
                 sorting[i] = sample.sortingNanos;
                 lineCount = sample.lines;
                 processMemory.refresh();
-                processRssSampledPeak = maxSupported(processRssSampledPeak,
-                        processMemory.rssBytes());
+                long timedRss = processMemory.rssBytes();
+                processRssTimedPeak = maxSupported(processRssTimedPeak, timedRss);
+                processRssSampledPeak = maxSupported(processRssSampledPeak, timedRss);
             }
             processMemory.refresh();
             long processRssLast = processMemory.rssBytes();
+            processRssTimedPeak = maxSupported(processRssTimedPeak, processRssLast);
             processRssSampledPeak = maxSupported(processRssSampledPeak, processRssLast);
             long processRssHwmAfterRun = processMemory.highWaterBytes();
+            long processRssTimedDelta = signedDelta(processRssLast, processRssTimedStart);
+            long processRssTimedPeakDelta = signedDelta(processRssTimedPeak,
+                    processRssTimedStart);
             long allocatedBytes = allocationProbe.deltaSince(allocatedBefore);
             long peakHeap = Math.max(heapPeakUsed(), usedHeap(memory));
             long gcCountDelta = nonNegativeDelta(gcCount(), gcCountBefore);
@@ -191,12 +206,17 @@ public final class FullOcrPerformanceMain {
                             + "\"process_memory_source\":\"%s\","
                             + "\"process_rss_loaded_bytes\":%d,"
                             + "\"process_rss_loaded_after_gc_bytes\":%d,"
+                            + "\"process_rss_warmup_peak_bytes\":%d,"
+                            + "\"process_rss_timed_start_bytes\":%d,"
+                            + "\"process_rss_timed_peak_bytes\":%d,"
                             + "\"process_rss_last_bytes\":%d,"
                             + "\"process_rss_sampled_peak_bytes\":%d,"
                             + "\"process_rss_hwm_bytes\":%d,"
                             + "\"process_rss_after_gc_bytes\":%d,"
                             + "\"process_rss_delta_bytes\":%d,"
                             + "\"process_rss_peak_delta_bytes\":%d,"
+                            + "\"process_rss_timed_delta_bytes\":%d,"
+                            + "\"process_rss_timed_peak_delta_bytes\":%d,"
                             + "\"allocation_measurement\":\"%s\","
                             + "\"allocated_bytes_total\":%d,"
                             + "\"allocated_bytes_per_ocr\":%d,"
@@ -234,9 +254,11 @@ public final class FullOcrPerformanceMain {
                     heapAfterGc, retainedHeap,
                     peakHeap, peakDelta, transientHeap, gcCountDelta, gcTimeDelta,
                     processMemory.source(), processRssLoaded, processRssLoadedAfterGc,
+                    processRssWarmupPeak, processRssTimedStart, processRssTimedPeak,
                     processRssLast, processRssSampledPeak, processRssHwmAfterRun,
                     processRssAfterGc, signedDelta(processRssLast, processRssLoaded),
-                    signedDelta(processRssSampledPeak, processRssLoaded),
+                    signedDelta(processRssSampledPeak, processRssLoaded), processRssTimedDelta,
+                    processRssTimedPeakDelta,
                     allocationProbe.method(), allocatedBytes,
                     perOperation(allocatedBytes, iterations),
                     perOperation(allocatedBytes, (long) iterations * Math.max(1, lineCount)),

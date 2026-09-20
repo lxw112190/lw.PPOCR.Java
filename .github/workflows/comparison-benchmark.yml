@@ -3,15 +3,10 @@ name: Java Comparison Benchmark
 on:
   workflow_dispatch:
     inputs:
-      iterations:
-        description: Timed OCR iterations after one warmup call
-        required: false
-        default: '99'
-        type: string
       detector_limit:
         description: Detector limit side
         required: false
-        default: '320'
+        default: '960'
         type: string
       processors:
         description: CPU count exposed to the JVM
@@ -93,10 +88,9 @@ jobs:
               raise SystemExit("invalid process RSS")
           PY
 
-      - name: Run Java comparison benchmark
+      - name: Run Java comparable benchmark
         shell: bash
         env:
-          ITERATIONS: ${{ inputs.iterations }}
           DETECTOR_LIMIT: ${{ inputs.detector_limit }}
           PROCESSORS: ${{ inputs.processors }}
         run: |
@@ -107,13 +101,30 @@ jobs:
             --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain \
-            1 "${ITERATIONS}" "${DETECTOR_LIMIT}" vector auto \
-            | tee comparison-results/java-raw.json
+            1 99 "${DETECTOR_LIMIT}" vector auto \
+            | tee comparison-results/java-comparable-raw.json
+
+      - name: Run Java steady benchmark
+        shell: bash
+        env:
+          DETECTOR_LIMIT: ${{ inputs.detector_limit }}
+          PROCESSORS: ${{ inputs.processors }}
+        run: |
+          set -euo pipefail
+          java -XX:ActiveProcessorCount=${PROCESSORS} \
+            -Xms64m -Xmx512m \
+            -Dlwppocr.benchmark.processMemory=true \
+            --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain \
+            10 20 "${DETECTOR_LIMIT}" vector auto \
+            | tee comparison-results/java-steady-raw.json
 
       - name: Generate Java comparison report
         run: |
           python scripts/summarize-java-comparison.py \
-            comparison-results/java-raw.json \
+            --comparable comparison-results/java-comparable-raw.json \
+            --steady comparison-results/java-steady-raw.json \
             --json-out comparison-results/java-comparison.json \
             --markdown-out comparison-results/java-comparison.md
 
