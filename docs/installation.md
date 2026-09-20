@@ -229,6 +229,7 @@ OCR。Release ZIP 中的同一图片位于 `models/ppocrv6-tiny/sample.jpg`。�
 `stage_hot_nodes` 进一步列出最慢节点及其已解析张量形状。`summed_thread_ms_per_ocr`
 是并行线程耗时之和，不能与墙钟总耗时直接相加比较。
 schema 5 另外报告 DB scratch、crop arena、已物化 FP32 常量和预备 projection 权重的字节数，
+并按 DET/CLS/REC 分项、按 REC 192/320/480/640/960 宽度桶展开 workspace，
 用于区分执行 workspace、后处理缓存和模型常驻内存。
 
 完整流水线会复用 Session 工作区、预处理数组、DB 几何缓冲和按文字行槽位保存的

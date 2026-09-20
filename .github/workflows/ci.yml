@@ -193,6 +193,8 @@ jobs:
             | tee benchmark-results/full-ocr-allocation-vector.json
           jfr view --width 160 allocation-by-class benchmark-results/full-ocr-allocation-vector.jfr \
             | tee benchmark-results/full-ocr-allocation-vector-by-class.txt
+      - name: Check performance regressions
+        run: python scripts/check-performance-regression.py
       - name: Publish benchmark summary
         run: |
           echo '### LWM loader performance' >> "$GITHUB_STEP_SUMMARY"
