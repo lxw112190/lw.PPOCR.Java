@@ -465,6 +465,14 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             return;
         }
         if (strideWidth == 2) {
+            if (VectorRecConv3x3Stride2Kernel.supports(batch, channels, height, width,
+                    outputChannels, outputHeight, outputWidth, kernelHeight, kernelWidth,
+                    strideHeight, strideWidth, padTop, padLeft, padBottom, padRight,
+                    groups)) {
+                VectorRecConv3x3Stride2Kernel.apply(input, inputOffset, weights, weightOffset,
+                        bias, biasOffset, output, outputOffset, width, outputWidth);
+                return;
+            }
             // REC's short feature maps are faster and create less Vector API
             // temporary state through the generic path on current JDK 25 builds.
             if (groups == 1 && outputChannels >= 16

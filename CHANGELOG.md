@@ -52,6 +52,8 @@ All notable changes to this project are documented in this file.
   stable JIT specialization without changing the Scalar correctness path.
 - Dynamic REC width sessions now share one model-wide prepared projection matrix;
   retained packed projection weights are reported once instead of once per width bucket.
+- The first Tiny REC 3x3 stride-two convolution now has a strict fixed-shape NCHW
+  Vector kernel with scalar border handling and no steady-state per-operation arrays.
 - Linux performance CI now fails on conservative latency, allocation, GC, workspace,
   or retained-weight regressions after publishing the focused benchmark inputs.
 - DB postprocess now follows the C/Paddle minimum-side filtering stages before
