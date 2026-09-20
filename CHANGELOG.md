@@ -52,9 +52,6 @@ All notable changes to this project are documented in this file.
   retained packed projection weights are reported once instead of once per width bucket.
 - Linux performance CI now fails on conservative latency, allocation, GC, workspace,
   or retained-weight regressions after publishing the focused benchmark inputs.
-- The Vector DET path now uses a bounded NHWC-friendly channel-tiled 3x3 kernel for
-  the large 16-channel feature maps while keeping the public NCHW tensor contract
-  and Scalar fallback for unsupported shapes.
 - DB postprocess now follows the C/Paddle minimum-side filtering stages before
   scoring, after unclip, and after source-coordinate restoration, with float
   geometry arithmetic for closer cross-runtime parity.

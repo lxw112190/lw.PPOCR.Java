@@ -187,43 +187,6 @@ public final class VectorBackendTest {
     }
 
     @Test
-    public void nhwcChannelTiledConvolutionMatchesScalarAtDet960Shape() {
-        int channels = 64;
-        int height = 128;
-        int width = 128;
-        int outputChannels = 16;
-        float[] input = values(channels * height * width, 0.001953125f, -0.5f);
-        float[] weights = values(outputChannels * channels * 3 * 3,
-                0.00390625f, -0.25f);
-        float[] bias = values(outputChannels, 0.015625f, -0.125f);
-        float[] expected = new float[outputChannels * height * width];
-        float[] actual = new float[expected.length];
-
-        scalar.conv(input, 0, weights, 0, bias, 0, expected, 0,
-                1, channels, height, width, outputChannels,
-                3, 3, 1, 1, 1, 1, 1, 1, 1, 1,
-                1, height, width);
-        vector.conv(input, 0, weights, 0, bias, 0, actual, 0,
-                1, channels, height, width, outputChannels,
-                3, 3, 1, 1, 1, 1, 1, 1, 1, 1,
-                1, height, width);
-
-        Assert.assertArrayEquals(expected, actual, 0.000001f);
-
-        Arrays.fill(expected, 0.0f);
-        Arrays.fill(actual, 0.0f);
-        scalar.conv(input, 0, weights, 0, null, 0, expected, 0,
-                1, channels, height, width, outputChannels,
-                3, 3, 1, 1, 1, 1, 1, 1, 1, 1,
-                1, height, width);
-        vector.conv(input, 0, weights, 0, null, 0, actual, 0,
-                1, channels, height, width, outputChannels,
-                3, 3, 1, 1, 1, 1, 1, 1, 1, 1,
-                1, height, width);
-        Assert.assertArrayEquals(expected, actual, 0.000001f);
-    }
-
-    @Test
     public void matchesScalarGroupedPointwiseConvolutionWithOffsets() {
         int batch = 2;
         int channels = 6;
