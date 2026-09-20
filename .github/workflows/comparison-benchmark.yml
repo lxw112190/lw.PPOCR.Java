@@ -1,0 +1,143 @@
+name: Java Comparison Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Timed OCR iterations after one warmup call
+        required: false
+        default: '99'
+        type: string
+      detector_limit:
+        description: Detector limit side
+        required: false
+        default: '320'
+        type: string
+      processors:
+        description: CPU count exposed to the JVM
+        required: false
+        default: '4'
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    name: Java Tiny Comparison Benchmark
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+
+      - name: Capture system information
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p comparison-results
+          lscpu > comparison-results/lscpu.txt
+          {
+            echo "git_sha=${GITHUB_SHA}"
+            echo "runner_os=${RUNNER_OS}"
+            echo
+            echo "=== uname ==="
+            uname -a
+            echo
+            echo "=== lscpu ==="
+            cat comparison-results/lscpu.txt
+            echo
+            echo "=== Java ==="
+            java -version
+            echo
+            echo "=== Memory ==="
+            free -h
+          } 2>&1 | tee comparison-results/system-info.txt
+          sed -n 's/^Model name:[[:space:]]*//p' comparison-results/lscpu.txt \
+            | head -1 | tee comparison-results/cpu-model.txt
+
+      - name: Build benchmark
+        run: mvn --batch-mode --no-transfer-progress package -DskipTests
+
+      - name: Capture Vector API capabilities
+        shell: bash
+        run: |
+          set -euo pipefail
+          java --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.VectorCapabilitiesMain \
+            | tee comparison-results/vector-capabilities.json
+
+      - name: Verify process RSS probe
+        shell: bash
+        run: |
+          set -euo pipefail
+          java -cp "lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.ProcessMemoryProbeMain \
+            | tee comparison-results/process-memory-probe.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          data = json.loads(Path("comparison-results/process-memory-probe.json").read_text())
+          if not data.get("supported"):
+              raise SystemExit("Linux process RSS probe is unavailable")
+          if data.get("rss_bytes", -1) <= 0:
+              raise SystemExit("invalid process RSS")
+          PY
+
+      - name: Run Java comparison benchmark
+        shell: bash
+        env:
+          ITERATIONS: ${{ inputs.iterations }}
+          DETECTOR_LIMIT: ${{ inputs.detector_limit }}
+          PROCESSORS: ${{ inputs.processors }}
+        run: |
+          set -euo pipefail
+          java -XX:ActiveProcessorCount=${PROCESSORS} \
+            -Xms64m -Xmx512m \
+            -Dlwppocr.benchmark.processMemory=true \
+            --add-modules jdk.incubator.vector \
+            -cp "lw-ppocr-core/target/classes:lw-ppocr-core/target/test-classes:lw-ppocr-imageio/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+            io.github.lxw112190.ppocr.benchmark.FullOcrPerformanceMain \
+            1 "${ITERATIONS}" "${DETECTOR_LIMIT}" vector auto \
+            | tee comparison-results/java-raw.json
+
+      - name: Generate Java comparison report
+        run: |
+          python scripts/summarize-java-comparison.py \
+            comparison-results/java-raw.json \
+            --json-out comparison-results/java-comparison.json \
+            --markdown-out comparison-results/java-comparison.md
+
+      - name: Publish benchmark summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat comparison-results/java-comparison.md >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## CPU model" >> "$GITHUB_STEP_SUMMARY"
+          cat comparison-results/cpu-model.txt >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "## Vector API" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat comparison-results/vector-capabilities.json >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "## Runner information" >> "$GITHUB_STEP_SUMMARY"
+          echo '```text' >> "$GITHUB_STEP_SUMMARY"
+          cat comparison-results/system-info.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload comparison results
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-comparison-benchmark
+          path: comparison-results/
+          if-no-files-found: error

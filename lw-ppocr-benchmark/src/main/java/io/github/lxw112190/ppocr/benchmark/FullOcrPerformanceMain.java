@@ -29,6 +29,8 @@ import java.lang.management.MemoryMXBean;
 import java.lang.management.MemoryPoolMXBean;
 import java.lang.management.MemoryType;
 import java.lang.management.MemoryUsage;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -64,21 +66,38 @@ public final class FullOcrPerformanceMain {
                 ? automaticPlan.getClassifierWorkers()
                 : args.length > 5 ? positive(args[5], "classification parallelism") : 1;
         String parallelismPolicy = automaticParallelism ? "auto" : "manual";
+        boolean processMemoryEnabled = Boolean.parseBoolean(
+                System.getProperty("lwppocr.benchmark.processMemory", "false"));
         if (detectorLimit < 32) throw new IllegalArgumentException("detector limit must be at least 32");
         KernelBackend backend = createBackend(backendName);
 
-        BgrImage image = loadImage();
+        BgrImage image = loadImage(System.getProperty("lwppocr.benchmark.image"));
         MemoryMXBean memory = ManagementFactory.getMemoryMXBean();
         ThreadAllocationProbe allocationProbe = ThreadAllocationProbe.create();
         long heapBefore = stabilizedHeap(memory);
+        ProcessMemoryProbe processMemory = ProcessMemoryProbe.open(processMemoryEnabled);
         long loadStart = System.nanoTime();
-        try (ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend,
+        try (ProcessMemoryProbe ignored = processMemory;
+             ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend,
                 recognitionParallelism, classificationParallelism, allocationProbe)) {
             long modelLoadNanos = System.nanoTime() - loadStart;
+            processMemory.refresh();
+            long processRssLoaded = processMemory.rssBytes();
+            long processRssSampledPeak = processRssLoaded;
             long heapAfterLoad = stabilizedHeap(memory);
+            processMemory.refresh();
+            long processRssLoadedAfterGc = processMemory.rssBytes();
+            processRssSampledPeak = maxSupported(processRssSampledPeak,
+                    processRssLoadedAfterGc);
             StageSample cold = pipeline.recognize(image);
+            processMemory.refresh();
+            processRssSampledPeak = maxSupported(processRssSampledPeak,
+                    processMemory.rssBytes());
             for (int i = 1; i < warmup; i++) {
                 pipeline.recognize(image);
+                processMemory.refresh();
+                processRssSampledPeak = maxSupported(processRssSampledPeak,
+                        processMemory.rssBytes());
             }
 
             resetHeapPeaks();
@@ -103,13 +122,22 @@ public final class FullOcrPerformanceMain {
                 recognition[i] = sample.recognitionNanos;
                 sorting[i] = sample.sortingNanos;
                 lineCount = sample.lines;
+                processMemory.refresh();
+                processRssSampledPeak = maxSupported(processRssSampledPeak,
+                        processMemory.rssBytes());
             }
+            processMemory.refresh();
+            long processRssLast = processMemory.rssBytes();
+            processRssSampledPeak = maxSupported(processRssSampledPeak, processRssLast);
+            long processRssHwmAfterRun = processMemory.highWaterBytes();
             long allocatedBytes = allocationProbe.deltaSince(allocatedBefore);
             long peakHeap = Math.max(heapPeakUsed(), usedHeap(memory));
             long gcCountDelta = nonNegativeDelta(gcCount(), gcCountBefore);
             long gcTimeDelta = nonNegativeDelta(gcTimeMillis(), gcTimeBefore);
             long heapAfter = usedHeap(memory);
             long heapAfterGc = stabilizedHeap(memory);
+            processMemory.refresh();
+            long processRssAfterGc = processMemory.rssBytes();
             long peakDelta = Math.max(0L, peakHeap - heapBefore);
             long modelHeap = Math.max(0L, heapAfterLoad - heapBefore);
             long retainedHeap = Math.max(0L, heapAfterGc - heapBefore);
@@ -145,6 +173,7 @@ public final class FullOcrPerformanceMain {
                             + "\"image_width\":%d,"
                             + "\"image_height\":%d,\"detector_limit_side\":%d,"
                             + "\"lines\":%d,\"warmup\":%d,\"iterations\":%d,"
+                            + "\"total_ocr_calls\":%d,"
                             + "\"model_load_ms\":%.3f,\"cold_ms\":%.3f,"
                             + "\"mean_ms\":%.3f,\"median_ms\":%.3f,\"p95_ms\":%.3f,"
                             + "\"detection_mean_ms\":%.3f,\"crop_mean_ms\":%.3f,"
@@ -159,6 +188,15 @@ public final class FullOcrPerformanceMain {
                             + "\"transient_heap_bytes\":%d,"
                             + "\"heap_peak_method\":\"mxbean-pool-sum\",\"gc_count_delta\":%d,"
                             + "\"gc_time_ms_delta\":%d,"
+                            + "\"process_memory_source\":\"%s\","
+                            + "\"process_rss_loaded_bytes\":%d,"
+                            + "\"process_rss_loaded_after_gc_bytes\":%d,"
+                            + "\"process_rss_last_bytes\":%d,"
+                            + "\"process_rss_sampled_peak_bytes\":%d,"
+                            + "\"process_rss_hwm_bytes\":%d,"
+                            + "\"process_rss_after_gc_bytes\":%d,"
+                            + "\"process_rss_delta_bytes\":%d,"
+                            + "\"process_rss_peak_delta_bytes\":%d,"
                             + "\"allocation_measurement\":\"%s\","
                             + "\"allocated_bytes_total\":%d,"
                             + "\"allocated_bytes_per_ocr\":%d,"
@@ -185,7 +223,8 @@ public final class FullOcrPerformanceMain {
                     recognitionParallelism, profileScope,
                     milliseconds(profiledSample.totalNanos),
                     image.width(), image.height(), detectorLimit, lineCount,
-                    warmup, iterations, milliseconds(modelLoadNanos), milliseconds(cold.totalNanos),
+                    warmup, iterations, warmup + iterations,
+                    milliseconds(modelLoadNanos), milliseconds(cold.totalNanos),
                     milliseconds(mean(total)), milliseconds(percentile(total, 0.50)),
                     milliseconds(percentile(total, 0.95)), milliseconds(mean(detection)),
                     milliseconds(mean(crop)), milliseconds(mean(classification)),
@@ -194,6 +233,10 @@ public final class FullOcrPerformanceMain {
                     heapBefore, heapAfterLoad, heapAfterLoad, modelHeap, heapAfter, heapAfter,
                     heapAfterGc, retainedHeap,
                     peakHeap, peakDelta, transientHeap, gcCountDelta, gcTimeDelta,
+                    processMemory.source(), processRssLoaded, processRssLoadedAfterGc,
+                    processRssLast, processRssSampledPeak, processRssHwmAfterRun,
+                    processRssAfterGc, signedDelta(processRssLast, processRssLoaded),
+                    signedDelta(processRssSampledPeak, processRssLoaded),
                     allocationProbe.method(), allocatedBytes,
                     perOperation(allocatedBytes, iterations),
                     perOperation(allocatedBytes, (long) iterations * Math.max(1, lineCount)),
@@ -288,10 +331,28 @@ public final class FullOcrPerformanceMain {
         }
     }
 
-    private static BgrImage loadImage() throws IOException {
+    private static BgrImage loadImage(String configuredPath) throws IOException {
+        if (configuredPath != null && !configuredPath.trim().isEmpty()) {
+            Path path = Paths.get(configuredPath);
+            if (!java.nio.file.Files.isRegularFile(path)) {
+                throw new IOException("benchmark image does not exist: " + path);
+            }
+            return ImageIoLoader.load(path);
+        }
         try (InputStream input = resource(IMAGE)) {
             return ImageIoLoader.load(input);
         }
+    }
+
+    private static long signedDelta(long after, long before) {
+        if (after < 0L || before < 0L) return -1L;
+        return after - before;
+    }
+
+    private static long maxSupported(long first, long second) {
+        if (first < 0L) return second;
+        if (second < 0L) return first;
+        return Math.max(first, second);
     }
 
     private static InputStream resource(String name) throws IOException {
