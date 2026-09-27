@@ -20,6 +20,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /** Dynamic-width REC facade: BGR preprocessing, graph execution, and CTC decoding. */
 public final class PaddleOcrRecognizer implements AutoCloseable {
+    /** Configures existing and future width sessions without duplicating constant weights. */
+    public void setIntraOpParallelism(int count) {
+        ensureOpen();
+        if (count <= 0) throw new IllegalArgumentException("operator parallelism must be positive");
+        intraOpParallelism = count;
+        for (RecSessionContext context : sessions) {
+            if (context != null) context.setIntraOpParallelism(count);
+        }
+        if (fallbackSession != null) fallbackSession.setIntraOpParallelism(count);
+    }
+    private int intraOpParallelism = 1;
     private static final int DEFAULT_MAXIMUM_WIDTH = 960;
     private final LwmModel model;
     private final PaddleOcrDictionary dictionary;
@@ -102,6 +113,28 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
         }
         if (fallbackSession != null && fallbackSession.usesProjectionFusion()) return true;
         return false;
+    }
+
+    /** Retained compact-projection row tiles, not included in graph workspace bytes. */
+    public long projectionScratchBytes() {
+        ensureOpen();
+        long bytes = fallbackSession == null ? 0L : fallbackSession.projectionScratchBytes();
+        for (RecSessionContext context : sessions) if (context != null) bytes += context.projectionScratchBytes();
+        return bytes;
+    }
+
+    public int fusedConvCount() {
+        ensureOpen();
+        int count = fallbackSession == null ? 0 : fallbackSession.fusedConvCount();
+        for (RecSessionContext context : sessions) if (context != null) count += context.fusedConvCount();
+        return count;
+    }
+
+    public long spatialScratchBytes() {
+        ensureOpen();
+        long bytes = fallbackSession == null ? 0 : fallbackSession.spatialScratchBytes();
+        for (RecSessionContext context : sessions) if (context != null) bytes += context.spatialScratchBytes();
+        return bytes;
     }
 
     /** Returns the combined workspace measurements of currently prepared REC width sessions. */
@@ -276,12 +309,14 @@ public final class PaddleOcrRecognizer implements AutoCloseable {
             RecSessionContext context = sessions[slot];
             if (context == null) {
                 context = new RecSessionContext(model, targetWidth, dictionary.classCount(), backend);
+                context.setIntraOpParallelism(intraOpParallelism);
                 sessions[slot] = context;
             }
             return context;
         }
         if (fallbackSession == null) {
             fallbackSession = new RecSessionContext(model, targetWidth, dictionary.classCount(), backend);
+            fallbackSession.setIntraOpParallelism(intraOpParallelism);
         }
         return fallbackSession;
     }

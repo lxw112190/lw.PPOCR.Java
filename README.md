@@ -23,8 +23,12 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - Shared LWM v0.1 model format with `lw.PPOCR.C`
 - Scalar correctness path plus an optional JDK 25 Vector API backend
 
-## What's new in 0.2.0
+## What's new in 0.2.1
 
+- End-to-end AUTO operator parallelism, prepared Conv fusion, and shared
+  spatial convolution panels with bounded weight packing and reusable scratch.
+- REC projection panel reuse and a smaller Vector MatMul hot loop.
+- Reproducible same-machine OCR latency, allocation, and process-memory records.
 - Lower steady-state heap and allocation through zero-copy execution, reusable
   OCR staging storage, workspace aliasing, and lazy/shared model data.
 - Fused REC projection, winning Softmax probability, ArgMax, and compact CTC
@@ -146,6 +150,35 @@ four, clamps workers to the detected line count, and prevents its planned REC
 worker/intra-op product from exceeding that CPU budget. MANUAL remains the
 default for compatibility; either individual worker setter selects it.
 
+AUTO now applies that budget to large DET/REC convolutions and MatMul, using
+disjoint channel/row shards on a bounded shared daemon pool. Small operators,
+unsupported grouped/batched convolutions, and MANUAL sessions stay serial.
+The vector REC projection reuses 128-class weight panels across up to 32 rows;
+its retained scratch is reported separately as `projection_scratch_bytes`.
+Conv parameters and tensor bindings are also prepared before execution. Eligible
+Conv + constant BN/channel bias/residual Add + ReLU/GELU/HardSwish sequences become
+one physical instruction, with intermediate allocations removed by the same fusion
+plan used by the executor. Post-ops finish the final allocation in place; this is not
+yet an NHWC or register-store epilogue implementation. `fused_conv_plans` reports
+the prepared-plan counts for DET, CLS, and REC. Use `-Dlwppocr.disableConvFusion=true`
+to compare against the unfused graph without changing thresholds or models.
+Prepared dense spatial Conv also packs four-pixel input panels and keeps model
+weights contiguous across output-channel vector lanes. Supported single-batch,
+ungrouped 2x2/3x3/5x5 convolutions use row shards and session-reused scratch across
+DET, CLS, and REC; other shapes retain the existing kernels. The graph remains
+NCHW: panels are local to each instruction, not a graph-wide NHWC layout.
+Additional spatial weight packing is bounded to 80 KiB per backend, shared across
+width/worker sessions; over-budget weights are repacked into session-reused scratch
+without per-call allocation, retaining the same spatial arithmetic kernel.
+`packed_weight_bytes` includes projection and spatial packing together;
+`spatial_packed_weight_bytes` counts the unique spatial subset and
+`spatial_scratch_bytes` counts live session scratch, separately from graph workspace.
+Use `-Dlwppocr.disableSpatialPanel=true` for a controlled A/B comparison.
+For controlled A/B measurements, `-Dlwppocr.disableIntraOp=true` and
+`-Dlwppocr.disableProjectionPanel=true` disable the two paths independently.
+Local environment, baseline, and end-to-end results are documented in
+[the x64 baseline](docs/local-x64-ocr-baseline-20260927.md).
+
 The optional JDK 25 Vector API backend accelerates all Conv configurations used
 by the Tiny models, the DET 2x upsampling ConvTranspose path, MatMul, reductions,
 activations, and binary broadcasting. It also fuses the exact five-node
@@ -170,7 +203,7 @@ mvn verify
 
 ## Release
 
-`0.2.0` is the current pre-1.0 release. It focuses on lower steady-state
+`0.2.1` is the current pre-1.0 release. It focuses on lower steady-state
 memory, lower allocation, fused REC execution, CPU-budgeted AUTO parallelism,
 and a more mature JDK 25 Vector API backend.
 
@@ -279,7 +312,7 @@ model layout, BGR/ImageIO usage, lifecycle, and concurrency guidance.
 
 ## Scope boundaries
 
-For `0.2.0`, the currently verified contract is the committed dynamic-shape FP32
+For `0.2.1`, the currently verified contract is the committed dynamic-shape FP32
 PP-OCRv6 Tiny model set. The runtime does not claim arbitrary ONNX topology
 compatibility, automatic model discovery, GPU, or Android support. The Vector
 API backend is optional and keeps Scalar fallbacks for shapes outside its

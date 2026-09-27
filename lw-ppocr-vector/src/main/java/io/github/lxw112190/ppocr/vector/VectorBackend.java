@@ -2,6 +2,9 @@ package io.github.lxw112190.ppocr.vector;
 
 import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
+import io.github.lxw112190.ppocr.kernels.ConvEpilogue;
+import io.github.lxw112190.ppocr.kernels.ConvEpilogueBackend;
+import io.github.lxw112190.ppocr.kernels.PreparedConvBackend;
 import io.github.lxw112190.ppocr.kernels.InPlaceElementwiseBackend;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ProjectionArgMaxBackend;
@@ -17,12 +20,26 @@ import jdk.incubator.vector.VectorSpecies;
 
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
 public final class VectorBackend implements KernelBackend, FusedGeluBackend,
-        ProjectionArgMaxBackend, InPlaceElementwiseBackend {
+        ProjectionArgMaxBackend, InPlaceElementwiseBackend, ConvEpilogueBackend, PreparedConvBackend {
     private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
     private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
     private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.makeZip(SPECIES, 0);
     private static final VectorShuffle<Float> ZIP_HIGH = VectorShuffle.makeZip(SPECIES, 1);
     private final ScalarBackend scalar = new ScalarBackend();
+    private final VectorPreparedConv.Weights spatialWeights = new VectorPreparedConv.Weights();
+
+    public PreparedConvBackend.Kernel prepareConv(float[] weights, int offset, int[] parameters) {
+        return Boolean.getBoolean("lwppocr.disableSpatialPanel") ? null
+                : VectorPreparedConv.prepare(spatialWeights, weights, offset, parameters);
+    }
+
+    public long preparedConvWeightBytes() { return spatialWeights.bytes(); }
+
+    public void finishPreparedConv(float[] output, int offset, int batch, int channels, int plane,
+                                    ConvEpilogue epilogue, float[] residual, int residualOffset) {
+        if (epilogue != null) VectorConvEpilogue.finish(output, offset, batch, channels, plane,
+                epilogue, 0, residual, residualOffset, this);
+    }
 
     @Override
     public void add(float[] left, int leftOffset, float[] right, int rightOffset,
@@ -368,6 +385,37 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
     }
 
     @Override
+    public int convEpilogueAlignment() { return SPECIES.length(); }
+
+    @Override
+    public void convEpilogue(float[] input, int inputOffset, float[] weights, int weightOffset,
+                             float[] bias, int biasOffset, float[] output, int outputOffset,
+                             int batch, int channels, int height, int width, int outputChannels,
+                             int kh, int kw, int sh, int sw, int dh, int dw,
+                             int pt, int pl, int pb, int pr, int groups, int oh, int ow,
+                             ConvEpilogue epilogue, int channelBase, float[] residual, int residualOffset) {
+        // Keep the proven register-blocked dot-product kernel intact. The physical
+        // instruction writes only its final allocation and finishes it in place.
+        conv(input, inputOffset, weights, weightOffset, bias, biasOffset, output, outputOffset,
+                batch, channels, height, width, outputChannels, kh, kw, sh, sw, dh, dw,
+                pt, pl, pb, pr, groups, oh, ow);
+        int plane = oh * ow;
+        if (epilogue.activation == ConvEpilogue.GELU && epilogue.factor == null
+                && epilogue.postBias == null && residual == null) {
+            gelu(output, outputOffset, output, outputOffset, batch * outputChannels * plane,
+                    epilogue.divisor, epilogue.addend, epilogue.multiplier);
+        } else {
+            VectorConvEpilogue.finish(output, outputOffset, batch, outputChannels, plane,
+                    epilogue, channelBase, residual, residualOffset, this);
+        }
+    }
+
+    @Override
+    public int projectionScratchRows(int rows, int inner, int columns) {
+        return Math.min(rows, Boolean.getBoolean("lwppocr.disableProjectionPanel") ? 4 : 32);
+    }
+
+    @Override
     public void projectionArgMax(float[] activations, int activationOffset,
                                  float[] weights, int weightOffset,
                                  float[] bias, int biasOffset,
@@ -385,8 +433,9 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                 rowScratch.length < (long) Math.min(rows, 4) * columns) {
             throw new IllegalArgumentException("projection buffers or dimensions are invalid");
         }
-        for (int rowBase = 0; rowBase < rows; rowBase += 4) {
-            int blockRows = Math.min(4, rows - rowBase);
+        int rowTile = Math.min(32, rowScratch.length / columns);
+        for (int rowBase = 0; rowBase < rows; rowBase += rowTile) {
+            int blockRows = Math.min(rowTile, rows - rowBase);
             matMul(activations, activationOffset + rowBase * inner, weights, weightOffset,
                     rowScratch, 0, blockRows, inner, columns);
             VectorProjectionArgMaxKernel.finish(rowScratch, blockRows, columns, bias, biasOffset,

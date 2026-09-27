@@ -2,6 +2,37 @@
 
 All notable changes to this project are documented in this file.
 
+## [0.2.1] - 2026-09-27
+
+### Changed
+
+- Connected AUTO DET/REC intra-op budgets to the prepared graph executor, with
+  bounded shared workers and disjoint convolution/matrix shards.
+- Added prepared physical Conv instructions and eligible BN, bias, residual,
+  and activation fusion, sharing one plan with the workspace allocator.
+- Reused REC projection weight panels across larger row tiles and split the
+  MatMul hot loop to reduce Vector API compilation-stage allocation.
+- Added prepared spatial convolution input panels and output-channel packed
+  weights. Extra model-wide packing is bounded to 80 KiB; weights exceeding
+  the cache budget use session-reused scratch rather than per-call arrays.
+- Included spatial packing in the total prepared-weight benchmark metric,
+  with separate spatial weight/scratch diagnostics.
+
+### Added
+
+- Reproducible local end-to-end OCR measurements, environment/model hashes,
+  frozen source snapshots, cold-start and process-peak memory records.
+- Regression coverage for fusion liveness, parallel tails, spatial padding,
+  dilation, nonfinite weights, cache budgets, and reused scratch.
+
+### Compatibility
+
+- Existing OCR APIs, Tiny models, dictionary and detection thresholds remain
+  unchanged. The graph remains NCHW; this is not a graph-wide NHWC migration.
+- Core remains Java 8 bytecode; the optional Vector backend requires JDK 25.
+- Release publication remains gated by three-platform tests and the existing
+  performance checks. Local measurements do not prove dataset CER or CI success.
+
 ## [0.2.0] - 2026-09-20
 
 ### Highlights
@@ -124,4 +155,5 @@ All notable changes to this project are documented in this file.
   versions.
 
 [0.2.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.2.0
+[0.2.1]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.2.1
 [0.1.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.1.0

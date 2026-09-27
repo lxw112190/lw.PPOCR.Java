@@ -31,7 +31,8 @@ public final class CtcProjectionSession implements AutoCloseable {
         this.backend = backend;
         this.weights = weights;
         this.bias = bias;
-        this.rowScratch = new float[Math.min(rows, 4) * weights.getColumns()];
+        this.rowScratch = new float[backend.projectionScratchRows(rows, weights.getInner(),
+                weights.getColumns()) * weights.getColumns()];
         this.rows = rows;
     }
 
@@ -110,7 +111,16 @@ public final class CtcProjectionSession implements AutoCloseable {
     }
 
     public int getTimeSteps() { return rows; }
+
+    public void setIntraOpParallelism(int count) {
+        ensureOpen();
+        prefix.setIntraOpParallelism(count);
+    }
     public int getClassCount() { return weights.getColumns(); }
+    public int fusedConvCount() { ensureOpen(); return prefix.fusedConvCount(); }
+    public long spatialScratchBytes() { ensureOpen(); return prefix.spatialScratchBytes(); }
+    /** Additional retained scratch, separate from the prefix graph workspace. */
+    public long getProjectionScratchBytes() { return (long) rowScratch.length * Float.BYTES; }
     public long getDenseOutputBytesAvoided() { return (long) rows * weights.getColumns() * 4L; }
     public long getWorkspaceBytes() { ensureOpen(); return prefix.execution().workspacePlan().getTotalBytes(); }
     /** Returns the model-wide retained prepared projection matrix bytes. */

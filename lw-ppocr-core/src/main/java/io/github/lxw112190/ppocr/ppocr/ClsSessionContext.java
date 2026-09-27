@@ -33,6 +33,9 @@ final class ClsSessionContext implements AutoCloseable {
         return ClsPostprocess.decode(output.array(), output.offset(), output.length(), resizedWidth);
     }
 
+    int fusedConvCount() { return session.fusedConvCount(); }
+    long spatialScratchBytes() { return session.spatialScratchBytes(); }
+
     WorkspaceDiagnostics workspaceDiagnostics() {
         return session.workspaceDiagnostics();
     }

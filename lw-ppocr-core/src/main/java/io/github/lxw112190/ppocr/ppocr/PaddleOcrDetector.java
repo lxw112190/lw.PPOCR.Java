@@ -16,6 +16,14 @@ import java.util.List;
 
 /** DET facade with static compatibility and cached C-compatible dynamic shapes. */
 public final class PaddleOcrDetector implements AutoCloseable {
+    private int intraOpParallelism = 1;
+
+    /** Uses a bounded share of the pipeline CPU budget for large DET convolutions. */
+    public void setIntraOpParallelism(int count) {
+        ensureOpen();
+        if (count <= 0) throw new IllegalArgumentException("operator parallelism must be positive");
+        intraOpParallelism = count;
+    }
     private static final int DEFAULT_DYNAMIC_LIMIT_SIDE = 960;
     private static final int DYNAMIC_CACHE_CAPACITY = 3;
 
@@ -38,6 +46,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
                                      float unclipRatio, boolean useDilation, int maxCandidates) {
         ensureOpen();
         DetSessionContext context = contextFor(source);
+        context.session.setIntraOpParallelism(intraOpParallelism);
         context.preprocess(source);
         context.session.runBound();
         FloatTensorView probabilityMap = context.session.outputView();
@@ -72,6 +81,9 @@ public final class PaddleOcrDetector implements AutoCloseable {
         return sessions.size();
     }
 
+    public int fusedConvCount() { ensureOpen(); return sessions.fusedConvCount(); }
+    public long spatialScratchBytes() { ensureOpen(); return sessions.spatialScratchBytes(); }
+
     /** Fills a caller-owned detection list without allocating a result list. */
     public void detectInto(BgrImage source, float bitmapThreshold, float boxThreshold,
                            float unclipRatio, boolean useDilation, int maxCandidates,
@@ -82,6 +94,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
                     "DET destination list is required");
         }
         DetSessionContext context = contextFor(source);
+        context.session.setIntraOpParallelism(intraOpParallelism);
         context.preprocess(source);
         context.session.runBound();
         FloatTensorView probabilityMap = context.session.outputView();

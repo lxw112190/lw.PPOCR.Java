@@ -15,6 +15,7 @@ public final class PreparedExecution {
     private final CompiledModel compiledModel;
     private final List<TensorShape> shapes;
     private final WorkspacePlan workspacePlan;
+    private final ConvFusionPlan[] convFusionPlans;
     private final int[] offsets;
     private final int[] lengths;
 
@@ -30,6 +31,18 @@ public final class PreparedExecution {
                       boolean aliasElementwise) {
         this(model, inputShapes, model.getNodes(), model.getGraphOutputs(), false,
                 fuseGelu, aliasElementwise);
+    }
+
+    PreparedExecution(LwmModel model, List<TensorShape> inputShapes, boolean fuseGelu,
+                      boolean aliasElementwise, boolean fuseConv) {
+        this(model, inputShapes, model.getNodes(), model.getGraphOutputs(), false,
+                fuseGelu, aliasElementwise, fuseConv);
+    }
+
+    PreparedExecution(LwmModel model, List<TensorShape> inputShapes, List<NodeInfo> nodes,
+                      int outputIndex, boolean fuseGelu, boolean aliasElementwise, boolean fuseConv) {
+        this(model, inputShapes, nodes, Collections.singletonList(outputIndex), true,
+                fuseGelu, aliasElementwise, fuseConv);
     }
 
     PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
@@ -55,15 +68,23 @@ public final class PreparedExecution {
                               List<NodeInfo> nodes,
                               List<Integer> outputs, boolean partial, boolean fuseGelu,
                               boolean aliasElementwise) {
+        this(model, inputShapes, nodes, outputs, partial, fuseGelu, aliasElementwise, false);
+    }
+
+    private PreparedExecution(LwmModel model, List<TensorShape> inputShapes,
+                              List<NodeInfo> nodes, List<Integer> outputs, boolean partial,
+                              boolean fuseGelu, boolean aliasElementwise, boolean fuseConv) {
         this.compiledModel = CompiledModel.acquire(model);
         this.model = compiledModel.model();
         this.shapes = ShapeResolver.resolve(model, inputShapes);
+        this.convFusionPlans = fuseConv ? ConvFusionPlan.compile(compiledModel, nodes, shapes, outputs)
+                : new ConvFusionPlan[nodes.size()];
         int[] concatAxes = concatAxes(nodes, compiledModel);
         this.workspacePlan = partial
                 ? MemoryPlanner.planPartial(model.getTensors(), nodes, model.getGraphInputs(),
-                        outputs, shapes, fuseGelu, aliasElementwise, concatAxes)
+                        outputs, shapes, fuseGelu, aliasElementwise, concatAxes, convFusionPlans)
                 : MemoryPlanner.plan(model.getTensors(), nodes, model.getGraphInputs(),
-                        outputs, shapes, fuseGelu, aliasElementwise, concatAxes);
+                        outputs, shapes, fuseGelu, aliasElementwise, concatAxes, convFusionPlans);
         this.offsets = new int[model.getTensors().size()];
         this.lengths = new int[model.getTensors().size()];
         for (int i = 0; i < model.getTensors().size(); i++) {
@@ -102,6 +123,7 @@ public final class PreparedExecution {
     public int length(int tensorIndex) { return lengths[tensorIndex]; }
 
     CompiledModel compiledModel() { return compiledModel; }
+    ConvFusionPlan[] convFusionPlans() { return convFusionPlans; }
 
     private static int[] concatAxes(List<NodeInfo> nodes, CompiledModel compiledModel) {
         int[] axes = new int[nodes.size()];

@@ -4,6 +4,7 @@ import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.BinaryOp;
 import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
 import io.github.lxw112190.ppocr.kernels.InPlaceElementwiseBackend;
+import io.github.lxw112190.ppocr.kernels.ConvEpilogueBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
@@ -16,9 +17,15 @@ import java.util.List;
 
 /** Prepared, reusable scalar execution session for the initial operator subset. */
 public final class InferenceSession implements AutoCloseable {
+    /** Sets this non-thread-safe session's share of the pipeline CPU budget. */
+    public void setIntraOpParallelism(int count) {
+        ensureOpen();
+        parallelKernels.setParallelism(count);
+    }
     private final PreparedExecution execution;
     private final Workspace workspace;
     private final KernelBackend backend;
+    private final ParallelKernels parallelKernels;
     private final FusedGeluBackend fusedGeluBackend;
     private final PreparedNode[] nodes;
     private final int[][] transposePermutations;
@@ -32,6 +39,7 @@ public final class InferenceSession implements AutoCloseable {
     private final BinaryPlan[] binaryPlans;
     private final InferenceProfiler.NodeDescriptor[] profileDescriptors;
     private final GeluPlan[] geluPlans;
+    private final PhysicalConv[] physicalConvs;
     private final int inputIndex;
     private final int outputIndex;
     private final FloatTensorView inputView;
@@ -71,11 +79,13 @@ public final class InferenceSession implements AutoCloseable {
         this.outputIndex = outputIndex;
         boolean supportsFusedGelu = backend instanceof FusedGeluBackend;
         boolean supportsInPlaceElementwise = backend instanceof InPlaceElementwiseBackend;
+        boolean supportsConvFusion = backend instanceof ConvEpilogueBackend
+                && !Boolean.getBoolean("lwppocr.disableConvFusion");
         this.execution = partial
                 ? new PreparedExecution(model, inputShapes, sessionNodes, outputIndex,
-                        supportsFusedGelu, supportsInPlaceElementwise)
+                        supportsFusedGelu, supportsInPlaceElementwise, supportsConvFusion)
                 : new PreparedExecution(model, inputShapes, supportsFusedGelu,
-                        supportsInPlaceElementwise);
+                        supportsInPlaceElementwise, supportsConvFusion);
         this.workspace = new Workspace(execution.workspacePlan());
         float[] storage = workspace.fp32();
         this.inputView = new FloatTensorView(storage, execution.offset(inputIndex),
@@ -83,6 +93,7 @@ public final class InferenceSession implements AutoCloseable {
         this.outputView = new FloatTensorView(storage, execution.offset(outputIndex),
                 execution.length(outputIndex));
         this.backend = backend;
+        this.parallelKernels = new ParallelKernels(backend);
         this.fusedGeluBackend = supportsFusedGelu
                 ? (FusedGeluBackend) backend : null;
         CompiledModel compiledModel = execution.compiledModel();
@@ -98,12 +109,14 @@ public final class InferenceSession implements AutoCloseable {
         this.binaryPlans = new BinaryPlan[nodes.length];
         this.profileDescriptors = new InferenceProfiler.NodeDescriptor[nodes.length];
         this.geluPlans = new GeluPlan[nodes.length];
+        this.physicalConvs = new PhysicalConv[nodes.length];
         for (int i = 0; i < nodes.length; i++) {
             NodeInfo node = compiledModel.node(i);
             PreparedNode prepared = new PreparedNode(i, node.getOperator(),
                     compiledModel.nodeInputs(i), compiledModel.nodeOutputs(i),
                     compiledModel.parameterData(i));
             this.nodes[i] = prepared;
+            this.physicalConvs[i] = PhysicalConv.prepare(execution, prepared, storage, backend);
             prepareBinary(prepared);
             prepareTranspose(prepared);
             prepareReduceMean(prepared);
@@ -111,6 +124,9 @@ public final class InferenceSession implements AutoCloseable {
             prepareConcat(prepared);
             prepareLayout(prepared);
         }
+        int spatialScratch = 0;
+        for (PhysicalConv conv : physicalConvs) if (conv != null) spatialScratch = Math.max(spatialScratch, conv.scratchFloats());
+        parallelKernels.prepareSpatialScratch(spatialScratch);
         if (fusedGeluBackend != null) prepareGeluPlans();
     }
 
@@ -143,6 +159,12 @@ public final class InferenceSession implements AutoCloseable {
         ensureOpen();
         float[] storage = workspace.fp32();
         for (int i = 0; i < nodes.length; i++) {
+            PhysicalConv conv = physicalConvs[i];
+            if (conv != null) {
+                executePhysicalConv(i, conv);
+                i = conv.last;
+                continue;
+            }
             GeluPlan gelu = geluPlans[i];
             if (gelu == null) {
                 executeNode(i, nodes[i], storage);
@@ -154,6 +176,51 @@ public final class InferenceSession implements AutoCloseable {
     }
 
     public PreparedExecution execution() { ensureOpen(); return execution; }
+
+    /** Number of semantic Conv sequences collapsed into physical instructions. */
+    public int fusedConvCount() {
+        ensureOpen();
+        int count = 0;
+        for (PhysicalConv conv : physicalConvs) if (conv != null && conv.fusion != null) count++;
+        return count;
+    }
+
+    public long spatialScratchBytes() { ensureOpen(); return parallelKernels.spatialScratchBytes(); }
+
+    public int spatialPanelConvCount() {
+        ensureOpen();
+        int count = 0;
+        for (PhysicalConv conv : physicalConvs) if (conv != null && conv.usesSpatialPanel()) count++;
+        return count;
+    }
+
+    private void executePhysicalConv(int index, PhysicalConv conv) {
+        InferenceProfiler profiler = InferenceProfiler.current();
+        long start = profiler == null ? 0 : System.nanoTime();
+        try {
+            conv.run(parallelKernels);
+        } catch (OcrException e) {
+            throw e;
+        } catch (RuntimeException e) {
+            throw unsupported(nodes[index], "invalid physical Conv parameters or tensor layout", e);
+        } finally {
+            if (profiler != null) {
+                InferenceProfiler.NodeDescriptor descriptor = profileDescriptors[index];
+                if (descriptor == null) {
+                    String description = "physical_conv,semantic_span=" + index + ".." + conv.last
+                            + ",input=" + execution.shapes().get(nodes[index].inputs[0])
+                            + ",output=" + execution.shapes().get(conv.fusion == null
+                            ? nodes[index].outputs[0] : conv.fusion.output)
+                            + ",epilogue=" + (conv.fusion == null ? 0 : conv.fusion.epilogue.activation)
+                            + ",spatial_panel=" + conv.usesSpatialPanel();
+                    descriptor = new InferenceProfiler.NodeDescriptor(execution.model(), index,
+                            OperatorType.CONV, description);
+                    profileDescriptors[index] = descriptor;
+                }
+                profiler.record(descriptor, System.nanoTime() - start);
+            }
+        }
+    }
 
     /** Returns the prepared workspace measurements for this shape-specialized session. */
     public WorkspaceDiagnostics workspaceDiagnostics() {
@@ -445,7 +512,7 @@ public final class InferenceSession implements AutoCloseable {
                 TensorShape c = execution.shapes().get(output);
                 if (a.getRank() == 2 && c.getRank() == 2) {
                     if (a.get(1) != b.get(0) || c.get(0) != a.get(0) || c.get(1) != b.get(1)) throw unsupported(node, "MatMul shape mismatch");
-                    backend.matMul(left, leftOffset, right, rightOffset, storage, offset(output), a.get(0), a.get(1), b.get(1));
+                    parallelKernels.matMul(left, leftOffset, right, rightOffset, storage, offset(output), a.get(0), a.get(1), b.get(1));
                 } else if (a.getRank() == 3 && c.getRank() == 3 && a.get(2) == b.get(0) &&
                         c.get(0) == a.get(0) && c.get(1) == a.get(1) && c.get(2) == b.get(1)) {
                     int batch = a.get(0);
@@ -455,7 +522,7 @@ public final class InferenceSession implements AutoCloseable {
                     int leftBatch = rows * inner;
                     int outputBatch = rows * columns;
                     for (int i = 0; i < batch; i++) {
-                        backend.matMul(left, leftOffset + i * leftBatch, right, rightOffset,
+                        parallelKernels.matMul(left, leftOffset + i * leftBatch, right, rightOffset,
                                 storage, offset(output) + i * outputBatch, rows, inner, columns);
                     }
                 } else {
@@ -533,7 +600,7 @@ public final class InferenceSession implements AutoCloseable {
         }
         float[] weights = data(inputs[1], storage);
         float[] bias = inputs.length == 3 ? data(inputs[2], storage) : null;
-        backend.conv(data(inputs[0], storage), offset(inputs[0]), weights, offset(inputs[1]), bias,
+        parallelKernels.conv(data(inputs[0], storage), offset(inputs[0]), weights, offset(inputs[1]), bias,
                 inputs.length == 3 ? offset(inputs[2]) : 0, storage, offset(output),
                 inputShape.get(0), inputShape.get(1), inputShape.get(2), inputShape.get(3),
                 weightShape.get(0), kernelHeight, kernelWidth, strideHeight, strideWidth,

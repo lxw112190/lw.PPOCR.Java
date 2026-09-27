@@ -37,6 +37,18 @@ final class DetSessionCache implements AutoCloseable {
 
     int size() { return entries.size(); }
 
+    int fusedConvCount() {
+        int count = 0;
+        for (DetSessionContext context : entries.values()) count += context.session.fusedConvCount();
+        return count;
+    }
+
+    long spatialScratchBytes() {
+        long bytes = 0;
+        for (DetSessionContext context : entries.values()) bytes += context.session.spatialScratchBytes();
+        return bytes;
+    }
+
     DetSessionContext getOrCreate(DetShapeKey key, LwmModel model, KernelBackend backend) {
         DetSessionContext existing = entries.get(key);
         if (existing != null) return existing;

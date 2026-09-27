@@ -15,6 +15,14 @@ import org.junit.Test;
 public final class VectorFullOcrGoldenTest {
     @Test
     public void matchesPinnedCPipeline() throws Exception {
+        matchesPinnedCPipeline(false);
+    }
+
+    @Test public void automaticOperatorParallelismMatchesPinnedCPipeline() throws Exception {
+        matchesPinnedCPipeline(true);
+    }
+
+    private void matchesPinnedCPipeline(boolean automatic) throws Exception {
         VectorBackend backend = new VectorBackend();
         BgrImage image = FullOcrGoldenFixture.loadImage(VectorFullOcrGoldenTest.class);
         Path directory = Files.createTempDirectory(Paths.get("target"),
@@ -27,11 +35,12 @@ public final class VectorFullOcrGoldenTest {
         copyResource(classifier, FullOcrGoldenFixture.ROOT + "cls/cls.lwm");
         copyResource(recognizer, FullOcrGoldenFixture.ROOT + "rec/rec.lwm");
         copyResource(dictionary, FullOcrGoldenFixture.ROOT + "rec/ppocr_keys.txt");
-        PaddleOcrOptions options = PaddleOcrOptions.builder()
+        PaddleOcrOptions.Builder builder = PaddleOcrOptions.builder()
                 .setDetectionMaximumSideLength(320)
                 .setClassificationParallelism(4)
-                .setRecognitionParallelism(4)
-                .build();
+                .setRecognitionParallelism(4);
+        if (automatic) builder.setParallelism(0);
+        PaddleOcrOptions options = builder.build();
         try (PaddleOcr ocr = PaddleOcr.load(detector, classifier, recognizer,
                 dictionary, options, backend)) {
             FullOcrGoldenFixture.assertMatches(ocr.recognize(image));

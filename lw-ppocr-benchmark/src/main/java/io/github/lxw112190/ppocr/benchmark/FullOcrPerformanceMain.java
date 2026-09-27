@@ -79,7 +79,7 @@ public final class FullOcrPerformanceMain {
         long loadStart = System.nanoTime();
         try (ProcessMemoryProbe ignored = processMemory;
              ProfiledPipeline pipeline = loadPipeline(detectorLimit, backend,
-                recognitionParallelism, classificationParallelism, allocationProbe)) {
+                recognitionParallelism, classificationParallelism, allocationProbe, automaticPlan)) {
             long modelLoadNanos = System.nanoTime() - loadStart;
             processMemory.refresh();
             long processRssLoaded = processMemory.rssBytes();
@@ -183,6 +183,9 @@ public final class FullOcrPerformanceMain {
                             + "\"parallelism_policy\":\"%s\","
                             + "\"classification_parallelism\":%d,"
                             + "\"recognition_parallelism\":%d,"
+                            + "\"detector_intra_op\":%d,\"recognizer_intra_op\":%d,"
+                            + "\"projection_scratch_bytes\":%d,"
+                            + "\"fused_conv_plans\":{\"detector\":%d,\"classifier\":%d,\"recognizer\":%d},"
                             + "\"operator_profile_scope\":\"%s\","
                             + "\"operator_profile_iterations\":1,\"operator_profile_ms\":%.3f,"
                             + "\"image_width\":%d,"
@@ -230,6 +233,7 @@ public final class FullOcrPerformanceMain {
                             + "\"rec_workspace_bytes\":%d,\"rec_workspace_by_width\":%s,"
                             + "\"rec_fallback_workspace_bytes\":%d,"
                             + "\"decoded_constant_bytes\":%d,\"packed_weight_bytes\":%d,"
+                            + "\"spatial_packed_weight_bytes\":%d,\"spatial_scratch_bytes\":%d,"
                             + "\"workspace_sessions\":{\"detector\":%d,\"classifier\":%d,\"recognizer\":%d},"
                             + "\"profile_stage_allocated_bytes\":{"
                             + "\"detection\":%d,\"crop\":%d,\"classification\":%d,"
@@ -240,7 +244,14 @@ public final class FullOcrPerformanceMain {
                     Boolean.toString(pipeline.isProjectionFusionActive()),
                     Boolean.toString(automaticParallelism), parallelismPolicy,
                     classificationParallelism,
-                    recognitionParallelism, profileScope,
+                    recognitionParallelism,
+                    automaticPlan == null || Boolean.getBoolean("lwppocr.disableIntraOp")
+                            ? 1 : automaticPlan.getDetectorIntraOp(),
+                    automaticPlan == null || Boolean.getBoolean("lwppocr.disableIntraOp")
+                            ? 1 : automaticPlan.getRecognizerIntraOp(),
+                    pipeline.recognizer.projectionScratchBytes(), pipeline.detector.fusedConvCount(),
+                    pipeline.classifier == null ? 0 : pipeline.classifier.fusedConvCount(),
+                    pipeline.recognizer.fusedConvCount(), profileScope,
                     milliseconds(profiledSample.totalNanos),
                     image.width(), image.height(), detectorLimit, lineCount,
                     warmup, iterations, warmup + iterations,
@@ -268,7 +279,13 @@ public final class FullOcrPerformanceMain {
                     pipeline.detectorWorkspaceBytes(), pipeline.classifierWorkspaceBytes(),
                     pipeline.recognizerWorkspaceBytes(), pipeline.recognizerWorkspaceJson(),
                     pipeline.recognizerFallbackWorkspaceBytes(),
-                    pipeline.decodedConstantBytes(), pipeline.packedWeightBytes(),
+                    pipeline.decodedConstantBytes(), pipeline.packedWeightBytes()
+                            + (backend instanceof io.github.lxw112190.ppocr.kernels.PreparedConvBackend
+                            ? ((io.github.lxw112190.ppocr.kernels.PreparedConvBackend) backend).preparedConvWeightBytes() : 0),
+                    backend instanceof io.github.lxw112190.ppocr.kernels.PreparedConvBackend
+                            ? ((io.github.lxw112190.ppocr.kernels.PreparedConvBackend) backend).preparedConvWeightBytes() : 0,
+                    pipeline.detector.spatialScratchBytes() + pipeline.recognizer.spatialScratchBytes()
+                            + (pipeline.classifier == null ? 0 : pipeline.classifier.spatialScratchBytes()),
                     pipeline.detectorSessionCount(), pipeline.classifierSessionCount(),
                     pipeline.recognizerSessionCount(),
                     profiledSample.detectionAllocatedBytes, profiledSample.cropAllocatedBytes,
@@ -310,7 +327,8 @@ public final class FullOcrPerformanceMain {
     private static ProfiledPipeline loadPipeline(int detectorLimit, KernelBackend backend,
                                                  int recognitionParallelism,
                                                  int classificationParallelism,
-                                                 ThreadAllocationProbe allocationProbe) throws IOException {
+                                                 ThreadAllocationProbe allocationProbe,
+                                                 ParallelismPlan automaticPlan) throws IOException {
         LwmModel detectorModel = loadModel(DET_MODEL);
         PaddleOcrDetector detector = null;
         LwmModel classifierModel = null;
@@ -320,11 +338,13 @@ public final class FullOcrPerformanceMain {
         PaddleOcrRecognizer recognizer = null;
         try {
             detector = new PaddleOcrDetector(detectorModel, detectorLimit, backend);
+            detector.setIntraOpParallelism(automaticPlan == null ? 1 : automaticPlan.getDetectorIntraOp());
             classifierModel = loadModel(CLS_MODEL);
             classifier = new PaddleOcrClassifier(classifierModel, backend);
             recognizerModel = loadModel(REC_MODEL);
             dictionary = loadDictionary();
             recognizer = new PaddleOcrRecognizer(recognizerModel, dictionary, backend);
+            recognizer.setIntraOpParallelism(automaticPlan == null ? 1 : automaticPlan.getRecognizerIntraOp());
             return new ProfiledPipeline(detector, classifier, recognizer,
                     recognitionParallelism, classificationParallelism, allocationProbe);
         } catch (RuntimeException e) {

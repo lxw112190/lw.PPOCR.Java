@@ -4,6 +4,9 @@ package io.github.lxw112190.ppocr.kernels;
 public interface ProjectionArgMaxBackend {
     boolean supportsProjectionArgMax(int rows, int inner, int columns);
 
+    /** Bounded reusable scratch request, allocated once per width session. */
+    default int projectionScratchRows(int rows, int inner, int columns) { return Math.min(rows, 4); }
+
     /**
      * Computes {@code activations * weights + bias}, then the row-wise argmax and
      * the winning softmax probability without retaining the dense output matrix.

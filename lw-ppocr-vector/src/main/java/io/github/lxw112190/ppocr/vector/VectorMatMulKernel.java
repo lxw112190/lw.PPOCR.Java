@@ -11,11 +11,25 @@ final class VectorMatMulKernel {
 
     static void multiply(float[] left, int leftOffset, float[] right, int rightOffset,
                          float[] output, int outputOffset, int rows, int inner, int columns) {
-        int bound = SPECIES.loopBound(columns);
+        // A dictionary weight matrix is much larger than cache. Keep one 128-class
+        // panel hot across all row microtiles instead of rescanning it every four rows.
+        if (rows >= 8 && columns >= 1024 && !Boolean.getBoolean("lwppocr.disableProjectionPanel")) {
+            for (int column = 0; column < columns; column += 128) {
+                multiplyRange(left, leftOffset, right, rightOffset, output, outputOffset,
+                        rows, inner, columns, column, Math.min(columns, column + 128));
+            }
+        } else {
+            multiplyRange(left, leftOffset, right, rightOffset, output, outputOffset,
+                    rows, inner, columns, 0, columns);
+        }
+    }
+
+    private static void multiplyRange(float[] left, int leftOffset, float[] right, int rightOffset,
+                                      float[] output, int outputOffset, int rows, int inner,
+                                      int columns, int firstColumn, int endColumn) {
+        int bound = SPECIES.loopBound(endColumn);
         int vectorWidth = SPECIES.length();
-        int pairedBound = columns - columns % (vectorWidth * 2);
-        int blockWidth = vectorWidth * 4;
-        int blockBound = columns - columns % blockWidth;
+        int pairedBound = endColumn - endColumn % (vectorWidth * 2);
         int row = 0;
         for (; row + 3 < rows; row += 4) {
             int leftRow0 = leftOffset + row * inner;
@@ -26,43 +40,10 @@ final class VectorMatMulKernel {
             int outputRow1 = outputRow0 + columns;
             int outputRow2 = outputRow1 + columns;
             int outputRow3 = outputRow2 + columns;
-            int column = 0;
+            int column = firstColumn;
             for (; column < pairedBound; column += vectorWidth * 2) {
-                FloatVector sum00 = FloatVector.zero(SPECIES);
-                FloatVector sum01 = FloatVector.zero(SPECIES);
-                FloatVector sum10 = FloatVector.zero(SPECIES);
-                FloatVector sum11 = FloatVector.zero(SPECIES);
-                FloatVector sum20 = FloatVector.zero(SPECIES);
-                FloatVector sum21 = FloatVector.zero(SPECIES);
-                FloatVector sum30 = FloatVector.zero(SPECIES);
-                FloatVector sum31 = FloatVector.zero(SPECIES);
-                int rightRow = rightOffset + column;
-                for (int k = 0; k < inner; k++) {
-                    FloatVector values0 = FloatVector.fromArray(SPECIES, right, rightRow);
-                    FloatVector values1 = FloatVector.fromArray(
-                            SPECIES, right, rightRow + vectorWidth);
-                    float left0 = left[leftRow0 + k];
-                    float left1 = left[leftRow1 + k];
-                    float left2 = left[leftRow2 + k];
-                    float left3 = left[leftRow3 + k];
-                    sum00 = sum00.add(values0.mul(left0));
-                    sum01 = sum01.add(values1.mul(left0));
-                    sum10 = sum10.add(values0.mul(left1));
-                    sum11 = sum11.add(values1.mul(left1));
-                    sum20 = sum20.add(values0.mul(left2));
-                    sum21 = sum21.add(values1.mul(left2));
-                    sum30 = sum30.add(values0.mul(left3));
-                    sum31 = sum31.add(values1.mul(left3));
-                    rightRow += columns;
-                }
-                sum00.intoArray(output, outputRow0 + column);
-                sum01.intoArray(output, outputRow0 + column + vectorWidth);
-                sum10.intoArray(output, outputRow1 + column);
-                sum11.intoArray(output, outputRow1 + column + vectorWidth);
-                sum20.intoArray(output, outputRow2 + column);
-                sum21.intoArray(output, outputRow2 + column + vectorWidth);
-                sum30.intoArray(output, outputRow3 + column);
-                sum31.intoArray(output, outputRow3 + column + vectorWidth);
+                multiplyFourRowsPair(left, leftRow0, right, rightOffset + column,
+                        output, outputRow0 + column, inner, columns);
             }
             for (; column < bound; column += vectorWidth) {
                 FloatVector sum0 = FloatVector.zero(SPECIES);
@@ -83,7 +64,7 @@ final class VectorMatMulKernel {
                 sum2.intoArray(output, outputRow2 + column);
                 sum3.intoArray(output, outputRow3 + column);
             }
-            for (; column < columns; column++) {
+            for (; column < endColumn; column++) {
                 float sum0 = 0.0f;
                 float sum1 = 0.0f;
                 float sum2 = 0.0f;
@@ -103,10 +84,73 @@ final class VectorMatMulKernel {
                 output[outputRow3 + column] = sum3;
             }
         }
+        multiplyRemainingRows(left, leftOffset, right, rightOffset, output, outputOffset,
+                row, rows, inner, columns, firstColumn, endColumn);
+    }
+
+    // Array-only boundaries keep vector values local to this compact hot method.
+    // Calling per column microtile also avoids waiting for the panel dispatcher
+    // to accumulate enough invocations before C2 compiles the arithmetic loop.
+    private static void multiplyFourRowsPair(float[] left, int leftRow0,
+                                            float[] right, int rightRow,
+                                            float[] output, int outputRow0,
+                                            int inner, int columns) {
+        int vectorWidth = SPECIES.length();
+        int leftRow1 = leftRow0 + inner;
+        int leftRow2 = leftRow1 + inner;
+        int leftRow3 = leftRow2 + inner;
+        int outputRow1 = outputRow0 + columns;
+        int outputRow2 = outputRow1 + columns;
+        int outputRow3 = outputRow2 + columns;
+        FloatVector sum00 = FloatVector.zero(SPECIES);
+        FloatVector sum01 = FloatVector.zero(SPECIES);
+        FloatVector sum10 = FloatVector.zero(SPECIES);
+        FloatVector sum11 = FloatVector.zero(SPECIES);
+        FloatVector sum20 = FloatVector.zero(SPECIES);
+        FloatVector sum21 = FloatVector.zero(SPECIES);
+        FloatVector sum30 = FloatVector.zero(SPECIES);
+        FloatVector sum31 = FloatVector.zero(SPECIES);
+        for (int k = 0; k < inner; k++) {
+            FloatVector values0 = FloatVector.fromArray(SPECIES, right, rightRow);
+            FloatVector values1 = FloatVector.fromArray(
+                    SPECIES, right, rightRow + vectorWidth);
+            float left0 = left[leftRow0 + k];
+            float left1 = left[leftRow1 + k];
+            float left2 = left[leftRow2 + k];
+            float left3 = left[leftRow3 + k];
+            sum00 = sum00.add(values0.mul(left0));
+            sum01 = sum01.add(values1.mul(left0));
+            sum10 = sum10.add(values0.mul(left1));
+            sum11 = sum11.add(values1.mul(left1));
+            sum20 = sum20.add(values0.mul(left2));
+            sum21 = sum21.add(values1.mul(left2));
+            sum30 = sum30.add(values0.mul(left3));
+            sum31 = sum31.add(values1.mul(left3));
+            rightRow += columns;
+        }
+        sum00.intoArray(output, outputRow0);
+        sum01.intoArray(output, outputRow0 + vectorWidth);
+        sum10.intoArray(output, outputRow1);
+        sum11.intoArray(output, outputRow1 + vectorWidth);
+        sum20.intoArray(output, outputRow2);
+        sum21.intoArray(output, outputRow2 + vectorWidth);
+        sum30.intoArray(output, outputRow3);
+        sum31.intoArray(output, outputRow3 + vectorWidth);
+    }
+
+    private static void multiplyRemainingRows(float[] left, int leftOffset,
+                                              float[] right, int rightOffset,
+                                              float[] output, int outputOffset,
+                                              int row, int rows, int inner, int columns,
+                                              int firstColumn, int endColumn) {
+        int vectorWidth = SPECIES.length();
+        int bound = SPECIES.loopBound(endColumn);
+        int blockWidth = vectorWidth * 4;
+        int blockBound = endColumn - endColumn % blockWidth;
         for (; row < rows; row++) {
             int outputRow = outputOffset + row * columns;
             int leftRow = leftOffset + row * inner;
-            int column = 0;
+            int column = firstColumn;
             for (; column < blockBound; column += blockWidth) {
                 FloatVector sum0 = FloatVector.zero(SPECIES);
                 FloatVector sum1 = FloatVector.zero(SPECIES);
@@ -139,7 +183,7 @@ final class VectorMatMulKernel {
                 }
                 sum.intoArray(output, outputRow + column);
             }
-            for (; column < columns; column++) {
+            for (; column < endColumn; column++) {
                 float sum = 0.0f;
                 int rightIndex = rightOffset + column;
                 for (int k = 0; k < inner; k++) {

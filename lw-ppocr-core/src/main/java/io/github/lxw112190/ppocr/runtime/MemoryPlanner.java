@@ -42,9 +42,18 @@ public final class MemoryPlanner {
                               List<Integer> graphInputs, List<Integer> graphOutputs,
                               List<TensorShape> shapes, boolean fuseGelu,
                               boolean aliasElementwise, int[] concatAxes) {
+        return plan(tensors, nodes, graphInputs, graphOutputs, shapes, fuseGelu,
+                aliasElementwise, concatAxes, null);
+    }
+
+    static WorkspacePlan plan(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                              List<Integer> graphInputs, List<Integer> graphOutputs,
+                              List<TensorShape> shapes, boolean fuseGelu,
+                              boolean aliasElementwise, int[] concatAxes, ConvFusionPlan[] convFusions) {
         PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, true,
                 concatAxes);
         Allocation old = allocateLegacy(data);
+        markConvPhantoms(data, convFusions);
         if (fuseGelu) markGeluPhantoms(data);
         if (aliasElementwise) {
             markLayoutAliases(data);
@@ -52,8 +61,8 @@ public final class MemoryPlanner {
             markConcatAliases(data);
         }
         Allocation current = allocateGreedy(data);
-        mapPhantomOffsets(data, current.offsets);
         mapAliasOffsets(data, current.offsets);
+        mapPhantomOffsets(data, current.offsets);
         return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
                 old.totalBytes, liveLowerBound(data));
     }
@@ -82,9 +91,18 @@ public final class MemoryPlanner {
                                      List<Integer> graphInputs, List<Integer> graphOutputs,
                                      List<TensorShape> shapes, boolean fuseGelu,
                                      boolean aliasElementwise, int[] concatAxes) {
+        return planPartial(tensors, nodes, graphInputs, graphOutputs, shapes, fuseGelu,
+                aliasElementwise, concatAxes, null);
+    }
+
+    static WorkspacePlan planPartial(List<TensorInfo> tensors, List<NodeInfo> nodes,
+                                     List<Integer> graphInputs, List<Integer> graphOutputs,
+                                     List<TensorShape> shapes, boolean fuseGelu,
+                                     boolean aliasElementwise, int[] concatAxes, ConvFusionPlan[] convFusions) {
         PlanningData data = prepare(tensors, nodes, graphInputs, graphOutputs, shapes, false,
                 concatAxes);
         Allocation old = allocateLegacy(data);
+        markConvPhantoms(data, convFusions);
         if (fuseGelu) markGeluPhantoms(data);
         if (aliasElementwise) {
             markLayoutAliases(data);
@@ -92,8 +110,8 @@ public final class MemoryPlanner {
             markConcatAliases(data);
         }
         Allocation current = allocateGreedy(data);
-        mapPhantomOffsets(data, current.offsets);
         mapAliasOffsets(data, current.offsets);
+        mapPhantomOffsets(data, current.offsets);
         return new WorkspacePlan(current.offsets, data.sizes, current.totalBytes,
                 old.totalBytes, liveLowerBound(data));
     }
@@ -233,8 +251,27 @@ public final class MemoryPlanner {
         return new Allocation(offsets, totalBytes);
     }
 
+    private static void markConvPhantoms(PlanningData data, ConvFusionPlan[] plans) {
+        if (plans == null) return;
+        for (ConvFusionPlan plan : plans) {
+            if (plan == null) continue;
+            // The final result is written at the Conv, not at the activation.
+            // Keep it live across that entire physical span, including residual reads.
+            data.births[plan.output] = Math.min(data.births[plan.output], plan.first);
+            for (int node = plan.first; node <= plan.last; node++) {
+                data.fusedNodes[node] = true;
+                for (int intermediate : data.nodes.get(node).getOutputs()) {
+                    if (intermediate == plan.output) continue;
+                    data.phantomSink[intermediate] = plan.output;
+                    data.sizes[intermediate] = 0;
+                }
+            }
+        }
+    }
+
     private static void markGeluPhantoms(PlanningData data) {
         for (int start = 0; start + 4 < data.nodes.size(); start++) {
+            if (data.fusedNodes[start]) continue;
             NodeInfo divide = data.nodes.get(start);
             NodeInfo erf = data.nodes.get(start + 1);
             NodeInfo add = data.nodes.get(start + 2);
@@ -482,7 +519,7 @@ public final class MemoryPlanner {
             if (sink < 0) continue;
             if (offsets[sink] < 0) {
                 throw new OcrException(OcrErrorCode.INVALID_MODEL,
-                        "GELU phantom sink has no workspace allocation: " + sink);
+                        "fused phantom sink has no workspace allocation: " + sink);
             }
             offsets[tensor] = offsets[sink];
         }

@@ -645,6 +645,25 @@ public final class VectorBackendTest {
         }
     }
 
+    @Test public void projectionPanelsMatchFourRowPathIncludingTailsAndOffsets() {
+        int rows = 35, inner = 31, columns = 1057;
+        float[] a = new float[5 + rows * inner], w = new float[7 + inner * columns];
+        float[] bias = new float[3 + columns];
+        for (int i = 0; i < a.length; i++) a[i] = (i % 43 - 21) * 0.01f;
+        for (int i = 0; i < w.length; i++) w[i] = (i % 71 - 35) * 0.02f;
+        for (int i = 0; i < bias.length; i++) bias[i] = (i % 17) * 0.003f;
+        int[] expectedIds = new int[rows], ids = new int[rows];
+        float[] expectedLogits = new float[rows], logits = new float[rows];
+        float[] expectedProbabilities = new float[rows], probabilities = new float[rows];
+        vector.projectionArgMax(a, 5, w, 7, bias, 3, rows, inner, columns,
+                expectedIds, expectedLogits, expectedProbabilities, new float[4 * columns]);
+        vector.projectionArgMax(a, 5, w, 7, bias, 3, rows, inner, columns,
+                ids, logits, probabilities, new float[32 * columns]);
+        Assert.assertArrayEquals(expectedIds, ids);
+        Assert.assertArrayEquals(expectedLogits, logits, 0);
+        Assert.assertArrayEquals(expectedProbabilities, probabilities, 0);
+    }
+
     private void assertBroadcast(BinaryOp operation, int[] leftShape, int[] rightShape,
                                  int[] outputShape) {
         float[] left = values(length(leftShape), 0.17f, 0.5f);

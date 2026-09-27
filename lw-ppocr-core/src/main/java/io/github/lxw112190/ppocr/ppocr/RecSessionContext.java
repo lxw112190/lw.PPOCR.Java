@@ -90,7 +90,19 @@ final class RecSessionContext implements AutoCloseable {
 
     int resizedWidth() { return resizedWidth; }
 
+    void setIntraOpParallelism(int count) {
+        if (projectionSession != null) projectionSession.setIntraOpParallelism(count);
+        else session.setIntraOpParallelism(count);
+    }
+
     boolean usesProjectionFusion() { return projectionSession != null; }
+
+    int fusedConvCount() { return projectionSession == null ? session.fusedConvCount() : projectionSession.fusedConvCount(); }
+    long spatialScratchBytes() { return projectionSession == null ? session.spatialScratchBytes() : projectionSession.spatialScratchBytes(); }
+
+    long projectionScratchBytes() {
+        return projectionSession == null ? 0L : projectionSession.getProjectionScratchBytes();
+    }
 
     WorkspaceDiagnostics workspaceDiagnostics() {
         return projectionSession != null

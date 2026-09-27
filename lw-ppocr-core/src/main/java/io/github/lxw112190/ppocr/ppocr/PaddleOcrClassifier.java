@@ -94,6 +94,20 @@ public final class PaddleOcrClassifier implements AutoCloseable {
         return contexts.size();
     }
 
+    public int fusedConvCount() {
+        ensureOpen();
+        int count = 0;
+        for (ClsSessionContext context : contexts) count += context.fusedConvCount();
+        return count;
+    }
+
+    public long spatialScratchBytes() {
+        ensureOpen();
+        long bytes = 0;
+        for (ClsSessionContext context : contexts) bytes += context.spatialScratchBytes();
+        return bytes;
+    }
+
     /** Classifies images concurrently while preserving input order. */
     public List<ClsClassificationResult> classifyAll(List<BgrImage> sources, int parallelism) {
         validateBatch(sources, parallelism, null);

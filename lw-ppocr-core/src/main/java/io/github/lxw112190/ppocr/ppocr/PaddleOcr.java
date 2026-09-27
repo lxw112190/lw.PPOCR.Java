@@ -106,12 +106,14 @@ public final class PaddleOcr implements AutoCloseable {
     public OcrResult recognize(BgrImage source) {
         ensureOpen();
         detectionStaging.clear();
+        detector.setIntraOpParallelism(options.parallelismPlan(0).getDetectorIntraOp());
         detector.detectInto(source,
                 options.getDetectionBitmapThreshold(), options.getDetectionBoxThreshold(),
                 options.getDetectionUnclipRatio(), options.isDetectionDilation(),
                 options.getMaxDetectionCandidates(), detectionStaging);
         List<DetectionBox> boxes = detectionStaging;
         ParallelismPlan parallelism = options.parallelismPlan(boxes.size());
+        recognizer.setIntraOpParallelism(parallelism.getRecognizerIntraOp());
         prepareStaging(boxes.size());
         try {
             cropper.cropAll(source, boxes, cropStaging);

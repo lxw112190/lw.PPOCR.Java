@@ -23,8 +23,11 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - 与 `lw.PPOCR.C` 共用 LWM v0.1 模型格式
 - 提供 Scalar 正确性路径，以及可选的 JDK 25 Vector API 后端
 
-## 0.2.0 新增内容
+## 0.2.1 新增内容
 
+- 端到端 AUTO 算子并行、预编译 Conv 融合，以及带权重预算和复用 scratch 的空间卷积打包。
+- REC 投影权重复用与更小的 Vector MatMul 热循环。
+- 可复现的同机 OCR 耗时、分配和进程内存记录。
 - 通过零拷贝执行、OCR 临时空间复用、Workspace alias、Lazy constants 等机制进一步
   降低稳态堆内存和对象分配；
 - 支持 REC 投影、winning Softmax probability、ArgMax 与紧凑 CTC 解码融合；
@@ -133,6 +136,30 @@ CLS 和 REC 支持相互独立的可选并行度，同时保持输入顺序和�
 同时保证计划中的 REC Worker 与 intra-op 乘积不超过 CPU 预算。为保持兼容，默认仍为
 MANUAL；调用任一独立 Worker 设置方法也会切回 MANUAL。
 
+AUTO 现已把预算实际应用到大型 DET/REC 卷积与 MatMul：共享有界守护线程池，
+分别按输出通道或矩阵行进行不重叠分片。小算子、不支持的分组／批量卷积及
+MANUAL Session 保留串行路径。Vector REC 投影按 128 个类别分块，在最多 32 行间
+复用权重；额外保留的缓冲单独记录为 `projection_scratch_bytes`。
+Conv 参数、形状和张量绑定也在运行前完成预编译。可融合的 Conv + 常量 BN／
+通道偏置／残差 Add + ReLU／GELU／HardSwish 会合成一个物理指令，执行器和
+内存规划器使用同一份融合计划，删除中间张量分配并原地完成后处理。
+目前仍为 NCHW，尚未实现 NHWC 或寄存器落盘前的 epilogue。JSON 中的
+`fused_conv_plans` 记录 DET、CLS、REC 已准备计划数量；可使用
+`-Dlwppocr.disableConvFusion=true` 在相同模型、阈值下关闭融合进行对比。
+预编译的密集空间卷积还会打包四像素输入块，并让输出通道方向的权重连续存储。
+支持的单 batch、非分组 2×2／3×3／5×5 卷积在 DET、CLS、REC 中共用该路径，
+按输出行分片，Session 复用 scratch；其他形状保留现有内核。图仍为 NCHW，
+这是指令内部打包，并不是整图 NHWC 布局。
+额外空间卷积权重打包按后端总计最多 80 KiB，宽度／worker Session 共用缓存，
+超出预算的权重在复用的 Session scratch 中重新打包，不按调用分配内存，
+仍使用相同空间卷积算术内核。`packed_weight_bytes` 合计投影和空间卷积权重，
+`spatial_packed_weight_bytes` 记录空间卷积子集，`spatial_scratch_bytes`
+记录已创建 Session 的额外 scratch，均不混入图 workspace。
+可用 `-Dlwppocr.disableSpatialPanel=true` 独立关闭此路径进行 A/B 对比。
+可使用 `-Dlwppocr.disableIntraOp=true`、`-Dlwppocr.disableProjectionPanel=true`
+分别关闭两条优化路径进行 A/B 对比。本机环境、优化前基线及完整 OCR 实测见
+[x64 基线记录](docs/local-x64-ocr-baseline-20260927.md)。
+
 可选的 JDK 25 Vector API 后端会加速 Tiny 模型使用的全部 Conv 配置、DET 2×
 上采样 ConvTranspose、MatMul、归约、激活函数和二元广播。它还会在校验张量连接、
 形状、常量和中间结果独占关系后，融合 Tiny 模型使用的精确五节点
@@ -154,7 +181,7 @@ mvn verify
 
 ## 发布版本
 
-`0.2.0` 是当前 1.0 之前的正式版本。本版本重点优化稳态内存占用、单次 OCR
+`0.2.1` 是当前 1.0 之前的正式版本。本版本重点优化稳态内存占用、单次 OCR
 分配、REC 末端融合、CPU 预算 AUTO 并行策略以及 JDK 25 Vector API 后端。
 
 相比 `0.1.0`，运行时会复用更多推理和 PP-OCR 工作缓存；动态宽度 REC Session
@@ -237,7 +264,7 @@ Maven 依赖、模型目录、BGR/ImageIO 用法、生命周期和并发指导�
 
 ## 使用边界
 
-`0.2.0` 当前经过验证的范围仍是仓库内动态形状 FP32 PP-OCRv6 Tiny 模型集。
+`0.2.1` 当前经过验证的范围仍是仓库内动态形状 FP32 PP-OCRv6 Tiny 模型集。
 运行时不承诺兼容任意 ONNX 拓扑，也不提供自动模型发现、GPU 或 Android 支持。
 Vector API 后端是可选组件，对于专门优化范围之外的形状仍会保留 Scalar 正确性
 回退路径。图像解码由可选的 `lw-ppocr-imageio` 模块单独提供。
