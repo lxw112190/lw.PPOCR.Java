@@ -15,6 +15,10 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Spatial Conv boundary panels now use independent single-accumulator Vector
+  loops, avoiding the two-CPU JDK 25 boxing/allocation regression without changing
+  padding semantics or accumulation order. CI checks two fresh low-CPU JVMs
+  against the existing 1 MB/OCR and GC limits and uploads evidence even on failure.
 - Slice execution now honors ends; bounded Q/K/V slices cannot copy an input
   tail past their output workspace. Prepared plans avoid per-run Slice allocation.
 - MatMul shape/execution now support broadcast matrix batches (rank >= 2).

@@ -158,26 +158,31 @@ final class VectorPreparedConv implements PreparedConvBackend.Kernel {
         s3.intoArray(scratch, inner * PIXELS + LANES * 3);
     }
 
-    /** Compact hot loop: vector values never escape an array-only method boundary. */
+    /** Boundary pixels have independent, single-accumulator Vector loops. */
     private static void microtile(float[] weights, int weightOffset, float[] scratch,
                                   int inner, int taps, float[] bias, int biasOffset, int count) {
-        FloatVector initial = bias == null ? FloatVector.zero(SPECIES)
-                : FloatVector.fromArray(SPECIES, bias, biasOffset);
-        FloatVector s0 = initial, s1 = initial, s2 = initial, s3 = initial;
         int validity = inner * PIXELS + PIXELS * LANES;
-        for (int k = 0; k < inner; k++) {
-            FloatVector w = FloatVector.fromArray(SPECIES, weights, weightOffset + k * LANES);
-            int valid = validity + (k % taps) * PIXELS;
-            int base = k * PIXELS;
-            // Skip padding exactly as the reference; never multiply invalid pixels by zero.
-            if (scratch[valid] != 0) s0 = s0.add(w.mul(scratch[base]));
-            if (scratch[valid + 1] != 0) s1 = s1.add(w.mul(scratch[base + 1]));
-            if (scratch[valid + 2] != 0) s2 = s2.add(w.mul(scratch[base + 2]));
-            if (scratch[valid + 3] != 0) s3 = s3.add(w.mul(scratch[base + 3]));
+        for (int pixel = 0; pixel < count; pixel++) {
+            boundaryPixel(weights, weightOffset, scratch, inner, taps, bias, biasOffset,
+                    validity, pixel);
         }
-        s0.intoArray(scratch, inner * PIXELS);
-        if (count > 1) s1.intoArray(scratch, inner * PIXELS + LANES);
-        if (count > 2) s2.intoArray(scratch, inner * PIXELS + LANES * 2);
-        if (count > 3) s3.intoArray(scratch, inner * PIXELS + LANES * 3);
+    }
+
+    private static void boundaryPixel(float[] weights, int weightOffset, float[] scratch,
+                                      int inner, int taps, float[] bias, int biasOffset,
+                                      int validity, int pixel) {
+        // Four separately conditional Vector accumulators caused persistent vector
+        // boxing in the two-CPU JDK 25 full-OCR workload. Keep the array-only method
+        // boundary and one accumulator, including for partial four-pixel tiles.
+        FloatVector sum = bias == null ? FloatVector.zero(SPECIES)
+                : FloatVector.fromArray(SPECIES, bias, biasOffset);
+        for (int k = 0; k < inner; k++) {
+            // Skip padding before loading weights, rather than multiplying by zero:
+            // nonfinite weights and signed-zero arithmetic must match Scalar Conv.
+            if (scratch[validity + (k % taps) * PIXELS + pixel] == 0) continue;
+            FloatVector w = FloatVector.fromArray(SPECIES, weights, weightOffset + k * LANES);
+            sum = sum.add(w.mul(scratch[k * PIXELS + pixel]));
+        }
+        sum.intoArray(scratch, inner * PIXELS + pixel * LANES);
     }
 }

@@ -50,6 +50,20 @@ def require_le(result: dict, key: str, limit: float, name: str) -> None:
         raise SystemExit(f"performance regression: {name} {key}={value:g} > {limit:g}")
 
 
+def check_low_cpu_allocation(result: dict, name: str) -> None:
+    for key, expected in {"available_processors": 2, "lines": 16,
+                          "detector_limit_side": 320, "warmup": 10, "iterations": 5}.items():
+        if number(result, key, name) != expected:
+            raise SystemExit(f"{name}: expected {key}={expected}")
+    if result.get("backend") != "vector" or result.get("parallelism_policy") != "auto":
+        raise SystemExit(f"{name}: expected Vector AUTO pipeline")
+    for key in ("allocated_bytes_per_ocr", "gc_count_delta"):
+        if number(result, key, name) < 0:
+            raise SystemExit(f"{name}: unsupported measurement {key}")
+    require_le(result, "allocated_bytes_per_ocr", 1_000_000.0, name)
+    require_le(result, "gc_count_delta", 1.0, name)
+
+
 def main() -> int:
     focused = {
         "rec-projection-matmul.json": 5.0,
@@ -75,6 +89,10 @@ def main() -> int:
             "performance regression: full-ocr-allocation-vector.json "
             f"workspace_efficiency={efficiency:g} < 0.95"
         )
+
+    for replica in (1, 2):
+        filename = f"full-ocr-allocation-vector-cpu2-r{replica}.json"
+        check_low_cpu_allocation(load_json(filename), filename)
 
     print("performance regression checks passed")
     return 0
