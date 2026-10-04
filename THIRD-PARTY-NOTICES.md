@@ -26,5 +26,18 @@ endorsement by the upstream project is implied.
 
 ## Build and test dependency
 
+The optional ONNX test/download workflow obtains the seven FP32
+Tiny/Small/Medium models and their dictionaries listed in
+`release/ppocrv6-onnx-manifest.json`, under Apache-2.0. The manifest pins their
+SHA-256 and reference source commit. Copyright (c) 2016 PaddlePaddle Authors.
+These downloaded files are not bundled into the existing v0.2.1 release.
+See `licenses/PaddleOCR-models-APACHE-2.0.txt`.
+
+NumPy and ONNX Runtime are independent validation tools only. They are not
+Java runtime dependencies and are not shipped in the Java JARs.
+The importer follows the ONNX protobuf specification and the reviewed graph
+contracts in lw.PPOCR.C, SimdPaddleOCR and lw.PPOCR.Vulkan; none of those
+projects' native or managed libraries are linked into this Java runtime.
+
 JUnit 4.13.2 is used only while running tests. It is not included in the
 runtime JARs or the release bundle.

@@ -2,6 +2,31 @@
 
 All notable changes to this project are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Pure Java, bounded ONNX protobuf importer and content-based ModelLoader,
+  sharing the existing IR and Scalar/Vector executors without native dependencies.
+- Direct FP32 PP-OCRv6 Small/Medium loading with the shared CLS and matching
+  18,710-class dictionary, preserving dynamic REC width buckets.
+- Hash-locked model acquisition, independent ORT graph-output checks, sample
+  pipeline text/score/rotation verification, and three-platform CI coverage.
+
+### Fixed
+
+- Slice execution now honors ends; bounded Q/K/V slices cannot copy an input
+  tail past their output workspace. Prepared plans avoid per-run Slice allocation.
+- MatMul shape/execution now support broadcast matrix batches (rank >= 2).
+- Multi-axis Unsqueeze uses output-axis semantics, with duplicate-axis checks.
+
+### Compatibility
+
+- Existing v0.2.1 release contents and Tiny LWM APIs remain unchanged.
+- ONNX support is a reviewed PP-OCR subset, not arbitrary ONNX compatibility.
+- C sample text differences are retained separately from independently
+  verified Java pipeline Goldens; see docs/onnx-models.md.
+
 ## [0.2.1] - 2026-09-27
 
 ### Changed

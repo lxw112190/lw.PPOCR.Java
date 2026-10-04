@@ -1,0 +1,3 @@
+# Test oracle only. Never included in Java JARs or releases.
+numpy==1.26.4
+onnxruntime==1.21.0

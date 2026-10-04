@@ -4,3 +4,4 @@ lw-ppocr-core/src/test/resources/golden/rec/ppocr_keys.txt -text
 *.bgr -text
 *.jpg -text
 *.ppm -text
+*.onnx -text

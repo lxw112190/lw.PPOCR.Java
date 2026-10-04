@@ -15,6 +15,13 @@ import java.util.List;
 public final class ShapeResolver {
     private ShapeResolver() { }
 
+    /** Shared numeric shape rules used while normalizing an ONNX graph. */
+    public static TensorShape resolveNode(OperatorType type, TensorShape[] inputs,
+                                          int[] declaredOutput, ByteBuffer parameters) {
+        return inferNode(new NodeInfo(type, new int[inputs.length], new int[] {0}, 0, parameters.remaining()),
+                -1, inputs, declaredOutput, parameters);
+    }
+
     public static List<TensorShape> resolveStatic(LwmModel model) {
         if (model == null) {
             throw new OcrException(OcrErrorCode.INVALID_ARGUMENT, "model is required");
@@ -153,16 +160,10 @@ public final class ShapeResolver {
                 return reshapeShape(inputs[0], declaredOutput, nodeIndex);
             case MAT_MUL:
                 requireInputCount(inputs, 2, nodeIndex);
-                requireRank(inputs[1], 2, nodeIndex);
-                if (inputs[0].getRank() != 2 && inputs[0].getRank() != 3) {
-                    throw invalid("MAT_MUL left input must have rank 2 or 3 at node " + nodeIndex);
-                }
-                int inner = inputs[0].get(inputs[0].getRank() - 1);
-                if (inner != inputs[1].get(0)) {
-                    throw invalid("MAT_MUL dimensions do not match at node " + nodeIndex);
-                }
-                if (inputs[0].getRank() == 2) return new TensorShape(inputs[0].get(0), inputs[1].get(1));
-                return new TensorShape(inputs[0].get(0), inputs[0].get(1), inputs[1].get(1));
+                return MatMulPlan.outputShape(inputs[0], inputs[1]);
+            case SLICE:
+                requireInputCount(inputs, 1, nodeIndex);
+                return sliceShape(inputs[0], parameters, nodeIndex);
             default:
                 throw invalid("shape inference is not implemented for " + type + " at node " + nodeIndex);
         }
@@ -300,8 +301,10 @@ public final class ShapeResolver {
         int axesCount = Short.toUnsignedInt(p.getShort(2));
         boolean keepDimensions = p.getInt(4) != 0;
         boolean[] reduced = new boolean[input.getRank()];
+        if (axesCount > input.getRank()) throw invalid("invalid REDUCE_MEAN axes count");
         for (int i = 0; i < axesCount; i++) {
             int axis = normalizeAxis(p.getInt(12 + i * 4), input.getRank(), nodeIndex);
+            if (reduced[axis]) throw invalid("duplicate REDUCE_MEAN axis");
             reduced[axis] = true;
         }
         int outputRank = keepDimensions ? input.getRank() : input.getRank() - axesCount;
@@ -353,27 +356,50 @@ public final class ShapeResolver {
         int[] axes = new int[axesCount];
         for (int i = 0; i < axesCount; i++) axes[i] = p.getInt(4 + i * 4);
         if (unsqueeze) {
-            int[] output = input.getDimensions();
+            int[] output = new int[input.getRank() + axesCount];
             for (int axis : axes) {
-                int normalized = axis < 0 ? axis + output.length + 1 : axis;
-                if (normalized < 0 || normalized > output.length) throw invalid("invalid UNSQUEEZE axis at node " + nodeIndex);
-                int[] next = new int[output.length + 1];
-                System.arraycopy(output, 0, next, 0, normalized);
-                next[normalized] = 1;
-                System.arraycopy(output, normalized, next, normalized + 1, output.length - normalized);
-                output = next;
+                int normalized = normalizeAxis(axis, output.length, nodeIndex);
+                if (output[normalized] == 1) throw invalid("duplicate UNSQUEEZE axis at node " + nodeIndex);
+                output[normalized] = 1;
             }
+            int source = 0;
+            for (int i = 0; i < output.length; i++) if (output[i] != 1) output[i] = input.get(source++);
             return new TensorShape(output);
         }
         boolean[] remove = new boolean[input.getRank()];
+        if (axesCount == 0) {
+            for (int i = 0; i < input.getRank(); i++) if (input.get(i) == 1) { remove[i] = true; axesCount++; }
+        }
         for (int axis : axes) {
             int normalized = normalizeAxis(axis, input.getRank(), nodeIndex);
             if (input.get(normalized) != 1) throw invalid("SQUEEZE axis is not one at node " + nodeIndex);
+            if (remove[normalized]) throw invalid("duplicate SQUEEZE axis at node " + nodeIndex);
             remove[normalized] = true;
         }
         int[] output = new int[input.getRank() - axesCount];
         int offset = 0;
         for (int axis = 0; axis < input.getRank(); axis++) if (!remove[axis]) output[offset++] = input.get(axis);
+        return new TensorShape(output);
+    }
+
+    private static TensorShape sliceShape(TensorShape input, ByteBuffer p, int nodeIndex) {
+        int[] output = input.getDimensions();
+        boolean[] used = new boolean[output.length];
+        int count = Short.toUnsignedInt(p.getShort(2));
+        if (count <= 0 || count > output.length) throw invalid("invalid SLICE axis count");
+        for (int i = 0; i < count; i++) {
+            int axis = normalizeAxis(p.getInt(68 + i * 4), output.length, nodeIndex);
+            if (used[axis]) throw invalid("duplicate SLICE axis");
+            used[axis] = true;
+            int step = p.getInt(100 + i * 4);
+            if (step <= 0) throw invalid("SLICE supports positive steps only");
+            long length = output[axis];
+            long start = p.getInt(4 + i * 4), end = p.getInt(36 + i * 4);
+            if (start < 0) start += length;
+            if (end < 0) end += length;
+            start = Math.max(0, Math.min(length, start)); end = Math.max(0, Math.min(length, end));
+            output[axis] = positiveDimension((int) Math.max(0, (end - start + step - 1) / step), nodeIndex);
+        }
         return new TensorShape(output);
     }
 

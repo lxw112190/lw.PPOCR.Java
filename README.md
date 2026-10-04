@@ -21,6 +21,7 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - No OpenCV native library
 - No JNI
 - Shared LWM v0.1 model format with `lw.PPOCR.C`
+- Pure-Java ONNX import for reviewed PP-OCRv6 Tiny/Small/Medium FP32 graphs (main branch)
 - Scalar correctness path plus an optional JDK 25 Vector API backend
 
 ## What's new in 0.2.1
@@ -97,9 +98,11 @@ The officially verified model set is **PP-OCRv6 Tiny / FP32 / LWM v0.1**. It is
 already present in the [GitHub Release ZIP](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
 under `models/ppocrv6-tiny/`; there is no separate model download.
 
-`lw.PPOCR.Java` does not parse ONNX. Only custom or additional PP-OCR models
-need offline conversion to LWM with the tools from
-[`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C). See the
+`main` additionally supports direct ONNX loading for reviewed Tiny, Small and
+Medium graphs, with no ONNX Runtime dependency. See the
+[ONNX guide](docs/onnx-models.md) for model acquisition, matching dictionaries,
+examples, validation and explicit subset boundaries. Existing v0.2.1 release
+contents are unchanged. See the
 [model guide](docs/models.md) for provenance, checksums, licensing, and the
 compatibility policy.
 
@@ -186,9 +189,9 @@ activations, and binary broadcasting. It also fuses the exact five-node
 validating tensor connections, shapes, constants, and exclusive intermediate
 uses. Unsupported generic shapes continue to fall back to Scalar correctness.
 
-The runtime intentionally does not parse ONNX. Official Tiny models are ready
-to use in the Release ZIP; conversion with `lw.PPOCR.C` is needed only for
-custom models.
+The main branch imports the reviewed PP-OCR ONNX subset directly into the
+existing execution IR. Tiny LWM remains ready to use in the v0.2.1 Release ZIP.
+Unsupported custom graphs still require conversion and separate validation.
 
 ## Build
 
@@ -312,8 +315,8 @@ model layout, BGR/ImageIO usage, lifecycle, and concurrency guidance.
 
 ## Scope boundaries
 
-For `0.2.1`, the currently verified contract is the committed dynamic-shape FP32
-PP-OCRv6 Tiny model set. The runtime does not claim arbitrary ONNX topology
+The published `0.2.1` contract is the committed Tiny LWM set; the unreleased main
+branch adds reviewed Tiny/Small/Medium ONNX support. The runtime does not claim arbitrary ONNX topology
 compatibility, automatic model discovery, GPU, or Android support. The Vector
 API backend is optional and keeps Scalar fallbacks for shapes outside its
 optimized paths. Image decoding is available separately through the optional

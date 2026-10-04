@@ -4,7 +4,7 @@ import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.DataType;
-import io.github.lxw112190.ppocr.model.LwmLoader;
+import io.github.lxw112190.ppocr.model.ModelLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
@@ -57,7 +57,7 @@ public final class PaddleOcrClassifier implements AutoCloseable {
 
     /** Loads a classifier using the supplied stateless kernel backend. */
     public static PaddleOcrClassifier load(Path path, KernelBackend backend) {
-        LwmModel model = LwmLoader.load(path);
+        LwmModel model = ModelLoader.load(path);
         try {
             return new PaddleOcrClassifier(model, backend);
         } catch (RuntimeException e) {

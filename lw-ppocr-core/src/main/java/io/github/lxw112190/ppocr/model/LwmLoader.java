@@ -70,7 +70,7 @@ public final class LwmLoader {
         }
     }
 
-    private static LwmModel parse(ByteBuffer source, RuntimeLimits limits) {
+    static LwmModel parse(ByteBuffer source, RuntimeLimits limits) {
         ByteBuffer bytes = source.duplicate().order(ByteOrder.LITTLE_ENDIAN);
         int fileSize = bytes.capacity();
         if (fileSize < HEADER_SIZE) {

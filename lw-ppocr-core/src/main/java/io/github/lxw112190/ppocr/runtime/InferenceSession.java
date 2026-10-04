@@ -31,12 +31,11 @@ public final class InferenceSession implements AutoCloseable {
     private final int[][] transposePermutations;
     private final int[][] transposeInputStrides;
     private final int[][] reduceAxes;
-    private final int[][] sliceStarts;
-    private final int[][] sliceAxes;
-    private final int[][] sliceSteps;
+    private final SlicePlan[] slicePlans;
     private final ConcatPlan[] concatPlans;
     private final int[][] layoutAxes;
     private final BinaryPlan[] binaryPlans;
+    private final MatMulPlan[] matMulPlans;
     private final InferenceProfiler.NodeDescriptor[] profileDescriptors;
     private final GeluPlan[] geluPlans;
     private final PhysicalConv[] physicalConvs;
@@ -101,12 +100,11 @@ public final class InferenceSession implements AutoCloseable {
         this.transposePermutations = new int[nodes.length][];
         this.transposeInputStrides = new int[nodes.length][];
         this.reduceAxes = new int[nodes.length][];
-        this.sliceStarts = new int[nodes.length][];
-        this.sliceAxes = new int[nodes.length][];
-        this.sliceSteps = new int[nodes.length][];
+        this.slicePlans = new SlicePlan[nodes.length];
         this.concatPlans = new ConcatPlan[nodes.length];
         this.layoutAxes = new int[nodes.length][];
         this.binaryPlans = new BinaryPlan[nodes.length];
+        this.matMulPlans = new MatMulPlan[nodes.length];
         this.profileDescriptors = new InferenceProfiler.NodeDescriptor[nodes.length];
         this.geluPlans = new GeluPlan[nodes.length];
         this.physicalConvs = new PhysicalConv[nodes.length];
@@ -118,6 +116,14 @@ public final class InferenceSession implements AutoCloseable {
             this.nodes[i] = prepared;
             this.physicalConvs[i] = PhysicalConv.prepare(execution, prepared, storage, backend);
             prepareBinary(prepared);
+            if (prepared.operator == OperatorType.MAT_MUL && prepared.inputs.length == 2) {
+                matMulPlans[i] = new MatMulPlan(execution.shapes().get(prepared.inputs[0]),
+                        execution.shapes().get(prepared.inputs[1]));
+                if (!MatMulPlan.outputShape(execution.shapes().get(prepared.inputs[0]),
+                        execution.shapes().get(prepared.inputs[1])).equals(execution.shapes().get(prepared.outputs[0]))) {
+                    throw unsupported(prepared, "MatMul shape mismatch");
+                }
+            }
             prepareTranspose(prepared);
             prepareReduceMean(prepared);
             prepareSlice(prepared);
@@ -502,31 +508,16 @@ public final class InferenceSession implements AutoCloseable {
                 executeSoftmax(node, storage, output);
                 break;
             case MAT_MUL:
-                if (inputs.length != 2 || execution.shapes().get(inputs[1]).getRank() != 2) {
-                    throw unsupported(node, "MatMul requires two inputs and a rank-2 right input");
-                }
+                if (inputs.length != 2) throw unsupported(node, "MatMul requires two inputs");
                 right = data(inputs[1], storage);
                 rightOffset = offset(inputs[1]);
-                TensorShape a = execution.shapes().get(inputs[0]);
-                TensorShape b = execution.shapes().get(inputs[1]);
-                TensorShape c = execution.shapes().get(output);
-                if (a.getRank() == 2 && c.getRank() == 2) {
-                    if (a.get(1) != b.get(0) || c.get(0) != a.get(0) || c.get(1) != b.get(1)) throw unsupported(node, "MatMul shape mismatch");
-                    parallelKernels.matMul(left, leftOffset, right, rightOffset, storage, offset(output), a.get(0), a.get(1), b.get(1));
-                } else if (a.getRank() == 3 && c.getRank() == 3 && a.get(2) == b.get(0) &&
-                        c.get(0) == a.get(0) && c.get(1) == a.get(1) && c.get(2) == b.get(1)) {
-                    int batch = a.get(0);
-                    int rows = a.get(1);
-                    int inner = a.get(2);
-                    int columns = b.get(1);
-                    int leftBatch = rows * inner;
-                    int outputBatch = rows * columns;
-                    for (int i = 0; i < batch; i++) {
-                        parallelKernels.matMul(left, leftOffset + i * leftBatch, right, rightOffset,
-                                storage, offset(output) + i * outputBatch, rows, inner, columns);
-                    }
-                } else {
-                    throw unsupported(node, "MatMul shape mismatch");
+                MatMulPlan matrix = matMulPlans[node.index];
+                if (matrix == null) throw unsupported(node, "MatMul shape mismatch");
+                for (int i = 0; i < matrix.batches; i++) {
+                    parallelKernels.matMul(left, leftOffset + matrix.leftOffsets[i], right,
+                            rightOffset + matrix.rightOffsets[i], storage,
+                            offset(output) + i * matrix.rows * matrix.columns,
+                            matrix.rows, matrix.inner, matrix.columns);
                 }
                 break;
             default:
@@ -836,23 +827,9 @@ public final class InferenceSession implements AutoCloseable {
     private void executeSlice(PreparedNode node, float[] storage, int output) {
         int[] inputs = node.inputs;
         if (inputs.length != 1) throw unsupported(node, "Slice requires one input");
-        int[] starts = sliceStarts[node.index];
-        int[] axes = sliceAxes[node.index];
-        int[] steps = sliceSteps[node.index];
-        if (starts == null) {
-            ByteBuffer params = node.parameters;
-            int count = params.getShort(2) & 0xffff;
-            starts = new int[count];
-            axes = new int[count];
-            steps = new int[count];
-            for (int i = 0; i < count; i++) {
-                starts[i] = params.getInt(4 + i * 4);
-                axes[i] = params.getInt(68 + i * 4);
-                steps[i] = params.getInt(100 + i * 4);
-            }
-        }
-        backend.slice(data(inputs[0], storage), offset(inputs[0]), storage, offset(output),
-                execution.shapes().get(inputs[0]).dimensionsUnsafe(), starts, axes, steps);
+        SlicePlan plan = slicePlans[node.index];
+        if (plan == null) throw unsupported(node, "invalid Slice plan");
+        plan.run(data(inputs[0], storage), offset(inputs[0]), storage, offset(output));
     }
 
     private void executeTranspose(PreparedNode node, float[] storage, int output) {
@@ -916,21 +893,9 @@ public final class InferenceSession implements AutoCloseable {
 
     private void prepareSlice(PreparedNode node) {
         if (node.getOperator() != OperatorType.SLICE) return;
-        ByteBuffer params = node.parameters;
-        int count = params.getShort(2) & 0xffff;
-        if (4L + count * 4L > params.limit() || 68L + count * 4L > params.limit() ||
-                100L + count * 4L > params.limit()) return;
-        int[] starts = new int[count];
-        int[] axes = new int[count];
-        int[] steps = new int[count];
-        for (int i = 0; i < count; i++) {
-            starts[i] = params.getInt(4 + i * 4);
-            axes[i] = params.getInt(68 + i * 4);
-            steps[i] = params.getInt(100 + i * 4);
-        }
-        sliceStarts[node.index] = starts;
-        sliceAxes[node.index] = axes;
-        sliceSteps[node.index] = steps;
+        if (node.inputs.length != 1 || node.outputs.length != 1) return;
+        slicePlans[node.index] = new SlicePlan(execution.shapes().get(node.inputs[0]),
+                execution.shapes().get(node.outputs[0]), node.parameters);
     }
 
     private void prepareConcat(PreparedNode node) {

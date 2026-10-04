@@ -4,7 +4,7 @@ import io.github.lxw112190.ppocr.image.BgrImage;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import io.github.lxw112190.ppocr.model.DataType;
-import io.github.lxw112190.ppocr.model.LwmLoader;
+import io.github.lxw112190.ppocr.model.ModelLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OcrErrorCode;
 import io.github.lxw112190.ppocr.model.OcrException;
@@ -174,7 +174,7 @@ public final class PaddleOcrDetector implements AutoCloseable {
     /** Loads a detector using an explicit dynamic-shape limit and stateless backend. */
     public static PaddleOcrDetector load(Path path, int maximumSideLength,
                                          KernelBackend backend) {
-        LwmModel model = LwmLoader.load(path);
+        LwmModel model = ModelLoader.load(path);
         try {
             return new PaddleOcrDetector(model, maximumSideLength, backend);
         } catch (RuntimeException e) {

@@ -133,9 +133,10 @@ Release 布局是公开契约，应用示例统一从
 
 ### 使用其他模型
 
-`lw.PPOCR.Java` Runtime 本身不解析 ONNX。如果需要使用其他 PP-OCR 模型，需通过
-[`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C) 提供的离线转换工具生成
-LWM 模型：
+主线现在可以直接读取锁定的 PP-OCRv6 Tiny/Small/Medium ONNX，不需要原生库、
+ONNX Runtime 或离线转换，参阅 [ONNX 接入说明](onnx-models.md)。
+已有 v0.2.1 Release 仍使用 Tiny LWM；超出 ONNX 支持子集的自定义图，
+可以通过 [`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C) 离线转换并单独验证：
 
 ```text
 官方 PP-OCRv6 Tiny：Release → 直接使用

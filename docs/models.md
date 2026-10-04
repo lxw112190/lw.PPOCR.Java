@@ -10,6 +10,8 @@ policy for `lw.PPOCR.Java`.
 | Text detection | PP-OCRv6 Tiny DET | LWM v0.1 | FP32 | Verified |
 | Direction classification | PP-OCRv6 Tiny CLS | LWM v0.1 | FP32 | Verified |
 | Text recognition | PP-OCRv6 Tiny REC | LWM v0.1 | FP32 | Verified |
+| Text detection/recognition | PP-OCRv6 Tiny/Small/Medium | ONNX | FP32 | Main branch; local Golden verified; three-platform CI configured |
+| Shared direction classification | PP-OCRv6 CLS | ONNX | FP32 | Main branch |
 
 The complete DET/CLS/REC set is covered by graph-level Golden tests and the
 committed 500×500, 16-line full OCR fixture.
@@ -77,8 +79,9 @@ extracted files before publishing the GitHub Release.
 
 ## LWM compatibility
 
-The current public model contract is dynamic-shape FP32 PP-OCRv6 Tiny encoded
-as LWM v0.1. The Java runtime validates the model header, checksums, tensors,
+The published v0.2.1 model contract is dynamic-shape FP32 PP-OCRv6 Tiny encoded
+as LWM v0.1. Main also supports the reviewed ONNX model set described in
+[ONNX models](onnx-models.md). The Java runtime validates the LWM header, checksums, tensors,
 nodes, parameters, graph indexes, and supported shapes before execution. See
 [`lwm-v0.1-compatibility.md`](lwm-v0.1-compatibility.md) for format boundaries.
 
@@ -88,8 +91,11 @@ after graph-output and full-pipeline Golden coverage has been added.
 
 ## Custom models
 
-`lw.PPOCR.Java` deliberately does not parse ONNX and does not include a model
-converter. To use another PP-OCR model:
+Main includes a pure-Java ONNX importer for the reviewed Tiny/Small/Medium
+graphs. Use [the ONNX model guide](onnx-models.md) and the hash-locked manifest;
+no conversion is required for that set. It is not an arbitrary ONNX runtime.
+
+For custom models outside that subset, an alternative remains:
 
 ```text
 ONNX model
@@ -103,5 +109,5 @@ Use the conversion tools from
 resulting graph against the Java runtime. Keep converted assets outside the
 application JAR when independent model updates are required.
 
-Official PP-OCRv6 Tiny models are ready to use from the Release ZIP. Custom
-models are the only case that requires the separate conversion workflow.
+Official Tiny LWM models remain ready to use from the v0.2.1 Release ZIP.
+Small/Medium ONNX downloads are separate and are not added to that existing ZIP.

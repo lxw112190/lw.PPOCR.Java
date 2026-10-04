@@ -54,6 +54,65 @@ jobs:
             echo "No failing Surefire text report was produced; inspect the failed Maven step."
           fi
 
+  onnx-compatibility:
+    name: ONNX Small/Medium (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '25'
+          cache: maven
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: scripts/requirements-onnx-tests.txt
+      - name: Install independent test oracle (not a Java runtime dependency)
+        run: python -m pip install -r scripts/requirements-onnx-tests.txt
+      - uses: actions/cache@v4
+        with:
+          path: build-local-data/onnx-models
+          key: onnx-assets-${{ hashFiles('release/ppocrv6-onnx-manifest.json') }}
+      - name: Fetch and verify pinned models
+        run: python scripts/prepare-onnx-models.py --output build-local-data/onnx-models
+      - name: Generate independent graph outputs
+        run: python scripts/generate-onnx-golden.py --models build-local-data/onnx-models --output build-local-data/onnx-golden
+      - name: Compile Java
+        run: mvn --batch-mode --no-transfer-progress package -DskipTests
+      - name: Validate graph outputs and sample pipeline (Scalar and Vector)
+        shell: bash
+        run: |
+          set -euo pipefail
+          sep=':'
+          if [ "$RUNNER_OS" = Windows ]; then sep=';'; fi
+          cp="lw-ppocr-core/target/classes${sep}lw-ppocr-imageio/target/classes${sep}lw-ppocr-vector/target/classes${sep}lw-ppocr-benchmark/target/classes"
+          for backend in scalar vector; do
+            java -Xmx1g --add-modules jdk.incubator.vector -cp "$cp" \
+              io.github.lxw112190.ppocr.benchmark.OnnxCompatibilityMain \
+              build-local-data/onnx-models build-local-data/onnx-golden "$backend" record-stage-inputs \
+              | tee "build-local-data/onnx-golden/validation-${backend}.jsonl"
+            python scripts/verify-onnx-full-ocr.py \
+              --models build-local-data/onnx-models --fixtures build-local-data/onnx-golden \
+              | tee "build-local-data/onnx-golden/full-ocr-reference-${backend}.jsonl"
+          done
+      - name: Upload ONNX validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: onnx-validation-${{ matrix.os }}
+          path: |
+            build-local-data/onnx-golden/*.json
+            build-local-data/onnx-golden/*.jsonl
+            build-local-data/onnx-golden/*.txt
+            build-local-data/onnx-golden/*stage-inputs.tsv
+
   performance:
     name: OCR performance (Linux)
     runs-on: ubuntu-latest
@@ -389,7 +448,7 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch'
-    needs: [build-and-test, performance]
+    needs: [build-and-test, performance, onnx-compatibility]
     runs-on: ubuntu-latest
     permissions:
       contents: write

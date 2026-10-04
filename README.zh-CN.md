@@ -21,6 +21,7 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - 不依赖 OpenCV 原生库
 - 不使用 JNI
 - 与 `lw.PPOCR.C` 共用 LWM v0.1 模型格式
+- 主线新增纯 Java ONNX 解析，接入锁定的 PP-OCRv6 Tiny/Small/Medium FP32 模型
 - 提供 Scalar 正确性路径，以及可选的 JDK 25 Vector API 后端
 
 ## 0.2.1 新增内容
@@ -92,9 +93,10 @@ Release 解压目录中的 [`QUICKSTART.md`](QUICKSTART.md) 提供了包含 impo
 [GitHub Release ZIP](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
 的 `models/ppocrv6-tiny/` 中，不需要单独下载模型包。
 
-`lw.PPOCR.Java` Runtime 本身不解析 ONNX。只有使用其他或自定义 PP-OCR 模型时，
-才需要通过 [`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C) 提供的离线
-工具转换为 LWM。模型来源、校验和、许可证和兼容策略参阅
+主线现可直接加载经过验证的 Tiny/Small/Medium ONNX，不需要 ONNX Runtime
+或转换为 LWM。模型获取、字典匹配、调用和支持边界参阅
+[ONNX 接入说明](docs/onnx-models.md)。已发布 v0.2.1 的 Tiny LWM 包不变。
+模型来源、校验和、许可证和兼容策略参阅
 [模型说明](docs/models.md)。
 
 ## ⚡ Vector API 加速
@@ -166,8 +168,8 @@ Conv 参数、形状和张量绑定也在运行前完成预编译。可融合的
 `DIV -> ERF -> ADD -> MUL -> MUL` GELU 表达式。通用但未专门优化的形状会继续
 回退到 Scalar 正确性实现。
 
-运行时刻意不解析 ONNX。官方 Tiny 模型可直接使用 Release ZIP 中的文件；只有自定义
-模型才需要通过 `lw.PPOCR.C` 离线转换。
+主线新增有界 ONNX 解析，将经过验证的 PP-OCR 图转换到已有执行 IR。
+v0.2.1 Release 中的 Tiny LWM 仍可直接使用；超出支持范围的自定义图需另行转换和验证。
 
 ## 构建
 
@@ -264,7 +266,7 @@ Maven 依赖、模型目录、BGR/ImageIO 用法、生命周期和并发指导�
 
 ## 使用边界
 
-`0.2.1` 当前经过验证的范围仍是仓库内动态形状 FP32 PP-OCRv6 Tiny 模型集。
+已发布 `0.2.1` 的范围仍为 Tiny LWM；未发布主线新增锁定的 Tiny/Small/Medium ONNX。
 运行时不承诺兼容任意 ONNX 拓扑，也不提供自动模型发现、GPU 或 Android 支持。
 Vector API 后端是可选组件，对于专门优化范围之外的形状仍会保留 Scalar 正确性
 回退路径。图像解码由可选的 `lw-ppocr-imageio` 模块单独提供。
