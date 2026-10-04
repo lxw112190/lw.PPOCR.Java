@@ -86,3 +86,23 @@ Scalar 是兼容性基线；Vector 后端为可选加速模块，编译和运行
 For Maven dependencies, BGR input, lifecycle, concurrency, and tuning, see
 [`docs/installation.md`](docs/installation.md). Model provenance and custom
 conversion are documented in [`docs/models.md`](docs/models.md).
+
+## 5. Small / Medium ONNX (0.3.0)
+
+The ZIP includes `release/ppocrv6-onnx-manifest.json` and an optional downloader,
+not the larger ONNX binaries. From the extracted directory:
+
+```text
+python scripts/prepare-onnx-models.py --output models
+```
+
+Python 3 is only used for acquisition; Java inference has no Python or native
+runtime dependency. Manual downloads with SHA-256 verification are also supported.
+See [the ONNX guide](docs/onnx-models.md) for Java loading and matching dictionaries.
+For the guide's example, use `Paths.get("models")` and the bundled sample at
+`models/ppocrv6-tiny/sample.jpg`.
+
+ZIP 附带固定哈希的 ONNX 清单和可选 Python 3 下载助手，不包含大型 ONNX 文件。
+下载后可直接加载 Small/Medium，无需转换；Java 推理不依赖 Python 或原生库。
+两档模型共用 `ppocrv6-tiny/cls.onnx` 和 `ppocrv6-shared/PP-OCRv6_small_rec_dict.txt`，
+不能使用 Tiny 的 `ppocr_keys.txt` 替代。也可根据清单手动下载并校验 SHA-256。

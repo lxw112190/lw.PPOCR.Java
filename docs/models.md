@@ -10,15 +10,15 @@ policy for `lw.PPOCR.Java`.
 | Text detection | PP-OCRv6 Tiny DET | LWM v0.1 | FP32 | Verified |
 | Direction classification | PP-OCRv6 Tiny CLS | LWM v0.1 | FP32 | Verified |
 | Text recognition | PP-OCRv6 Tiny REC | LWM v0.1 | FP32 | Verified |
-| Text detection/recognition | PP-OCRv6 Tiny/Small/Medium | ONNX | FP32 | Main branch; local Golden verified; three-platform CI configured |
-| Shared direction classification | PP-OCRv6 CLS | ONNX | FP32 | Main branch |
+| Text detection/recognition | PP-OCRv6 Tiny/Small/Medium | ONNX | FP32 | 0.3.0; Golden-verified, separate download |
+| Shared direction classification | PP-OCRv6 CLS | ONNX | FP32 | 0.3.0; shared by the ONNX variants |
 
 The complete DET/CLS/REC set is covered by graph-level Golden tests and the
 committed 500×500, 16-line full OCR fixture.
 
 ## Download
 
-Official models are shipped with every tagged GitHub Release:
+The Tiny LWM set is shipped with every tagged GitHub Release:
 
 ➡️ [Download the latest Release](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
 
@@ -26,6 +26,9 @@ The single Release ZIP contains the runtime JARs, models, recognition
 dictionary, sample image, documentation, licenses, and SHA-256 manifests. No
 separate model download or ONNX conversion is required for the official Tiny
 model set.
+
+The reviewed ONNX variants are separate downloads. Version 0.3.0 includes the
+pinned acquisition manifest and optional downloader; see [ONNX models](onnx-models.md).
 
 ## Release layout contract
 
@@ -79,8 +82,8 @@ extracted files before publishing the GitHub Release.
 
 ## LWM compatibility
 
-The published v0.2.1 model contract is dynamic-shape FP32 PP-OCRv6 Tiny encoded
-as LWM v0.1. Main also supports the reviewed ONNX model set described in
+The bundled model contract remains dynamic-shape FP32 PP-OCRv6 Tiny encoded
+as LWM v0.1. Version 0.3.0 also supports the reviewed ONNX model set described in
 [ONNX models](onnx-models.md). The Java runtime validates the LWM header, checksums, tensors,
 nodes, parameters, graph indexes, and supported shapes before execution. See
 [`lwm-v0.1-compatibility.md`](lwm-v0.1-compatibility.md) for format boundaries.
@@ -91,7 +94,7 @@ after graph-output and full-pipeline Golden coverage has been added.
 
 ## Custom models
 
-Main includes a pure-Java ONNX importer for the reviewed Tiny/Small/Medium
+Version 0.3.0 includes a pure-Java ONNX importer for the reviewed Tiny/Small/Medium
 graphs. Use [the ONNX model guide](onnx-models.md) and the hash-locked manifest;
 no conversion is required for that set. It is not an arbitrary ONNX runtime.
 
@@ -109,5 +112,6 @@ Use the conversion tools from
 resulting graph against the Java runtime. Keep converted assets outside the
 application JAR when independent model updates are required.
 
-Official Tiny LWM models remain ready to use from the v0.2.1 Release ZIP.
-Small/Medium ONNX downloads are separate and are not added to that existing ZIP.
+Official Tiny LWM models remain ready to use from the Release ZIP.
+The v0.3.0 ZIP includes the pinned ONNX manifest and optional downloader;
+Small/Medium ONNX binaries are separate downloads and are not bundled.

@@ -21,10 +21,20 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - No OpenCV native library
 - No JNI
 - Shared LWM v0.1 model format with `lw.PPOCR.C`
-- Pure-Java ONNX import for reviewed PP-OCRv6 Tiny/Small/Medium FP32 graphs (main branch)
+- Pure-Java ONNX import for reviewed PP-OCRv6 Tiny/Small/Medium FP32 graphs
 - Scalar correctness path plus an optional JDK 25 Vector API backend
 
-## What's new in 0.2.1
+## What's new in 0.3.0
+
+- Pure-Java, bounded ONNX loading for Tiny/Small/Medium, with no native dependencies.
+- Correct bounded Slice, broadcast-batched MatMul, and multi-axis Unsqueeze.
+- Independent ORT numerical/text validation and three-platform ONNX CI coverage.
+- Fixed the low-CPU Vector boundary-convolution allocation regression; the
+  existing 1 MB/OCR gate remains unchanged, with two fresh two-CPU checks.
+- The Release ZIP includes a pinned ONNX model manifest and optional downloader;
+  Tiny LWM stays bundled, while larger ONNX assets are downloaded separately.
+
+Retained from 0.2.1:
 
 - End-to-end AUTO operator parallelism, prepared Conv fusion, and shared
   spatial convolution panels with bounded weight packing and reusable scratch.
@@ -98,11 +108,12 @@ The officially verified model set is **PP-OCRv6 Tiny / FP32 / LWM v0.1**. It is
 already present in the [GitHub Release ZIP](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
 under `models/ppocrv6-tiny/`; there is no separate model download.
 
-`main` additionally supports direct ONNX loading for reviewed Tiny, Small and
+Version 0.3.0 additionally supports direct ONNX loading for reviewed Tiny, Small and
 Medium graphs, with no ONNX Runtime dependency. See the
 [ONNX guide](docs/onnx-models.md) for model acquisition, matching dictionaries,
-examples, validation and explicit subset boundaries. Existing v0.2.1 release
-contents are unchanged. See the
+examples, validation and explicit subset boundaries. The ZIP contains
+`release/ppocrv6-onnx-manifest.json` and `scripts/prepare-onnx-models.py`; the
+larger ONNX models are not bundled. See the
 [model guide](docs/models.md) for provenance, checksums, licensing, and the
 compatibility policy.
 
@@ -189,8 +200,8 @@ activations, and binary broadcasting. It also fuses the exact five-node
 validating tensor connections, shapes, constants, and exclusive intermediate
 uses. Unsupported generic shapes continue to fall back to Scalar correctness.
 
-The main branch imports the reviewed PP-OCR ONNX subset directly into the
-existing execution IR. Tiny LWM remains ready to use in the v0.2.1 Release ZIP.
+Version 0.3.0 imports the reviewed PP-OCR ONNX subset directly into the
+existing execution IR. Tiny LWM remains ready to use in the Release ZIP.
 Unsupported custom graphs still require conversion and separate validation.
 
 ## Build
@@ -206,9 +217,9 @@ mvn verify
 
 ## Release
 
-`0.2.1` is the current pre-1.0 release. It focuses on lower steady-state
-memory, lower allocation, fused REC execution, CPU-budgeted AUTO parallelism,
-and a more mature JDK 25 Vector API backend.
+`0.3.0` is the current pre-1.0 release target. It adds reviewed ONNX loading and
+PP-OCRv6 Small/Medium support, corrects graph execution, and fixes low-CPU
+Vector allocation while retaining the v0.2.1 end-to-end optimizations.
 
 Compared with `0.1.0`, the runtime now reuses more inference and PP-OCR working
 storage, shares prepared REC projection weights across dynamic-width sessions,
@@ -218,7 +229,8 @@ workspace efficiency, and retained prepared weights.
 
 Tagged builds produce a release-candidate bundle containing the three runtime
 JARs, PP-OCRv6 Tiny LWM models, dictionary, sample image, root-level
-`QUICKSTART.md`, documentation, and license notices. Each ZIP has a SHA-256
+`QUICKSTART.md`, documentation, license notices, and the ONNX acquisition tools.
+Small/Medium ONNX binaries are separate hash-locked downloads. Each ZIP has a SHA-256
 sidecar, and CI runs full OCR from the extracted bundle before publishing it
 to GitHub Releases and retaining the same files as an Actions artifact.
 
@@ -315,8 +327,8 @@ model layout, BGR/ImageIO usage, lifecycle, and concurrency guidance.
 
 ## Scope boundaries
 
-The published `0.2.1` contract is the committed Tiny LWM set; the unreleased main
-branch adds reviewed Tiny/Small/Medium ONNX support. The runtime does not claim arbitrary ONNX topology
+Version `0.3.0` supports the committed Tiny LWM set and the reviewed
+Tiny/Small/Medium ONNX set. The runtime does not claim arbitrary ONNX topology
 compatibility, automatic model discovery, GPU, or Android support. The Vector
 API backend is optional and keeps Scalar fallbacks for shapes outside its
 optimized paths. Image decoding is available separately through the optional

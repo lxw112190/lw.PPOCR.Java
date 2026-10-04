@@ -34,6 +34,41 @@ DOCUMENTS_WITH_CANONICAL_MODEL_PATH = {
     "docs/models.md",
 }
 
+ONNX_ASSET_PATHS = {
+    "ppocrv6-tiny/det.onnx", "ppocrv6-tiny/cls.onnx", "ppocrv6-tiny/rec.onnx",
+    "ppocrv6-tiny/ppocr_keys.txt", "ppocrv6-small/det.onnx", "ppocrv6-small/rec.onnx",
+    "ppocrv6-medium/det.onnx", "ppocrv6-medium/rec.onnx",
+    "ppocrv6-shared/PP-OCRv6_small_rec_dict.txt",
+}
+
+
+def is_hex(value, length: int) -> bool:
+    return isinstance(value, str) and len(value) == length and all(
+        char in "0123456789abcdef" for char in value)
+
+
+def verify_onnx_tools(root: Path) -> None:
+    downloader = require_file(root, "scripts/prepare-onnx-models.py")
+    compile(downloader.read_text(encoding="utf-8"), str(downloader), "exec")
+    manifest = json.loads(require_file(root, "release/ppocrv6-onnx-manifest.json").read_text("utf-8"))
+    commit = manifest.get("reference_commit")
+    if manifest.get("schema_version") != 1 or manifest.get("license") != "Apache-2.0" or not is_hex(commit, 40):
+        raise SystemExit("invalid pinned ONNX manifest metadata")
+    assets = manifest.get("assets")
+    if not isinstance(assets, list) or len(assets) != len(ONNX_ASSET_PATHS):
+        raise SystemExit("ONNX manifest asset count mismatch")
+    paths = set()
+    for asset in assets:
+        if not isinstance(asset, dict) or asset.get("path") not in ONNX_ASSET_PATHS:
+            raise SystemExit("unexpected ONNX asset path")
+        path = asset["path"]
+        expected_url = f"https://raw.githubusercontent.com/lxw112190/lw.PPOCR.C/{commit}/models/{path}"
+        if path in paths or not is_hex(asset.get("sha256"), 64) or asset.get("url") != expected_url:
+            raise SystemExit(f"invalid pinned ONNX asset: {path}")
+        paths.add(path)
+    if paths != ONNX_ASSET_PATHS:
+        raise SystemExit("ONNX manifest asset paths mismatch")
+
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -70,6 +105,8 @@ def verify(root: Path) -> None:
 
     for artifact in ("lw-ppocr-core", "lw-ppocr-imageio", "lw-ppocr-vector"):
         require_single_jar(root, artifact)
+
+    verify_onnx_tools(root)
 
     model_root = root / "models" / "ppocrv6-tiny"
     manifest_path = require_file(root, "models/ppocrv6-tiny/manifest.json")

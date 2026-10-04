@@ -21,10 +21,18 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - 不依赖 OpenCV 原生库
 - 不使用 JNI
 - 与 `lw.PPOCR.C` 共用 LWM v0.1 模型格式
-- 主线新增纯 Java ONNX 解析，接入锁定的 PP-OCRv6 Tiny/Small/Medium FP32 模型
+- 纯 Java ONNX 解析，接入锁定的 PP-OCRv6 Tiny/Small/Medium FP32 模型
 - 提供 Scalar 正确性路径，以及可选的 JDK 25 Vector API 后端
 
-## 0.2.1 新增内容
+## 0.3.0 新增内容
+
+- 纯 Java 有界 ONNX 解析，支持经过验证的 Tiny/Small/Medium，无原生运行时依赖。
+- 修复 Slice 输出边界、批次广播 MatMul 和多轴 Unsqueeze。
+- 新增独立 ORT 数值/文本验证，以及三平台 ONNX CI 验收。
+- 修复低 CPU 下 Vector 边界卷积的大分配问题；1 MB/OCR 门槛不变，增加两次独立 2-CPU 验证。
+- Release ZIP 附带固定哈希的 ONNX 清单和可选下载助手；Tiny LWM 仍内置，大型 ONNX 模型另行下载。
+
+保留 0.2.1 的端到端优化：
 
 - 端到端 AUTO 算子并行、预编译 Conv 融合，以及带权重预算和复用 scratch 的空间卷积打包。
 - REC 投影权重复用与更小的 Vector MatMul 热循环。
@@ -93,9 +101,10 @@ Release 解压目录中的 [`QUICKSTART.md`](QUICKSTART.md) 提供了包含 impo
 [GitHub Release ZIP](https://github.com/lxw112190/lw.PPOCR.Java/releases/latest)
 的 `models/ppocrv6-tiny/` 中，不需要单独下载模型包。
 
-主线现可直接加载经过验证的 Tiny/Small/Medium ONNX，不需要 ONNX Runtime
+0.3.0 可直接加载经过验证的 Tiny/Small/Medium ONNX，不需要 ONNX Runtime
 或转换为 LWM。模型获取、字典匹配、调用和支持边界参阅
-[ONNX 接入说明](docs/onnx-models.md)。已发布 v0.2.1 的 Tiny LWM 包不变。
+[ONNX 接入说明](docs/onnx-models.md)。ZIP 内附 `release/ppocrv6-onnx-manifest.json`
+和 `scripts/prepare-onnx-models.py`，大型 ONNX 模型不内置。
 模型来源、校验和、许可证和兼容策略参阅
 [模型说明](docs/models.md)。
 
@@ -168,8 +177,8 @@ Conv 参数、形状和张量绑定也在运行前完成预编译。可融合的
 `DIV -> ERF -> ADD -> MUL -> MUL` GELU 表达式。通用但未专门优化的形状会继续
 回退到 Scalar 正确性实现。
 
-主线新增有界 ONNX 解析，将经过验证的 PP-OCR 图转换到已有执行 IR。
-v0.2.1 Release 中的 Tiny LWM 仍可直接使用；超出支持范围的自定义图需另行转换和验证。
+0.3.0 新增有界 ONNX 解析，将经过验证的 PP-OCR 图转换到已有执行 IR。
+Release 内置 Tiny LWM 仍可直接使用；超出支持范围的自定义图需另行转换和验证。
 
 ## 构建
 
@@ -183,15 +192,16 @@ mvn verify
 
 ## 发布版本
 
-`0.2.1` 是当前 1.0 之前的正式版本。本版本重点优化稳态内存占用、单次 OCR
-分配、REC 末端融合、CPU 预算 AUTO 并行策略以及 JDK 25 Vector API 后端。
+`0.3.0` 是本次 1.0 之前的发布目标，新增经过验证的 ONNX 和 Small/Medium 支持，
+修复图执行正确性与低 CPU 下 Vector 分配问题，并保留 v0.2.1 的端到端优化。
 
 相比 `0.1.0`，运行时会复用更多推理和 PP-OCR 工作缓存；动态宽度 REC Session
 共享同一份已准备的投影权重；受支持的 REC 末端图不再保留完整 `[T,C]` 概率矩阵；
 CI 还加入了针对延迟、对象分配、GC、工作区效率和已准备权重占用的保守性能回归门禁。
 
 Tag 构建会生成发布候选包，其中包含三个运行时 JAR、PP-OCRv6 Tiny LWM 模型、
-字典、示例图片、根目录 `QUICKSTART.md`、文档和许可证声明。每个 ZIP 都附带
+字典、示例图片、根目录 `QUICKSTART.md`、文档、许可证声明和 ONNX 获取工具。
+Small/Medium ONNX 文件通过固定 SHA-256 下载，不包含在 ZIP 中。每个 ZIP 都附带
 SHA-256 文件；CI 会先解压候选包并运行一次完整 OCR，再发布到 GitHub Releases，
 同时保留相同文件作为 Actions Artifact。
 
@@ -266,7 +276,7 @@ Maven 依赖、模型目录、BGR/ImageIO 用法、生命周期和并发指导�
 
 ## 使用边界
 
-已发布 `0.2.1` 的范围仍为 Tiny LWM；未发布主线新增锁定的 Tiny/Small/Medium ONNX。
+`0.3.0` 支持内置 Tiny LWM，以及经过锁定和验证的 Tiny/Small/Medium ONNX。
 运行时不承诺兼容任意 ONNX 拓扑，也不提供自动模型发现、GPU 或 Android 支持。
 Vector API 后端是可选组件，对于专门优化范围之外的形状仍会保留 Scalar 正确性
 回退路径。图像解码由可选的 `lw-ppocr-imageio` 模块单独提供。

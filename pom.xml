@@ -6,11 +6,11 @@
 
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-parent</artifactId>
-    <version>0.2.1</version>
+    <version>0.3.0</version>
     <packaging>pom</packaging>
 
     <name>lw.PPOCR.Java</name>
-    <description>Pure Java PP-OCR runtime sharing the LWM model format.</description>
+    <description>Pure Java PP-OCR runtime with LWM and bounded ONNX model loading.</description>
     <url>https://github.com/lxw112190/lw.PPOCR.Java</url>
 
     <licenses>

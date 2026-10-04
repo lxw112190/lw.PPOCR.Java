@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-04
+
 ### Added
 
 - Pure Java, bounded ONNX protobuf importer and content-based ModelLoader,
@@ -12,6 +14,8 @@ All notable changes to this project are documented in this file.
   18,710-class dictionary, preserving dynamic REC width buckets.
 - Hash-locked model acquisition, independent ORT graph-output checks, sample
   pipeline text/score/rotation verification, and three-platform CI coverage.
+- Release ZIP acquisition-tool validation and manual release re-runs that
+  validate the selected tag consistently across every prerequisite job.
 
 ### Fixed
 
@@ -26,7 +30,9 @@ All notable changes to this project are documented in this file.
 
 ### Compatibility
 
-- Existing v0.2.1 release contents and Tiny LWM APIs remain unchanged.
+- Tiny LWM APIs and the bundled model layout remain compatible with v0.2.1.
+- The ZIP includes the SHA-256-locked ONNX manifest and optional standard-library
+  Python downloader; Small/Medium model binaries are separate downloads.
 - ONNX support is a reviewed PP-OCR subset, not arbitrary ONNX compatibility.
 - C sample text differences are retained separately from independently
   verified Java pipeline Goldens; see docs/onnx-models.md.
@@ -185,4 +191,5 @@ All notable changes to this project are documented in this file.
 
 [0.2.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.2.0
 [0.2.1]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.2.1
+[0.3.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.3.0
 [0.1.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.1.0

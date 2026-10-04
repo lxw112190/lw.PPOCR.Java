@@ -1,16 +1,19 @@
 # ONNX models / ONNX 模型接入
 
-主线现在可直接加载经过锁定的 PP-OCRv6 Tiny、Small、Medium FP32 ONNX。
+0.3.0 可直接加载经过锁定的 PP-OCRv6 Tiny、Small、Medium FP32 ONNX。
 Java core 仍然只依赖 JDK 标准库，生成 Java 8 目标字节码；Vector 后端需要 JDK 25。
-已发布的 v0.2.1 包仍包含原来的 Tiny LWM，本次主线功能尚未发布。
+0.3.0 ZIP 继续内置 Tiny LWM，并附带固定清单和下载助手；大型 ONNX 文件另行获取。
 
 ## 获取模型
 
-从仓库根目录运行：
+从仓库或 Release 解压目录运行（Python 3 仅用于可选下载）：
 
 ```powershell
 python scripts/prepare-onnx-models.py --output build-local-data/onnx-models
 ```
+
+Release 用户也可使用 `--output models`，此时下方 Java 示例的根目录改为
+`Paths.get("models")`。下载助手只校验/写入 ONNX 文件，不会覆盖内置 Tiny LWM。
 
 Python 只用于可选的下载和开发验证，不是 Java 应用运行依赖。也可以自行下载
 [固定清单](../release/ppocrv6-onnx-manifest.json) 内的文件，并校验 SHA-256。
@@ -92,6 +95,9 @@ Small/Medium 更大的权重、注意力和激活会增加耗时及内存；
 本次验证兼容性，不宣称速度与 Tiny 相同，也不改变原性能门禁。
 
 ## 可复现验证 / Validation
+
+下方命令用于源码仓库的开发验收，不在 Release ZIP 中执行。完整 Golden、
+benchmark 和 ORT 测试依赖不随运行库打包；普通应用只需上方加载接口。
 
 普通 `mvn verify` 包含不需网络/模型下载的 protobuf、动态形状、广播 MatMul、
 有限 Slice 和拒绝边界测试，也保留原 Tiny LWM Golden。
