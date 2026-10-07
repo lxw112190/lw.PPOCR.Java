@@ -9,7 +9,7 @@
 
 GitHub Actions 是本仓库的构建与测试权威环境，覆盖 Linux、Windows 和 macOS。
 
-## 获取 0.3.0 构件
+## 获取 0.3.1 构件
 
 当前版本尚未发布到 Maven Central。可以从源码将构件安装到本机 Maven 仓库：
 
@@ -18,8 +18,8 @@ mvn --batch-mode --no-transfer-progress clean install
 ```
 
 完整 Reactor（包括可选 Vector 模块）需要 JDK 25。Tag 构建生成的 GitHub Release
-会提供 `lw-ppocr-core-0.3.0.jar`、`lw-ppocr-imageio-0.3.0.jar` 和
-`lw-ppocr-vector-0.3.0.jar`，以及 Tiny 模型、字典、示例图片、许可证和 ONNX 获取工具。
+会提供 `lw-ppocr-core-0.3.1.jar`、`lw-ppocr-imageio-0.3.1.jar` 和
+`lw-ppocr-vector-0.3.1.jar`，以及 Tiny 模型、字典、示例图片、许可证和 ONNX 获取工具。
 
 ## Maven 模块
 
@@ -29,7 +29,7 @@ mvn --batch-mode --no-transfer-progress clean install
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-core</artifactId>
-    <version>0.3.0</version>
+    <version>0.3.1</version>
 </dependency>
 ```
 
@@ -39,7 +39,7 @@ mvn --batch-mode --no-transfer-progress clean install
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-imageio</artifactId>
-    <version>0.3.0</version>
+    <version>0.3.1</version>
 </dependency>
 ```
 
@@ -52,7 +52,7 @@ DET 的 2 倍上采样 ConvTranspose、广播、激活、归约和 MatMul；其�
 <dependency>
     <groupId>io.github.lxw112190</groupId>
     <artifactId>lw-ppocr-vector</artifactId>
-    <version>0.3.0</version>
+    <version>0.3.1</version>
 </dependency>
 ```
 
@@ -133,7 +133,7 @@ Release 布局是公开契约，应用示例统一从
 
 ### 使用其他模型
 
-0.3.0 可以直接读取锁定的 PP-OCRv6 Tiny/Small/Medium ONNX，不需要原生库、
+0.3.1 可以直接读取锁定的 PP-OCRv6 Tiny/Small/Medium ONNX，不需要原生库、
 ONNX Runtime 或离线转换，参阅 [ONNX 接入说明](onnx-models.md)。
 ZIP 继续内置 Tiny LWM；Small/Medium 文件使用随包下载助手获取。超出 ONNX 支持子集的自定义图，
 可以通过 [`lw.PPOCR.C`](https://github.com/lxw112190/lw.PPOCR.C) 离线转换并单独验证：
@@ -241,7 +241,7 @@ schema 5 另外报告 DB scratch、crop arena、已物化 FP32 常量和预备 p
 
 ## 当前范围
 
-v0.3.0 验证了内置动态形状 FP32 Tiny LWM 及固定清单内的 Tiny/Small/Medium ONNX，Scalar 是稳定参考
+v0.3.1 验证了内置动态形状 FP32 Tiny LWM 及固定清单内的 Tiny/Small/Medium ONNX，Scalar 是稳定参考
 路径。当前不承诺任意 ONNX 拓扑、动态模型发现、GPU 或 Android；Vector API
 后端是 JDK 25 可选加速路径，对优化范围外的通用形状回退 Scalar。性能数字仅
 用于同机研发比较，不构成发布性能承诺。

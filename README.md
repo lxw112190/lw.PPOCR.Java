@@ -24,6 +24,13 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - Pure-Java ONNX import for reviewed PP-OCRv6 Tiny/Small/Medium FP32 graphs
 - Scalar correctness path plus an optional JDK 25 Vector API backend
 
+## What's new in 0.3.1
+
+- Faster wide/depthwise Vector convolutions, parallel ConvTranspose and prepared-convolution post-ops.
+- Fixed hot Vector shuffle allocations; added fixed-species, shard and allocation regressions.
+- Expanded opt-in pointwise FMA and reproducible Java/C# comparison diagnostics; FMA remains off by default.
+- Fixed macOS ONNX CI argument handling. Public OCR APIs and the 0.3.0 model/bundle layout are unchanged.
+
 ## What's new in 0.3.0
 
 - Pure-Java, bounded ONNX loading for Tiny/Small/Medium, with no native dependencies.
@@ -248,9 +255,9 @@ mvn verify
 
 ## Release
 
-`0.3.0` is the current pre-1.0 release target. It adds reviewed ONNX loading and
-PP-OCRv6 Small/Medium support, corrects graph execution, and fixes low-CPU
-Vector allocation while retaining the v0.2.1 end-to-end optimizations.
+`0.3.1` is the current pre-1.0 release target. It improves convolution throughput,
+fixes hot Vector allocations and macOS ONNX CI, and retains the public OCR APIs,
+reviewed Tiny/Small/Medium model support and bundle layout introduced in `0.3.0`.
 
 Compared with `0.1.0`, the runtime now reuses more inference and PP-OCR working
 storage, shares prepared REC projection weights across dynamic-width sessions,

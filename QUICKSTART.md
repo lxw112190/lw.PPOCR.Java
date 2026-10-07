@@ -87,7 +87,7 @@ For Maven dependencies, BGR input, lifecycle, concurrency, and tuning, see
 [`docs/installation.md`](docs/installation.md). Model provenance and custom
 conversion are documented in [`docs/models.md`](docs/models.md).
 
-## 5. Small / Medium ONNX (0.3.0)
+## 5. Small / Medium ONNX (0.3.0 and later)
 
 The ZIP includes `release/ppocrv6-onnx-manifest.json` and an optional downloader,
 not the larger ONNX binaries. From the extracted directory:

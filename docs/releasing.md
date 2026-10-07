@@ -1,6 +1,6 @@
 # lw.PPOCR.Java 发布清单
 
-本文档用于维护者发布 `v0.x`，本次目标为 `v0.3.0`。Tag 和已经公开的 Release 不应移动或覆盖；发现问题时
+本文档用于维护者发布 `v0.x`，本次目标为 `v0.3.1`。Tag 和已经公开的 Release 不应移动或覆盖；发现问题时
 应修复后提升版本号。
 
 ## 1. 发布前检查
@@ -22,15 +22,15 @@
 
 ## 2. 创建不可变 Tag
 
-本次使用 `0.3.0`：
+本次使用 `0.3.1`：
 
 ```text
-git tag -a v0.3.0 -m "lw.PPOCR.Java v0.3.0"
-git push origin v0.3.0
+git tag -a v0.3.1 -m "lw.PPOCR.Java v0.3.1"
+git push origin v0.3.1
 ```
 
 Tag CI 会拒绝与 POM 版本不一致的 Tag。它会重新运行测试，生成
-`lw.PPOCR.Java-v0.3.0.zip` 和 `lw.PPOCR.Java-v0.3.0.zip.sha256`。打包阶段会先执行
+`lw.PPOCR.Java-v0.3.1.zip` 和 `lw.PPOCR.Java-v0.3.1.zip.sha256`。打包阶段会先执行
 公开 Release 布局检查；解压后再校验全部 SHA-256，并使用包内 JAR、模型、字典和
 示例图片运行一次 16 行完整 OCR。全部验证成功后，CI 会创建同名
 GitHub Release、上传 ZIP 与 `.sha256`，并保留相同文件作为 Actions Artifact。
@@ -42,20 +42,20 @@ GitHub Release、上传 ZIP 与 `.sha256`，并保留相同文件作为 Actions 
 Linux/macOS：
 
 ```text
-sha256sum -c lw.PPOCR.Java-v0.3.0.zip.sha256
-unzip lw.PPOCR.Java-v0.3.0.zip
-cd lw.PPOCR.Java-v0.3.0
+sha256sum -c lw.PPOCR.Java-v0.3.1.zip.sha256
+unzip lw.PPOCR.Java-v0.3.1.zip
+cd lw.PPOCR.Java-v0.3.1
 sha256sum -c SHA256SUMS.txt
 ```
 
 Windows PowerShell：
 
 ```powershell
-$expected = (Get-Content .\lw.PPOCR.Java-v0.3.0.zip.sha256).Split()[0]
-$actual = (Get-FileHash .\lw.PPOCR.Java-v0.3.0.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+$expected = (Get-Content .\lw.PPOCR.Java-v0.3.1.zip.sha256).Split()[0]
+$actual = (Get-FileHash .\lw.PPOCR.Java-v0.3.1.zip -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -ne $expected) { throw "SHA-256 mismatch" }
-Expand-Archive .\lw.PPOCR.Java-v0.3.0.zip -DestinationPath .\verified
-Set-Location .\verified\lw.PPOCR.Java-v0.3.0
+Expand-Archive .\lw.PPOCR.Java-v0.3.1.zip -DestinationPath .\verified
+Set-Location .\verified\lw.PPOCR.Java-v0.3.1
 Get-Content .\SHA256SUMS.txt | ForEach-Object {
     if ($_ -match '^([0-9a-fA-F]{64})\s+\*?(.+)$') {
         $expected = $matches[1]
@@ -71,17 +71,17 @@ Windows 内部文件清单使用 GNU `sha256sum` 格式，上述 PowerShell 会�
 
 ## 4. 确认 GitHub Release
 
-确认不可变 Tag `v0.3.0` 对应的 GitHub Release 已发布，说明来自 `CHANGELOG.md`
+确认不可变 Tag `v0.3.1` 对应的 GitHub Release 已发布，说明来自 `CHANGELOG.md`
 对应章节，并包含 ZIP 与 `.sha256`。CI 遇到已经存在的同名 Release 会失败，不会覆盖
 已发布资产；如需修复，应提升版本号并重新发布。
 
 如果标签构建成功但发布步骤未运行，可在 GitHub Actions 的 `Java CI` 页面选择
-`Run workflow`，将已经存在的标签（例如 `v0.3.0`）填入 `release_tag`。所有前置验证
+`Run workflow`，将已经存在的标签（例如 `v0.3.1`）填入 `release_tag`。所有前置验证
 任务和发布任务都会检出该标签，重新完成构建、性能、ONNX、校验和与完整 OCR
 测试，不会把 `main` 的验证结果误用于另一个标签。无需额外手动运行 `gh release create`。
 
 ## 5. 发布后的开发版本
 
-Release 发布后，可将 Maven 版本提升到下一个开发版本，例如 `0.3.1-SNAPSHOT`，并在
+Release 发布后，可将 Maven 版本提升到下一个开发版本，例如 `0.3.2-SNAPSHOT`，并在
 `CHANGELOG.md` 顶部建立 `Unreleased` 小节。需要撤回时保留原 Tag 和 Release，在说明中
 标记问题并发布更高版本，不能重写已公开的历史。

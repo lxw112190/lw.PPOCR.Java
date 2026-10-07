@@ -4,6 +4,8 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-07
+
 ### Fixed
 
 - ONNX validation on macOS now keeps JVM argument arrays nonempty under Bash
@@ -48,6 +50,20 @@ All notable changes to this project are documented in this file.
 - An isolated, hash-locked Windows Java/C# CPU comparison runner for all three
   models, sharing decoded BGR pixels and REC buckets; it reports text/crop
   differences and process memory independently of CI performance gates.
+
+### Compatibility and measurement scope
+
+- Public OCR APIs, Tiny LWM bundle, reviewed Tiny/Small/Medium FP32 ONNX model
+  set and width buckets remain compatible with 0.3.0. Core/ImageIO retain Java 8
+  bytecode; full builds and the optional Vector backend require JDK 25.
+- FMA and >=32-channel FMA panels remain opt-in and change rounding. Validate
+  your actual models/dataset before enabling them.
+- The local CPU8 two-process sample comparison measured Medium about 9% lower
+  latency than pinned C# commit 3e4192f; Tiny/Small were still slower. Crops are
+  not identical and no dataset CER or universal speed advantage is claimed.
+  See docs/spatial-convolution-optimization-20261007.md for the workload and evidence.
+- The original latency/allocation gates remain unchanged; no models, benchmark
+  logs, C# sources or test-only ONNX Runtime dependencies are added to the ZIP.
 
 ## [0.3.0] - 2026-10-04
 
@@ -237,4 +253,5 @@ All notable changes to this project are documented in this file.
 [0.2.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.2.0
 [0.2.1]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.2.1
 [0.3.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.3.0
+[0.3.1]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.3.1
 [0.1.0]: https://github.com/lxw112190/lw.PPOCR.Java/releases/tag/v0.1.0

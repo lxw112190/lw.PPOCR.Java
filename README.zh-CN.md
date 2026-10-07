@@ -24,6 +24,13 @@ dependencies. 轻量级纯 Java PP-OCRv6 推理运行时，无原生依赖。
 - 纯 Java ONNX 解析，接入锁定的 PP-OCRv6 Tiny/Small/Medium FP32 模型
 - 提供 Scalar 正确性路径，以及可选的 JDK 25 Vector API 后端
 
+## 0.3.1 新增内容
+
+- 大核/depthwise Vector 卷积、并行转置卷积与 prepared 卷积后处理优化。
+- 修复热机 Vector shuffle 分配，增加固定 species、分片及分配回归测试。
+- 扩展可选 pointwise FMA 和可复现 Java/C# 对照工具；FMA 仍默认关闭。
+- 修复 macOS ONNX CI 参数处理，公开 OCR API、0.3.0 模型及发布包布局保持兼容。
+
 ## 0.3.0 新增内容
 
 - 纯 Java 有界 ONNX 解析，支持经过验证的 Tiny/Small/Medium，无原生运行时依赖。
@@ -216,8 +223,8 @@ mvn verify
 
 ## 发布版本
 
-`0.3.0` 是本次 1.0 之前的发布目标，新增经过验证的 ONNX 和 Small/Medium 支持，
-修复图执行正确性与低 CPU 下 Vector 分配问题，并保留 v0.2.1 的端到端优化。
+`0.3.1` 是本次 1.0 之前的发布目标，优化卷积吞吐、修复热机 Vector 分配和 macOS ONNX CI；
+公开 OCR API、0.3.0 引入的 Tiny/Small/Medium 模型支持与发布包布局保持兼容。
 
 相比 `0.1.0`，运行时会复用更多推理和 PP-OCR 工作缓存；动态宽度 REC Session
 共享同一份已准备的投影权重；受支持的 REC 末端图不再保留完整 `[T,C]` 概率矩阵；

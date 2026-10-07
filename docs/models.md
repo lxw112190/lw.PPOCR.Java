@@ -113,5 +113,5 @@ resulting graph against the Java runtime. Keep converted assets outside the
 application JAR when independent model updates are required.
 
 Official Tiny LWM models remain ready to use from the Release ZIP.
-The v0.3.0 ZIP includes the pinned ONNX manifest and optional downloader;
+The Release ZIP includes the pinned ONNX manifest and optional downloader;
 Small/Medium ONNX binaries are separate downloads and are not bundled.

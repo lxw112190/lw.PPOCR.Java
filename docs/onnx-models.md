@@ -1,6 +1,7 @@
 # ONNX models / ONNX 模型接入
 
-0.3.0 可直接加载经过锁定的 PP-OCRv6 Tiny、Small、Medium FP32 ONNX。
+0.3.0 及以后可直接加载经过锁定的 PP-OCRv6 Tiny、Small、Medium FP32 ONNX。
+0.3.1 保留相同模型清单、字典和运行 API；新增优化不扩大任意 ONNX 兼容性范围。
 Java core 仍然只依赖 JDK 标准库，生成 Java 8 目标字节码；Vector 后端需要 JDK 25。
 0.3.0 ZIP 继续内置 Tiny LWM，并附带固定清单和下载助手；大型 ONNX 文件另行获取。
 
