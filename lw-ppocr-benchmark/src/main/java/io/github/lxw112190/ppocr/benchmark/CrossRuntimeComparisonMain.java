@@ -69,12 +69,18 @@ public final class CrossRuntimeComparisonMain {
             }
             System.out.printf(Locale.ROOT,"{\"schema\":1,\"runtime\":\"java\",\"variant\":%s,"
                 +"\"fma\":%s,\"cpu\":%d,\"line_workers\":%d,\"det_threads\":%d,\"rec_threads\":%d,"
+                +"\"features\":{\"six_pointwise_fma\":%s,\"extended_pointwise_fma\":%s,\"small_pointwise_fma\":%s,\"parallel_prepared_epilogue\":%s,\"parallel_transpose\":%s,\"paired_transpose\":%s,\"wide_conv_register\":%s,\"depthwise_register\":%s},"
                 +"\"warmup\":%d,\"iterations\":%d,\"width\":%d,\"height\":%d,\"det_width\":%d,\"det_height\":%d,\"bgr_sha256\":%s,"
                 +"\"settings\":{\"det_limit\":960,\"bitmap\":0.3,\"box\":0.6,\"unclip\":1.6,\"dilation\":false,\"max_candidates\":1000,\"cls_threshold\":0.9,\"rec_buckets\":[192,320,480,640,960]},"
                 +"\"mean_ms\":%.3f,\"median_ms\":%.3f,\"p95_ms\":%.3f,\"heap_after_gc_bytes\":%d,"
                 +"\"gc_count\":%d,\"lines\":%s}%n",quote(variant),Boolean.getBoolean("lwppocr.vectorFma"),
                 Runtime.getRuntime().availableProcessors(),plan.getLineWorkers(),plan.getDetectorIntraOp(),
-                plan.getRecognizerIntraOp(),warmup,iterations,w,h,detShape.getInputWidth(),detShape.getInputHeight(),
+                plan.getRecognizerIntraOp(),Boolean.getBoolean("lwppocr.vectorFma")&&!Boolean.getBoolean("lwppocr.disableSixPointwise"),
+                Boolean.getBoolean("lwppocr.vectorFma")&&!Boolean.getBoolean("lwppocr.disableExtendedFmaPointwise"),
+                Boolean.getBoolean("lwppocr.vectorFma")&&!Boolean.getBoolean("lwppocr.disableExtendedFmaPointwise")&&Boolean.getBoolean("lwppocr.smallFmaPointwise"),
+                !Boolean.getBoolean("lwppocr.disableParallelEpilogue"),!Boolean.getBoolean("lwppocr.disableParallelTranspose"),
+                !Boolean.getBoolean("lwppocr.disableTransposePair"),!Boolean.getBoolean("lwppocr.disableWideConv"),
+                !Boolean.getBoolean("lwppocr.disableDepthwiseRegister"),warmup,iterations,w,h,detShape.getInputWidth(),detShape.getInputHeight(),
                 quote(hash(pixels)),total/iterations/1e6,
                 samples[samples.length/2]/1e6,samples[(int)Math.ceil(iterations*.95)-1]/1e6,heap,gcDelta,
                 lines.append(']').toString());

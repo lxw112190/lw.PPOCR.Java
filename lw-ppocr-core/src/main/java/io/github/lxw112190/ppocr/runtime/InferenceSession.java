@@ -669,7 +669,7 @@ public final class InferenceSession implements AutoCloseable {
             throw unsupported(node, "ConvTranspose shape or parameter mismatch");
         }
         float[] bias = inputs.length == 3 ? data(inputs[2], storage) : null;
-        backend.convTranspose(data(inputs[0], storage), offset(inputs[0]), data(inputs[1], storage), offset(inputs[1]),
+        parallelKernels.convTranspose(data(inputs[0], storage), offset(inputs[0]), data(inputs[1], storage), offset(inputs[1]),
                 bias, inputs.length == 3 ? offset(inputs[2]) : 0, storage, offset(output), inputShape.get(0),
                 inputShape.get(1), inputShape.get(2), inputShape.get(3), outputShape.get(1), kernelHeight,
                 kernelWidth, strideHeight, strideWidth, dilationHeight, dilationWidth, padTop, padLeft, groups,

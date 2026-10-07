@@ -200,10 +200,29 @@ the original path. See [the Medium optimization record](docs/medium-optimization
 for same-machine end-to-end results, memory accounting, and reproduction commands.
 
 An experimental `-Dlwppocr.vectorFma=true` enables fused FP32 arithmetic only in
-eligible large pointwise kernels. It is off by default and changes rounding;
+eligible pointwise kernels (including 64–255 channels in FMA mode). It is off by default and changes rounding;
 validate your models/dataset before using it. The independent Windows
 [Java/C# comparison](docs/java-csharp-comparison-20261007.md) shares hash-locked
 models and decoded pixels, records crop/text differences, and does not change CI gates.
+
+The latest end-to-end work parallelizes prepared-convolution post-ops and 2x2
+transpose convolutions within the existing CPU budget. Opt-in FMA uses a six-output
+microkernel without extra packed weights. `-Dlwppocr.disableExtendedFmaPointwise=true`
+restores the earlier FMA eligibility. Reversible switches and validation are
+documented in [the OCR throughput record](docs/ocr-throughput-optimization-20261007.md).
+`-Dlwppocr.smallFmaPointwise=true` additionally enables experimental >=32-channel
+FMA panels; it is off by default and not faster for every model. Transpose writes
+use cached shuffle masks to avoid per-vector allocations, with a hot-allocation test.
+Earlier two-process repetitions put Tiny near C# parity, while Small/Medium
+remain slower; this is not a claim of a universal speed or memory advantage.
+
+Wide dense and 7x7/9x9 depthwise convolutions now retain spatial sums in registers,
+preserving Scalar arithmetic without extra weight copies. See the
+[spatial-convolution record](docs/spatial-convolution-optimization-20261007.md)
+for controlled measurements and fallback switches; focused gains are not full-OCR speedups.
+The latest two-process sample comparison measures Medium about 9% lower latency
+than the pinned C# reference, with Tiny/Small still slower. This uses opt-in FMA,
+and different crops prevent an identical-kernel-workload or dataset-wide claim.
 
 The optional JDK 25 Vector API backend accelerates all Conv configurations used
 by the Tiny models, the DET 2x upsampling ConvTranspose path, MatMul, reductions,

@@ -176,10 +176,24 @@ Conv 参数、形状和张量绑定也在运行前完成预编译。可融合的
 可用 `-Dlwppocr.disableLargePointwise=true` 关闭新路径进行同条件对照。
 实测、内存口径和复现命令见 [Medium 优化记录](docs/medium-optimization-20261007.md)。
 
-实验开关 `-Dlwppocr.vectorFma=true` 仅对符合条件的大通道 1×1 卷积使用融合
+实验开关 `-Dlwppocr.vectorFma=true` 对符合条件的 1×1 卷积使用融合
 FP32 运算；默认关闭，舍入方式会变化，启用前请验证实际模型和数据集。
 独立的 Windows [Java/C# 对照工具](docs/java-csharp-comparison-20261007.md)
 共享固定哈希模型和解码像素，记录框、文本及工作量差异，不改变 CI 性能门禁。
+
+本轮端到端优化在现有 CPU 预算内并行执行 prepared 卷积后处理和 2×2 转置卷积；
+可选 FMA 改用六输出通道微内核，并扩展至 64～255 通道层；不增加打包权重。
+`-Dlwppocr.disableExtendedFmaPointwise=true` 可恢复原 FMA 命中范围，默认非 FMA 范围不变。
+回退开关、正确性验证及实测见 [OCR 吞吐优化记录](docs/ocr-throughput-optimization-20261007.md)。
+`-Dlwppocr.smallFmaPointwise=true` 可额外启用 >=32 通道的 FMA 面板，默认关闭，
+不是每个模型都会更快。转置卷积改用固定重排掩码，避免逐向量分配，已补热机分配回归测试。
+上一轮实测 Tiny 基本与 C# 持平，Small/Medium 仍有差距；不声明普遍的速度或进程内存优势。
+
+大核普通卷积及7×7/9×9 depthwise 新增寄存器累加路径，保持 Scalar 运算顺序，
+不复制额外权重。受控实测和回退开关见[空间卷积优化记录](docs/spatial-convolution-optimization-20261007.md)；
+单算子收益不等于完整 OCR 加速倍数。
+最新两轮样图对照中，Medium 耗时比固定 C# 参考少约9%，Tiny/Small仍较慢。
+此成绩使用可选 FMA，且两端裁剪有差异，不作相同算子负载或多图性能声明。
 
 可选的 JDK 25 Vector API 后端会加速 Tiny 模型使用的全部 Conv 配置、DET 2×
 上采样 ConvTranspose、MatMul、归约、激活函数和二元广播。它还会在校验张量连接、

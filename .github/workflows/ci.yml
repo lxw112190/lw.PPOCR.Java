@@ -41,12 +41,12 @@ jobs:
           cache: maven
       - name: Compile and test
         run: mvn --batch-mode --no-transfer-progress verify
-      - name: Check large pointwise panels with fixed Vector species
+      - name: Check convolution kernels with fixed Vector species
         shell: bash
         run: |
           for bits in 128 512; do
             mvn --batch-mode --no-transfer-progress -pl lw-ppocr-vector -am \
-              -Dtest=VectorLargePointwiseTest,VectorLargePointwiseFmaTest -Dsurefire.failIfNoSpecifiedTests=false \
+              -Dtest=VectorLargePointwiseTest,VectorLargePointwiseFmaTest,VectorConvTransposeRowsTest,VectorParallelTransposeTest,VectorParallelEpilogueTest,VectorRegisterConvTest,VectorParallelRegisterConvTest -Dsurefire.failIfNoSpecifiedTests=false \
               -Dlwppocr.vectorBits=$bits test
           done
       - name: Report test failures
@@ -108,12 +108,15 @@ jobs:
           sep=':'
           if [ "$RUNNER_OS" = Windows ]; then sep=';'; fi
           cp="lw-ppocr-core/target/classes${sep}lw-ppocr-imageio/target/classes${sep}lw-ppocr-vector/target/classes${sep}lw-ppocr-benchmark/target/classes"
-          for backend in scalar vector vector-fma; do
+          for backend in scalar vector vector-fma vector-fma-small; do
             flags=()
             execution_backend="$backend"
-            if [ "$backend" = vector-fma ]; then
+            if [[ "$backend" = vector-fma* ]]; then
               flags=(-Dlwppocr.vectorFma=true)
               execution_backend=vector
+            fi
+            if [ "$backend" = vector-fma-small ]; then
+              flags+=(-Dlwppocr.smallFmaPointwise=true)
             fi
             java "${flags[@]}" -Xmx1g --add-modules jdk.incubator.vector -cp "$cp" \
               io.github.lxw112190.ppocr.benchmark.OnnxCompatibilityMain \

@@ -109,7 +109,9 @@ Small 有一条宽度 Java=640 / C#=480；Medium 有一条 Java=960 / C#=640。
 FMA 一次舍入与默认乘加两次舍入不同，不能声称 Scalar 位级一致。
 单测以 `Math.fma` 为独立参考，覆盖偏移、bias、尾部、保护区、分片复用、
 并行私有 scratch、NaN/Infinity/-0，并在 preferred/128/512-bit species 验证。
-Tiny 不命中该大通道路径；启用标志不代表每个模型都有加速。
+本节测量的旧配置中 Tiny 不命中该大通道路径；启用标志不代表每个模型都有加速。
+后续 FMA 专属命中范围和较充分预热的对照见
+[第二轮 OCR 吞吐优化记录](ocr-throughput-optimization-20261007.md)，不要混用两轮配置的结果。
 
 目前保持实验开关：即使样图/Golden 通过，也必须先验证实际数据集 CER、
 文字、框和资源使用，再考虑默认启用。全文输出 parity 不等于所有中间值位级 parity。

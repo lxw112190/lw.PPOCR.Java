@@ -4,6 +4,8 @@ import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ConvEpilogue;
 import io.github.lxw112190.ppocr.kernels.ConvEpilogueBackend;
 import io.github.lxw112190.ppocr.kernels.PreparedConvBackend;
+import io.github.lxw112190.ppocr.kernels.PreparedConvEpilogueRowsBackend;
+import io.github.lxw112190.ppocr.kernels.ConvTransposeRowsBackend;
 
 /** Disjoint NCHW channel / matrix row shards, preserving reduction order. */
 final class ParallelKernels implements OperatorParallelExecutor.Action {
@@ -14,6 +16,8 @@ final class ParallelKernels implements OperatorParallelExecutor.Action {
     private int inputOffset, weightOffset, biasOffset, outputOffset;
     private final int[] p = new int[18];
     private boolean matrix;
+    private boolean transpose;
+    private boolean finishing;
     private ConvEpilogue epilogue;
     private float[] residual;
     private int residualOffset;
@@ -54,8 +58,23 @@ final class ParallelKernels implements OperatorParallelExecutor.Action {
             bind(a, ao, null, 0, b, bo, c, co); prepared = kernel;
             try { executor.run(count, this); } finally { prepared = null; clear(); }
         }
-        ((PreparedConvBackend) backend).finishPreparedConv(c, co, batch, channels, plane,
-                epilogue, residual, residualOffset);
+        finishPreparedConv(c,co,batch,channels,plane,epilogue,residual,residualOffset);
+    }
+
+    private void finishPreparedConv(float[] c,int co,int batch,int channels,int plane,
+                                    ConvEpilogue ep,float[] residual,int ro) {
+        if(ep==null)return;
+        int grain=backend instanceof PreparedConvEpilogueRowsBackend
+                ? ((PreparedConvEpilogueRowsBackend)backend).preparedEpilogueChannelAlignment() : channels;
+        int count=Math.min(parallelism,channels/grain);
+        if(batch!=1 || count<=1 || (long)channels*plane<65536
+                || Boolean.getBoolean("lwppocr.disableParallelEpilogue")) {
+            ((PreparedConvBackend)backend).finishPreparedConv(c,co,batch,channels,plane,ep,residual,ro);
+            return;
+        }
+        bind(null,0,null,0,null,0,c,co);this.epilogue=ep;this.residual=residual;this.residualOffset=ro;
+        p[0]=channels;p[1]=plane;p[2]=grain;finishing=true;
+        try {executor.run(count,this);} finally {clear();}
     }
     void matMul(float[] a, int ao, float[] b, int bo, float[] c, int co,
                 int rows, int inner, int columns) {
@@ -109,11 +128,40 @@ final class ParallelKernels implements OperatorParallelExecutor.Action {
         p[17] = grain;
         try { executor.run(count, this); } finally { clear(); }
     }
+    void convTranspose(float[] a, int ao, float[] w, int wo, float[] b, int bo, float[] c, int co,
+                       int batch, int channels, int height, int width, int outChannels,
+                       int kh, int kw, int sh, int sw, int dh, int dw, int pt, int pl,
+                       int groups, int oh, int ow) {
+        p[0]=batch; p[1]=channels; p[2]=height; p[3]=width; p[4]=outChannels;
+        p[5]=kh; p[6]=kw; p[7]=sh; p[8]=sw; p[9]=dh; p[10]=dw;
+        p[11]=pt; p[12]=pl; p[13]=0; p[14]=0; p[15]=groups; p[16]=oh; p[17]=ow;
+        long operations=(long)batch*channels*height*width*(outChannels/groups)*kh*kw;
+        int count=operations < 2000000L ? 1 : Math.min(parallelism, batch*outChannels);
+        if (count == 1 || !(backend instanceof ConvTransposeRowsBackend)
+                || Boolean.getBoolean("lwppocr.disableParallelTranspose")
+                || !((ConvTransposeRowsBackend)backend).supportsConvTransposeRows(p)) {
+            backend.convTranspose(a,ao,w,wo,b,bo,c,co,batch,channels,height,width,outChannels,
+                    kh,kw,sh,sw,dh,dw,pt,pl,groups,oh,ow);
+            return;
+        }
+        bind(a,ao,w,wo,b,bo,c,co); transpose=true;
+        try { executor.run(count,this); } finally { transpose=false; clear(); }
+    }
+
     public void run(int shard, int shards) {
         if (prepared != null) {
             int rows = prepared.outputRows();
             prepared.runRows(input, inputOffset, bias, biasOffset, output, outputOffset,
                     spatialScratch[shard], rows * shard / shards, rows * (shard + 1) / shards);
+        } else if(finishing) {
+            int blocks=p[0]/p[2],first=blocks*shard/shards*p[2];
+            int end=shard==shards-1?p[0]:blocks*(shard+1)/shards*p[2];
+            ((PreparedConvEpilogueRowsBackend)backend).finishPreparedConvChannels(output,outputOffset,
+                    p[0],p[1],epilogue,residual,residualOffset,first,end);
+        } else if (transpose) {
+            int rows=p[0]*p[4];
+            ((ConvTransposeRowsBackend)backend).convTransposeRows(input,inputOffset,weights,weightOffset,
+                    bias,biasOffset,output,outputOffset,p,rows*shard/shards,rows*(shard+1)/shards);
         } else if (matrix) {
             int blocks = p[0] / 4, first = blocks * shard / shards * 4;
             int end = shard == shards - 1 ? p[0] : blocks * (shard + 1) / shards * 4;
@@ -146,5 +194,8 @@ final class ParallelKernels implements OperatorParallelExecutor.Action {
         input = a; inputOffset = ao; weights = w; weightOffset = wo;
         bias = b; biasOffset = bo; output = c; outputOffset = co;
     }
-    private void clear() { input = weights = bias = output = residual = null; epilogue = null; }
+    private void clear() {
+        input = weights = bias = output = residual = null; epilogue = null;
+        matrix = false; transpose = false; finishing=false;
+    }
 }

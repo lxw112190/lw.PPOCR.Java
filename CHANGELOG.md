@@ -6,6 +6,27 @@ All notable changes to this project are documented in this file.
 
 ### Changed
 
+- Register-resident 7x7/1x7/7x1 dense and paired 7x7/9x9 depthwise Vector
+  kernels preserve Scalar reduction and padding semantics without per-call
+  buffers or weight copies. Added bitwise, channel-shard, fixed-species and
+  hot-allocation tests; unsupported geometry and explicit switches retain fallback.
+- Parallel prepared-Conv post-ops and paired/parallel non-overlapping 2x2
+  ConvTranspose now share the existing bounded operator pool. Channel alignment
+  preserves activation tail boundaries, and all shards join before reuse/failure.
+- Opt-in large-pointwise FMA now uses six output channels and twelve accumulators,
+  retaining ordered reduction, 32-pixel scratch, canonical weights and a four-channel
+  fallback. No additional model-weight packing or new numerical approximation.
+- FMA-only pointwise panels cover >=64 input/output channels, with independent
+  Math.fma and real ONNX/ORT validation; default non-FMA eligibility is unchanged.
+  `lwppocr.disableExtendedFmaPointwise` restores the previous >=256 range.
+- Optional `lwppocr.smallFmaPointwise=true` further extends FMA coverage to >=32;
+  it is separately opt-in, validated against real graph/CTC/CLS outputs.
+- Fixed DET ConvTranspose dynamic shuffle-mask allocations with equivalent cached
+  single-source shuffles/blend masks, including the legacy fallback. Added a
+  real-size hot allocation regression without relaxing existing CI thresholds.
+- Added preferred/128/512-bit shard, failure-recovery and FMA fallback tests.
+  Benchmark JSON records optimization switches; original CI gates are unchanged.
+
 - Large Vector 1x1 Conv now packs bounded 32-pixel input panels into session-reused
   per-worker scratch. It preserves channel reduction order, disjoint spatial
   shards, canonical weights, and Scalar fallbacks; no per-call buffers or default FMA.

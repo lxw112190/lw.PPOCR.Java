@@ -2,6 +2,10 @@ import copy
 import importlib.util
 import pathlib
 import unittest
+import contextlib
+import io
+import json
+import tempfile
 
 spec = importlib.util.spec_from_file_location('comparison', pathlib.Path(__file__).with_name('summarize-csharp-comparison.py'))
 module = importlib.util.module_from_spec(spec)
@@ -23,6 +27,23 @@ class ContractTest(unittest.TestCase):
         self.assertEqual(1.5, result['java_over_csharp'])
         self.assertTrue(result['identical_ordered_crops'])
         self.assertEqual(1, result['exact_text_lines'])
+
+    def test_features_are_reported_without_changing_input_contract(self):
+        self.java['features'] = {'parallel_prepared_epilogue': True}
+        self.assertEqual(self.java['features'], module.compare(self.java, self.csharp)['java_features'])
+
+    def test_fma_only_run_has_no_invented_default_baseline(self):
+        java = dict(self.java, fma=True, replica=1)
+        peer = dict(self.csharp, replica=1)
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            (root / 'medium-java-fma-r1.json').write_text(json.dumps(java), encoding='utf-8')
+            (root / 'medium-csharp-r1.json').write_text(json.dumps(peer), encoding='utf-8')
+            with contextlib.redirect_stdout(io.StringIO()):
+                module.main(root)
+            summary = json.loads((root / 'summary.json').read_text(encoding='utf-8'))[0]
+            self.assertNotIn('fma_reduction_percent', summary)
+            self.assertEqual(1.5, summary['java_over_csharp'])
 
     def test_each_contract_mismatch_fails(self):
         for key in ('cpu', 'line_workers', 'det_threads', 'rec_threads', 'warmup',

@@ -5,6 +5,8 @@ import io.github.lxw112190.ppocr.kernels.FusedGeluBackend;
 import io.github.lxw112190.ppocr.kernels.ConvEpilogue;
 import io.github.lxw112190.ppocr.kernels.ConvEpilogueBackend;
 import io.github.lxw112190.ppocr.kernels.PreparedConvBackend;
+import io.github.lxw112190.ppocr.kernels.PreparedConvEpilogueRowsBackend;
+import io.github.lxw112190.ppocr.kernels.ConvTransposeRowsBackend;
 import io.github.lxw112190.ppocr.kernels.InPlaceElementwiseBackend;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ProjectionArgMaxBackend;
@@ -20,11 +22,13 @@ import jdk.incubator.vector.VectorSpecies;
 
 /** Optional JDK 25 Vector API backend with scalar fallback for unsupported kernels. */
 public final class VectorBackend implements KernelBackend, FusedGeluBackend,
-        ProjectionArgMaxBackend, InPlaceElementwiseBackend, ConvEpilogueBackend, PreparedConvBackend {
+        ProjectionArgMaxBackend, InPlaceElementwiseBackend, ConvEpilogueBackend, PreparedConvBackend,
+        ConvTransposeRowsBackend, PreparedConvEpilogueRowsBackend {
     private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
     private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
-    private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.makeZip(SPECIES, 0);
-    private static final VectorShuffle<Float> ZIP_HIGH = VectorShuffle.makeZip(SPECIES, 1);
+    private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.fromOp(SPECIES, i -> i / 2);
+    private static final VectorShuffle<Float> ZIP_HIGH = VectorShuffle.fromOp(SPECIES, i -> SPECIES.length() / 2 + i / 2);
+    private static final VectorMask<Float> ZIP_ODD = VectorMask.fromLong(SPECIES, 0xAAAAAAAAAAAAAAAAL);
     private final ScalarBackend scalar = new ScalarBackend();
     private final VectorPreparedConv.Weights spatialWeights = new VectorPreparedConv.Weights();
 
@@ -43,6 +47,13 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                     ConvEpilogue epilogue, float[] residual, int residualOffset) {
         if (epilogue != null) VectorConvEpilogue.finish(output, offset, batch, channels, plane,
                 epilogue, 0, residual, residualOffset, this);
+    }
+
+    public int preparedEpilogueChannelAlignment() { return SPECIES.length(); }
+    public void finishPreparedConvChannels(float[] output,int offset,int channels,int plane,
+            ConvEpilogue epilogue,float[] residual,int residualOffset,int firstChannel,int endChannel) {
+        VectorConvEpilogue.finish(output,offset+firstChannel*plane,1,endChannel-firstChannel,plane,
+                epilogue,firstChannel,residual,residualOffset+firstChannel*plane,this);
     }
 
     @Override
@@ -475,6 +486,19 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             return;
         }
         if (groups == channels && outputChannels == channels && strideWidth == 1) {
+            if (!Boolean.getBoolean("lwppocr.disableDepthwiseRegister")
+                    && kernelHeight == kernelWidth && (kernelHeight == 7 || kernelHeight == 9)
+                    && (strideHeight == 1 || strideHeight == 2)
+                    && dilationHeight == 1 && dilationWidth == 1
+                    && padTop == kernelHeight / 2 && padBottom == padTop
+                    && padLeft == kernelWidth / 2 && padRight == padLeft
+                    && outputHeight == (height + strideHeight - 1) / strideHeight
+                    && outputWidth == width) {
+                VectorDepthwiseRegister.apply(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                        output, outputOffset, batch, channels, height, width,
+                        kernelHeight, strideHeight, outputHeight);
+                return;
+            }
             if (kernelHeight == 5 && kernelWidth == 5 && strideHeight == 1
                     && dilationHeight == 1 && dilationWidth == 1
                     && padTop == 2 && padLeft == 2 && padBottom == 2 && padRight == 2
@@ -490,6 +514,19 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
             return;
         }
         if (strideWidth == 1) {
+            if (!Boolean.getBoolean("lwppocr.disableWideConv") && groups == 1
+                    && ((kernelHeight == 7 && kernelWidth == 7)
+                        || (kernelHeight == 1 && kernelWidth == 7)
+                        || (kernelHeight == 7 && kernelWidth == 1))
+                    && strideHeight == 1 && dilationHeight == 1 && dilationWidth == 1
+                    && padTop == kernelHeight / 2 && padBottom == padTop
+                    && padLeft == kernelWidth / 2 && padRight == padLeft
+                    && outputHeight == height && outputWidth == width) {
+                VectorWideConv.apply(input, inputOffset, weights, weightOffset, bias, biasOffset,
+                        output, outputOffset, batch, channels, height, width, outputChannels,
+                        kernelHeight, kernelWidth, padTop, padLeft);
+                return;
+            }
             if (groups == 1 && channels >= 8 && outputChannels >= 8
                     && outputChannels % 8 == 0
                     && kernelHeight == 3 && kernelWidth == 3 && strideHeight == 1
@@ -1389,6 +1426,20 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
         scalar.resizeNearest(input, inputOffset, output, outputOffset, batch, channels,
                 inputHeight, inputWidth, outputHeight, outputWidth, scaleHeight, scaleWidth);
     }
+    public boolean supportsConvTransposeRows(int[] p) {
+        return !Boolean.getBoolean("lwppocr.disableTransposePair")
+                && p[15]==1 && p[5]==2 && p[6]==2 && p[7]==2 && p[8]==2
+                && p[9]==1 && p[10]==1 && p[11]==0 && p[12]==0
+                && p[16]==p[2]*2 && p[17]==p[3]*2;
+    }
+
+    public void convTransposeRows(float[] input, int inputOffset, float[] weights, int weightOffset,
+                                  float[] bias, int biasOffset, float[] output, int outputOffset,
+                                  int[] p, int firstRow, int endRow) {
+        VectorConvTranspose2x2.run(input,inputOffset,weights,weightOffset,bias,biasOffset,output,outputOffset,
+                p[1],p[2],p[3],p[4],firstRow,endRow);
+    }
+
     @Override public void convTranspose(float[] input, int inputOffset, float[] weights, int weightOffset,
                                         float[] bias, int biasOffset, float[] output, int outputOffset,
                                         int batch, int inputChannels, int inputHeight, int inputWidth,
@@ -1401,6 +1452,11 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                 dilationHeight == 1 && dilationWidth == 1 &&
                 padTop == 0 && padLeft == 0 &&
                 outputHeight == inputHeight * 2 && outputWidth == inputWidth * 2) {
+            if (!Boolean.getBoolean("lwppocr.disableTransposePair")) {
+                VectorConvTranspose2x2.run(input,inputOffset,weights,weightOffset,bias,biasOffset,output,outputOffset,
+                        inputChannels,inputHeight,inputWidth,outputChannels,0,batch*outputChannels);
+                return;
+            }
             convTransposeTwoByTwo(input, inputOffset, weights, weightOffset, bias, biasOffset,
                     output, outputOffset, batch, inputChannels, inputHeight, inputWidth,
                     outputChannels, outputHeight, outputWidth);
@@ -1445,13 +1501,13 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                             sum11 = sum11.add(sample.mul(weights[kernel + 3]));
                         }
                         int outputColumn = iw * 2;
-                        sum00.rearrange(ZIP_LOW, sum01)
+                        sum00.rearrange(ZIP_LOW).blend(sum01.rearrange(ZIP_LOW),ZIP_ODD)
                                 .intoArray(output, outputRow0 + outputColumn);
-                        sum00.rearrange(ZIP_HIGH, sum01)
+                        sum00.rearrange(ZIP_HIGH).blend(sum01.rearrange(ZIP_HIGH),ZIP_ODD)
                                 .intoArray(output, outputRow0 + outputColumn + SPECIES.length());
-                        sum10.rearrange(ZIP_LOW, sum11)
+                        sum10.rearrange(ZIP_LOW).blend(sum11.rearrange(ZIP_LOW),ZIP_ODD)
                                 .intoArray(output, outputRow1 + outputColumn);
-                        sum10.rearrange(ZIP_HIGH, sum11)
+                        sum10.rearrange(ZIP_HIGH).blend(sum11.rearrange(ZIP_HIGH),ZIP_ODD)
                                 .intoArray(output, outputRow1 + outputColumn + SPECIES.length());
                     }
                     for (; iw < inputWidth; iw++) {

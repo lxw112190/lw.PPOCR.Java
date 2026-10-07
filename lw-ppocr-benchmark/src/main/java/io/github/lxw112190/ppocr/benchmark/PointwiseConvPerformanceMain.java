@@ -135,10 +135,15 @@ public final class PointwiseConvPerformanceMain {
         static Shape forProfile(String profile) {
             if ("medium-expand".equals(profile)) return new Shape(1, 1024, 6, 240, 512, 1);
             if ("medium-late".equals(profile)) return new Shape(1, 1536, 3, 240, 768, 1);
+            if ("medium-up".equals(profile)) return new Shape(1, 512, 6, 240, 1024, 1);
+            if ("medium-late-up".equals(profile)) return new Shape(1, 768, 3, 240, 1536, 1);
+            if ("medium-det-up".equals(profile)) return new Shape(1, 128, 128, 128, 256, 1);
+            if ("tiny-expand".equals(profile)) return new Shape(1, 48, 12, 240, 96, 1);
+            if ("tiny-bottleneck".equals(profile)) return new Shape(1, 96, 12, 240, 48, 1);
             if ("rec".equals(profile)) return new Shape(1, 320, 3, 240, 160, 1);
             if ("cls".equals(profile)) return new Shape(1, 128, 3, 80, 128, 1);
             if ("det".equals(profile)) return new Shape(1, 64, 80, 80, 32, 1);
-            throw new IllegalArgumentException("profile must be rec, cls, det, medium-expand or medium-late");
+            throw new IllegalArgumentException("unknown pointwise profile: " + profile);
         }
     }
 }

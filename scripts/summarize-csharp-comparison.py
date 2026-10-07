@@ -34,6 +34,7 @@ def compare(java, csharp):
     texts = sum(jl['text'] == cl['text'] for jl,cl in zip(j,c)) if equal_count else None
     rotations = equal_count and all(jl['rotation'] == cl['rotation'] for jl,cl in zip(j,c))
     return dict(variant=java['variant'], fma=java['fma'],
+                java_features=java.get('features', {}),
                 java_mean_ms=java['mean_ms'], csharp_mean_ms=csharp['mean_ms'],
                 java_over_csharp=java['mean_ms']/csharp['mean_ms'],
                 java_lines=len(j), csharp_lines=len(c), exact_text_lines=texts,
@@ -52,8 +53,9 @@ def main(root):
         peer = root / f"{java['variant']}-csharp-r{java['replica']}.json"
         csharp = json.loads(peer.read_text(encoding='utf-8-sig'))
         summary = dict(replica=java['replica'], **compare(java, csharp))
-        if java['fma']:
-            baseline = json.loads((root / f"{java['variant']}-java-r{java['replica']}.json").read_text(encoding='utf-8-sig'))
+        baseline_path = root / f"{java['variant']}-java-r{java['replica']}.json"
+        if java['fma'] and baseline_path.exists():
+            baseline = json.loads(baseline_path.read_text(encoding='utf-8-sig'))
             summary['fma_reduction_percent'] = 100*(1-java['mean_ms']/baseline['mean_ms'])
             summary['fma_ordered_text_rotation_width_parity'] = [
                 (line['text'], line['rotation'], line['rec_width']) for line in java['lines']

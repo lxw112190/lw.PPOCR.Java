@@ -12,9 +12,15 @@ final class VectorLargePointwise implements PreparedConvBackend.Kernel {
     private final float[] weights;
     private final int weightOffset, channels, outputChannels, plane;
     private final boolean fma;
+    private final boolean six = !Boolean.getBoolean("lwppocr.disableSixPointwise");
+
 
     static VectorLargePointwise prepare(float[] weights, int offset, int[] p) {
-        if (p[0] != 1 || p[1] < 256 || p[4] < 256 || p[2] <= 0 || p[3] <= 0
+        // Wider coverage is exclusive to explicitly requested fused arithmetic.
+        int minimum = Boolean.getBoolean("lwppocr.vectorFma")
+                && !Boolean.getBoolean("lwppocr.disableExtendedFmaPointwise")
+                ? Boolean.getBoolean("lwppocr.smallFmaPointwise") ? 32 : 64 : 256;
+        if (p[0] != 1 || p[1] < minimum || p[4] < minimum || p[2] <= 0 || p[3] <= 0
                 || p[5] != 1 || p[6] != 1 || p[9] <= 0 || p[10] <= 0
                 || p[7] != 1 || p[8] != 1 || p[15] != 1
                 || p[11] != 0 || p[12] != 0 || p[13] != 0 || p[14] != 0
@@ -31,8 +37,8 @@ final class VectorLargePointwise implements PreparedConvBackend.Kernel {
         this.fma = Boolean.getBoolean("lwppocr.vectorFma");
     }
 
-    // Per-worker scratch is owned/reused by the session; no weight copies or
-    // invocation allocations. Tiles are independent, including partial tails.
+    // Per-worker scratch is session-reused. Canonical weights are never copied.
+    // Tiles include independent tails.
     public int scratchFloats() { return channels * PANEL; }
     public int outputRows() { return (plane + PANEL - 1) / PANEL; }
     public long operations() { return (long) channels * outputChannels * plane; }
@@ -44,6 +50,14 @@ final class VectorLargePointwise implements PreparedConvBackend.Kernel {
             for (int k = 0; k < channels; k++)
                 System.arraycopy(input, inputOffset + k * plane + first, scratch, k * PANEL, pixels);
             int oc = 0;
+            if(fma && six) {
+                for(;oc+5<outputChannels;oc+=6) {
+                    int x=0;
+                    for(;x+2*LANES<=pixels;x+=2*LANES)
+                        sixPairFma(scratch,x,bias,biasOffset,output,outputOffset+first+x,oc);
+                    if(x<pixels)for(int c=oc;c<oc+6;c++)oneFma(scratch,x,pixels,bias,biasOffset,output,outputOffset+first,c);
+                }
+            }
             for (; oc + 3 < outputChannels; oc += 4) {
                 int x = 0;
                 for (; x + 2 * LANES <= pixels; x += 2 * LANES) {
@@ -51,7 +65,7 @@ final class VectorLargePointwise implements PreparedConvBackend.Kernel {
                     else fourPair(scratch, x, bias, biasOffset, output, outputOffset + first + x, oc);
                 }
                 if (fma) {
-                    for (int c = oc; c < oc + 4; c++)
+                    for (int c = oc; x < pixels && c < oc + 4; c++)
                         oneFma(scratch, x, pixels, bias, biasOffset, output, outputOffset + first, c);
                     continue;
                 }
@@ -128,21 +142,57 @@ final class VectorLargePointwise implements PreparedConvBackend.Kernel {
         s30.intoArray(output, dest + 3 * plane); s31.intoArray(output, dest + 3 * plane + LANES);
     }
 
+
+
+    // Twelve accumulators share two input loads; keep this compact for C2 escape elimination.
+    private void sixPairFma(float[] input,int x,float[] bias,int bo,float[] output,int dest,int oc) {
+        dest+=oc*plane;
+        FloatVector s00=FloatVector.broadcast(SPECIES,bias==null?0:bias[bo+oc+0]),s01=s00;
+        FloatVector s10=FloatVector.broadcast(SPECIES,bias==null?0:bias[bo+oc+1]),s11=s10;
+        FloatVector s20=FloatVector.broadcast(SPECIES,bias==null?0:bias[bo+oc+2]),s21=s20;
+        FloatVector s30=FloatVector.broadcast(SPECIES,bias==null?0:bias[bo+oc+3]),s31=s30;
+        FloatVector s40=FloatVector.broadcast(SPECIES,bias==null?0:bias[bo+oc+4]),s41=s40;
+        FloatVector s50=FloatVector.broadcast(SPECIES,bias==null?0:bias[bo+oc+5]),s51=s50;
+        for(int k=0;k<channels;k++) {
+            FloatVector a0=FloatVector.fromArray(SPECIES,input,k*PANEL+x),a1=FloatVector.fromArray(SPECIES,input,k*PANEL+x+LANES);
+            FloatVector w;
+            w=FloatVector.broadcast(SPECIES,weights[weightOffset+(oc+0)*channels+k]);s00=a0.fma(w,s00);s01=a1.fma(w,s01);
+            w=FloatVector.broadcast(SPECIES,weights[weightOffset+(oc+1)*channels+k]);s10=a0.fma(w,s10);s11=a1.fma(w,s11);
+            w=FloatVector.broadcast(SPECIES,weights[weightOffset+(oc+2)*channels+k]);s20=a0.fma(w,s20);s21=a1.fma(w,s21);
+            w=FloatVector.broadcast(SPECIES,weights[weightOffset+(oc+3)*channels+k]);s30=a0.fma(w,s30);s31=a1.fma(w,s31);
+            w=FloatVector.broadcast(SPECIES,weights[weightOffset+(oc+4)*channels+k]);s40=a0.fma(w,s40);s41=a1.fma(w,s41);
+            w=FloatVector.broadcast(SPECIES,weights[weightOffset+(oc+5)*channels+k]);s50=a0.fma(w,s50);s51=a1.fma(w,s51);
+        }
+        s00.intoArray(output,dest+0*plane);s01.intoArray(output,dest+0*plane+LANES);
+        s10.intoArray(output,dest+1*plane);s11.intoArray(output,dest+1*plane+LANES);
+        s20.intoArray(output,dest+2*plane);s21.intoArray(output,dest+2*plane+LANES);
+        s30.intoArray(output,dest+3*plane);s31.intoArray(output,dest+3*plane+LANES);
+        s40.intoArray(output,dest+4*plane);s41.intoArray(output,dest+4*plane+LANES);
+        s50.intoArray(output,dest+5*plane);s51.intoArray(output,dest+5*plane+LANES);
+    }
+
+
     private void oneFma(float[] input, int first, int pixels, float[] bias, int bo,
                         float[] output, int dest, int oc) {
         int w = weightOffset + oc * channels, x = first;
         dest += oc * plane;
         for (; x + LANES <= pixels; x += LANES) {
-            FloatVector sum = FloatVector.broadcast(SPECIES, bias == null ? 0 : bias[bo + oc]);
-            for (int k = 0; k < channels; k++) sum = FloatVector.fromArray(SPECIES,
-                    input, k * PANEL + x).fma(FloatVector.broadcast(SPECIES, weights[w + k]), sum);
-            sum.intoArray(output, dest + x);
+            oneVectorFma(input,x,bias==null?0:bias[bo+oc],output,dest+x,w);
         }
         for (; x < pixels; x++) {
             float sum = bias == null ? 0 : bias[bo + oc];
             for (int k = 0; k < channels; k++) sum = Math.fma(input[k * PANEL + x], weights[w + k], sum);
             output[dest + x] = sum;
         }
+    }
+
+    // Keep vector state out of the outer vector/scalar-tail loop and skip empty
+    // work before entering it, so profiling is driven by actual tail reductions.
+    private void oneVectorFma(float[] input,int x,float initial,float[] output,int dest,int weightBase) {
+        FloatVector sum=FloatVector.broadcast(SPECIES,initial);
+        for(int k=0;k<channels;k++)sum=FloatVector.fromArray(SPECIES,input,k*PANEL+x)
+                .fma(FloatVector.broadcast(SPECIES,weights[weightBase+k]),sum);
+        sum.intoArray(output,dest);
     }
 
     private void fourScalar(float[] input, int x, float[] bias, int bo, float[] output, int dest, int oc) {

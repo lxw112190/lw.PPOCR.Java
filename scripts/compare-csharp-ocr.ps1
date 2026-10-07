@@ -10,6 +10,8 @@ param(
     [ValidateRange(1,1000)][int]$Iterations=10,
     [ValidateRange(1,10)][int]$Replicas=1,
     [ValidateSet('tiny','small','medium')][string[]]$Variants=@('tiny','small','medium'),
+    [ValidateSet('default','fma')][string[]]$JavaModes=@('default','fma'),
+    [switch]$SmallChannelFma,
     [switch]$SkipJavaBuild
 )
 # Windows / PowerShell 7. Runs sequentially; no benchmark runs during compilation.
@@ -20,6 +22,7 @@ $savedJavaHome=$env:JAVA_HOME
 $savedCpu=$env:DOTNET_PROCESSOR_COUNT
 $savedHeap=$env:DOTNET_GCHeapHardLimit
 try {
+    if($JavaModes.Count -eq 0) { throw 'Choose at least one Java mode' }
     $models=(Resolve-Path -LiteralPath $ModelsRoot).Path
     $imagePath=(Resolve-Path -LiteralPath $Image).Path
     $java=Join-Path $JavaHome 'bin/java.exe'
@@ -56,6 +59,18 @@ try {
         java_commit=(& git rev-parse HEAD).Trim(); java_status=@(& git status --short)
         csharp_commit=$reference; csharp_snapshot=$snapshot; measured_at=(Get-Date).ToString('o')
         cpu_budget=$Cpu; cpu=Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors
+        java_modes=$JavaModes
+        java_small_channel_fma=$SmallChannelFma.IsPresent
+        java_compiled_classes=@(foreach($path in @(
+            'lw-ppocr-vector/target/classes/io/github/lxw112190/ppocr/vector/VectorLargePointwise.class',
+            'lw-ppocr-vector/target/classes/io/github/lxw112190/ppocr/vector/VectorBackend.class',
+            'lw-ppocr-vector/target/classes/io/github/lxw112190/ppocr/vector/VectorConvTranspose2x2.class',
+            'lw-ppocr-vector/target/classes/io/github/lxw112190/ppocr/vector/VectorWideConv.class',
+            'lw-ppocr-vector/target/classes/io/github/lxw112190/ppocr/vector/VectorDepthwiseRegister.class',
+            'lw-ppocr-core/target/classes/io/github/lxw112190/ppocr/runtime/ParallelKernels.class',
+            'lw-ppocr-benchmark/target/classes/io/github/lxw112190/ppocr/benchmark/CrossRuntimeComparisonMain.class')) {
+            [ordered]@{path=$path;sha256=(Get-FileHash -LiteralPath $path).Hash}
+        })
         os=Get-CimInstance Win32_OperatingSystem | Select-Object Caption,Version,BuildNumber
         physical_memory_bytes=(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory
         power_scheme=@(& powercfg /getactivescheme)
@@ -71,6 +86,9 @@ try {
     foreach($replica in 1..$Replicas) {
         foreach($variant in $Variants) {
             $order=if($replica%2) { @('java','java-fma','csharp') } else { @('csharp','java-fma','java') }
+            $order=@($order | Where-Object { $_ -eq 'csharp' -or
+                ($_ -eq 'java' -and $JavaModes -contains 'default') -or
+                ($_ -eq 'java-fma' -and $JavaModes -contains 'fma') })
             foreach($runtime in $order) {
                 $name="$variant-$runtime-r$replica"
                 $stdout=Join-Path $output "$name.json"
@@ -79,7 +97,8 @@ try {
                 if($runtime -eq 'csharp') { $exe=$Dotnet; $arguments=@("`"$dll`"")+$common }
                 else {
                     $exe=$java
-                    $arguments=@("-XX:ActiveProcessorCount=$Cpu",'-Xms64m','-Xmx2g',"-Dlwppocr.vectorFma=$($runtime -eq 'java-fma')",'--add-modules','jdk.incubator.vector','-cp',"`"$cp`"",$main,'run')+$common
+                    $arguments=@("-XX:ActiveProcessorCount=$Cpu",'-Xms64m','-Xmx2g',"-Dlwppocr.vectorFma=$($runtime -eq 'java-fma')",
+                        "-Dlwppocr.smallFmaPointwise=$($SmallChannelFma -and $runtime -eq 'java-fma')",'--add-modules','jdk.incubator.vector','-cp',"`"$cp`"",$main,'run')+$common
                 }
                 Write-Output "Running $name"
                 $process=Start-Process -FilePath $exe -ArgumentList $arguments -WindowStyle Hidden -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr

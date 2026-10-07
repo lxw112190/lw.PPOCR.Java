@@ -186,7 +186,8 @@ public final class FullOcrPerformanceMain {
                             + "\"vector_bits\":\"%s\","
                             + "\"pointwise_block\":\"%s\","
                             + "\"features\":{\"rec_projection_fusion\":%s,"
-                            + "\"large_pointwise_fma\":%s,\"auto_parallelism\":%s},"
+                            + "\"large_pointwise_fma\":%s,\"auto_parallelism\":%s,"
+                            + "\"six_pointwise_fma\":%s,\"extended_pointwise_fma\":%s,\"small_pointwise_fma\":%s,\"parallel_prepared_epilogue\":%s,\"parallel_transpose\":%s,\"paired_transpose\":%s,\"wide_conv_register\":%s,\"depthwise_register\":%s},"
                             + "\"parallelism_policy\":\"%s\","
                             + "\"classification_parallelism\":%d,"
                             + "\"recognition_parallelism\":%d,"
@@ -251,7 +252,15 @@ public final class FullOcrPerformanceMain {
                     Boolean.toString(pipeline.isProjectionFusionActive()),
                     Boolean.toString("vector".equals(backendName) && Boolean.getBoolean("lwppocr.vectorFma")
                             && !Boolean.getBoolean("lwppocr.disableLargePointwise")),
-                    Boolean.toString(automaticParallelism), parallelismPolicy,
+                    Boolean.toString(automaticParallelism),
+                    Boolean.toString("vector".equals(backendName)&&Boolean.getBoolean("lwppocr.vectorFma")&&!Boolean.getBoolean("lwppocr.disableSixPointwise")),
+                    Boolean.toString("vector".equals(backendName)&&Boolean.getBoolean("lwppocr.vectorFma")&&!Boolean.getBoolean("lwppocr.disableExtendedFmaPointwise")),
+                    Boolean.toString("vector".equals(backendName)&&Boolean.getBoolean("lwppocr.vectorFma")&&!Boolean.getBoolean("lwppocr.disableExtendedFmaPointwise")&&Boolean.getBoolean("lwppocr.smallFmaPointwise")),
+                    Boolean.toString("vector".equals(backendName)&&!Boolean.getBoolean("lwppocr.disableParallelEpilogue")),
+                    Boolean.toString("vector".equals(backendName)&&!Boolean.getBoolean("lwppocr.disableParallelTranspose")),
+                    Boolean.toString("vector".equals(backendName)&&!Boolean.getBoolean("lwppocr.disableTransposePair")),
+                    Boolean.toString("vector".equals(backendName)&&!Boolean.getBoolean("lwppocr.disableWideConv")),
+                    Boolean.toString("vector".equals(backendName)&&!Boolean.getBoolean("lwppocr.disableDepthwiseRegister")),parallelismPolicy,
                     classificationParallelism,
                     recognitionParallelism,
                     automaticPlan == null || Boolean.getBoolean("lwppocr.disableIntraOp")
