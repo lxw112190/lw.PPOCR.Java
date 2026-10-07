@@ -109,16 +109,18 @@ jobs:
           if [ "$RUNNER_OS" = Windows ]; then sep=';'; fi
           cp="lw-ppocr-core/target/classes${sep}lw-ppocr-imageio/target/classes${sep}lw-ppocr-vector/target/classes${sep}lw-ppocr-benchmark/target/classes"
           for backend in scalar vector vector-fma vector-fma-small; do
-            flags=()
+            # Keep the array nonempty: macOS Bash 3.2 rejects empty-array
+            # expansion under nounset, even when flags=() was assigned.
+            flags=(-Xmx1g)
             execution_backend="$backend"
             if [[ "$backend" = vector-fma* ]]; then
-              flags=(-Dlwppocr.vectorFma=true)
+              flags+=(-Dlwppocr.vectorFma=true)
               execution_backend=vector
             fi
             if [ "$backend" = vector-fma-small ]; then
               flags+=(-Dlwppocr.smallFmaPointwise=true)
             fi
-            java "${flags[@]}" -Xmx1g --add-modules jdk.incubator.vector -cp "$cp" \
+            java "${flags[@]}" --add-modules jdk.incubator.vector -cp "$cp" \
               io.github.lxw112190.ppocr.benchmark.OnnxCompatibilityMain \
               build-local-data/onnx-models build-local-data/onnx-golden "$execution_backend" record-stage-inputs \
               | tee "build-local-data/onnx-golden/validation-${backend}.jsonl"

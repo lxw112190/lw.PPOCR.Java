@@ -4,6 +4,11 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- ONNX validation on macOS now keeps JVM argument arrays nonempty under Bash
+  nounset, preserving the heap limit and all Scalar/Vector/FMA validation modes.
+
 ### Changed
 
 - Register-resident 7x7/1x7/7x1 dense and paired 7x7/9x9 depthwise Vector
