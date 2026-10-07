@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- Large Vector 1x1 Conv now packs bounded 32-pixel input panels into session-reused
+  per-worker scratch. It preserves channel reduction order, disjoint spatial
+  shards, canonical weights, and Scalar fallbacks; no per-call buffers or default FMA.
+- Full OCR benchmark accepts an explicit ONNX model root and Tiny/Small/Medium
+  variant, reports the model identity, and retains the existing Tiny LWM defaults.
+- Added large-channel kernel diagnostics and fixed 128/512-bit correctness tests
+  to CI without relaxing the existing performance/allocation gates. See
+  docs/medium-optimization-20261007.md for the controlled local comparison.
+
+### Added
+
+- Opt-in `-Dlwppocr.vectorFma=true` fused FP32 large-pointwise kernels, with
+  Math.fma reference tests. Default reduction remains Scalar-bit-identical.
+- An isolated, hash-locked Windows Java/C# CPU comparison runner for all three
+  models, sharing decoded BGR pixels and REC buckets; it reports text/crop
+  differences and process memory independently of CI performance gates.
+
 ## [0.3.0] - 2026-10-04
 
 ### Added

@@ -193,6 +193,18 @@ For controlled A/B measurements, `-Dlwppocr.disableIntraOp=true` and
 Local environment, baseline, and end-to-end results are documented in
 [the x64 baseline](docs/local-x64-ocr-baseline-20260927.md).
 
+Large single-batch 1x1 convolutions now reuse bounded 32-pixel input panels,
+targeting Small/Medium channel expansions without copying model weights or
+changing reduction order. Use `-Dlwppocr.disableLargePointwise=true` to compare
+the original path. See [the Medium optimization record](docs/medium-optimization-20261007.md)
+for same-machine end-to-end results, memory accounting, and reproduction commands.
+
+An experimental `-Dlwppocr.vectorFma=true` enables fused FP32 arithmetic only in
+eligible large pointwise kernels. It is off by default and changes rounding;
+validate your models/dataset before using it. The independent Windows
+[Java/C# comparison](docs/java-csharp-comparison-20261007.md) shares hash-locked
+models and decoded pixels, records crop/text differences, and does not change CI gates.
+
 The optional JDK 25 Vector API backend accelerates all Conv configurations used
 by the Tiny models, the DET 2x upsampling ConvTranspose path, MatMul, reductions,
 activations, and binary broadcasting. It also fuses the exact five-node

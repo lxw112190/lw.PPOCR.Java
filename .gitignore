@@ -3,6 +3,8 @@ target/
 benchmark-results/
 build-local-data/
 build-local/
+scripts/csharp-comparison/bin/
+scripts/csharp-comparison/obj/
 dist/
 *.rar
 *.class

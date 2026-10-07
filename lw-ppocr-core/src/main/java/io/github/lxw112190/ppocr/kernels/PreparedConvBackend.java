@@ -4,6 +4,7 @@ package io.github.lxw112190.ppocr.kernels;
 public interface PreparedConvBackend {
     interface Kernel {
         int scratchFloats();
+        /** Independent kernel-defined work units; may be spatial panels rather than image rows. */
         int outputRows();
         long operations();
         void runRows(float[] input, int inputOffset, float[] bias, int biasOffset,

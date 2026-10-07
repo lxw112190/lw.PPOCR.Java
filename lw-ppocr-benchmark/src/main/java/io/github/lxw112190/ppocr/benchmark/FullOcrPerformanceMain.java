@@ -5,7 +5,7 @@ import io.github.lxw112190.ppocr.image.BgrTransforms;
 import io.github.lxw112190.ppocr.imageio.ImageIoLoader;
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
-import io.github.lxw112190.ppocr.model.LwmLoader;
+import io.github.lxw112190.ppocr.model.ModelLoader;
 import io.github.lxw112190.ppocr.model.LwmModel;
 import io.github.lxw112190.ppocr.model.OperatorType;
 import io.github.lxw112190.ppocr.ppocr.ClsClassificationResult;
@@ -36,7 +36,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
-/** CI-friendly end-to-end OCR benchmark over the committed Tiny Golden assets. */
+/** End-to-end OCR benchmark: committed Tiny LWM by default, explicit ONNX root optionally. */
 public final class FullOcrPerformanceMain {
     private static final String DET_MODEL = "/golden/det/det.lwm";
     private static final String CLS_MODEL = "/golden/cls/cls.lwm";
@@ -50,6 +50,12 @@ public final class FullOcrPerformanceMain {
     private FullOcrPerformanceMain() { }
 
     public static void main(String[] args) throws Exception {
+        String variant = configuredVariant();
+        String modelsRoot = System.getProperty("lwppocr.benchmark.modelsRoot");
+        if (modelsRoot == null && !"tiny".equals(variant))
+            throw new IllegalArgumentException("Small/Medium require lwppocr.benchmark.modelsRoot");
+        if (modelsRoot != null && modelsRoot.trim().isEmpty())
+            throw new IllegalArgumentException("lwppocr.benchmark.modelsRoot must not be empty");
         int warmup = args.length > 0 ? positive(args[0], "warmup") : DEFAULT_WARMUP;
         int iterations = args.length > 1 ? positive(args[1], "iterations") : DEFAULT_ITERATIONS;
         int detectorLimit = args.length > 2
@@ -176,10 +182,11 @@ public final class FullOcrPerformanceMain {
             String pointwiseBlock = pointwiseBlockSetting(backendName);
             System.out.printf(Locale.ROOT,
                     "{\"schema\":5,\"benchmark\":\"%s\",\"backend\":\"%s\","
+                            + "\"model_variant\":\"%s\",\"model_format\":\"%s\","
                             + "\"vector_bits\":\"%s\","
                             + "\"pointwise_block\":\"%s\","
                             + "\"features\":{\"rec_projection_fusion\":%s,"
-                            + "\"auto_parallelism\":%s},"
+                            + "\"large_pointwise_fma\":%s,\"auto_parallelism\":%s},"
                             + "\"parallelism_policy\":\"%s\","
                             + "\"classification_parallelism\":%d,"
                             + "\"recognition_parallelism\":%d,"
@@ -240,8 +247,10 @@ public final class FullOcrPerformanceMain {
                             + "\"rotation\":%d,\"recognition\":%d,\"sorting\":%d},"
                             + "\"operators\":%s,"
                             + "\"stage_operators\":%s,\"stage_hot_nodes\":%s}%n",
-                    benchmark, backendName, vectorBits, pointwiseBlock,
+                    benchmark, backendName, variant, modelsRoot == null ? "lwm" : "onnx", vectorBits, pointwiseBlock,
                     Boolean.toString(pipeline.isProjectionFusionActive()),
+                    Boolean.toString("vector".equals(backendName) && Boolean.getBoolean("lwppocr.vectorFma")
+                            && !Boolean.getBoolean("lwppocr.disableLargePointwise")),
                     Boolean.toString(automaticParallelism), parallelismPolicy,
                     classificationParallelism,
                     recognitionParallelism,
@@ -362,15 +371,35 @@ public final class FullOcrPerformanceMain {
     }
 
     private static LwmModel loadModel(String resource) throws IOException {
+        String root = System.getProperty("lwppocr.benchmark.modelsRoot");
+        if (root != null) {
+            String variant = configuredVariant();
+            String relative = resource.equals(CLS_MODEL) ? "ppocrv6-tiny/cls.onnx"
+                    : "ppocrv6-" + variant + (resource.equals(DET_MODEL) ? "/det.onnx" : "/rec.onnx");
+            return ModelLoader.load(Paths.get(root).resolve(relative));
+        }
         try (InputStream input = resource(resource)) {
-            return LwmLoader.load(input);
+            return ModelLoader.load(input);
         }
     }
 
     private static PaddleOcrDictionary loadDictionary() throws IOException {
+        String root = System.getProperty("lwppocr.benchmark.modelsRoot");
+        if (root != null) {
+            return PaddleOcrDictionary.load(Paths.get(root).resolve("tiny".equals(configuredVariant())
+                    ? "ppocrv6-tiny/ppocr_keys.txt" : "ppocrv6-shared/PP-OCRv6_small_rec_dict.txt"));
+        }
         try (InputStream input = resource(DICTIONARY)) {
             return PaddleOcrDictionary.load(input);
         }
+    }
+
+    private static String configuredVariant() {
+        String variant = System.getProperty("lwppocr.benchmark.variant", "tiny");
+        if (!"tiny".equals(variant) && !"small".equals(variant) && !"medium".equals(variant)) {
+            throw new IllegalArgumentException("benchmark variant must be tiny, small or medium");
+        }
+        return variant;
     }
 
     private static BgrImage loadImage(String configuredPath) throws IOException {

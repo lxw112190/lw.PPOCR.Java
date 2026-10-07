@@ -31,6 +31,7 @@ jobs:
       - name: Test Python helpers
         run: |
           python scripts/test-compare-predictions.py
+          python scripts/test_summarize_csharp_comparison.py
           python -m unittest discover -s scripts/tests -p 'test_release_layout.py'
       - name: Set up JDK 25
         uses: actions/setup-java@v4
@@ -40,6 +41,14 @@ jobs:
           cache: maven
       - name: Compile and test
         run: mvn --batch-mode --no-transfer-progress verify
+      - name: Check large pointwise panels with fixed Vector species
+        shell: bash
+        run: |
+          for bits in 128 512; do
+            mvn --batch-mode --no-transfer-progress -pl lw-ppocr-vector -am \
+              -Dtest=VectorLargePointwiseTest,VectorLargePointwiseFmaTest -Dsurefire.failIfNoSpecifiedTests=false \
+              -Dlwppocr.vectorBits=$bits test
+          done
       - name: Report test failures
         if: failure()
         shell: bash
@@ -92,17 +101,23 @@ jobs:
         run: python scripts/generate-onnx-golden.py --models build-local-data/onnx-models --output build-local-data/onnx-golden
       - name: Compile Java
         run: mvn --batch-mode --no-transfer-progress package -DskipTests
-      - name: Validate graph outputs and sample pipeline (Scalar and Vector)
+      - name: Validate graph outputs and sample pipeline (Scalar, Vector and opt-in FMA)
         shell: bash
         run: |
           set -euo pipefail
           sep=':'
           if [ "$RUNNER_OS" = Windows ]; then sep=';'; fi
           cp="lw-ppocr-core/target/classes${sep}lw-ppocr-imageio/target/classes${sep}lw-ppocr-vector/target/classes${sep}lw-ppocr-benchmark/target/classes"
-          for backend in scalar vector; do
-            java -Xmx1g --add-modules jdk.incubator.vector -cp "$cp" \
+          for backend in scalar vector vector-fma; do
+            flags=()
+            execution_backend="$backend"
+            if [ "$backend" = vector-fma ]; then
+              flags=(-Dlwppocr.vectorFma=true)
+              execution_backend=vector
+            fi
+            java "${flags[@]}" -Xmx1g --add-modules jdk.incubator.vector -cp "$cp" \
               io.github.lxw112190.ppocr.benchmark.OnnxCompatibilityMain \
-              build-local-data/onnx-models build-local-data/onnx-golden "$backend" record-stage-inputs \
+              build-local-data/onnx-models build-local-data/onnx-golden "$execution_backend" record-stage-inputs \
               | tee "build-local-data/onnx-golden/validation-${backend}.jsonl"
             python scripts/verify-onnx-full-ocr.py \
               --models build-local-data/onnx-models --fixtures build-local-data/onnx-golden \
@@ -162,6 +177,16 @@ jobs:
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.PointwiseConvPerformanceMain scalar rec \
             | tee benchmark-results/rec-pointwise-conv-scalar.json
+          for profile in medium-expand medium-late; do
+            java --add-modules jdk.incubator.vector \
+              -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+              io.github.lxw112190.ppocr.benchmark.PointwiseConvPerformanceMain vector "$profile" 10 20 \
+              | tee "benchmark-results/${profile}-pointwise-direct.json"
+            java --add-modules jdk.incubator.vector \
+              -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
+              io.github.lxw112190.ppocr.benchmark.PointwiseConvPerformanceMain vector "$profile" 10 20 prepared \
+              | tee "benchmark-results/${profile}-pointwise-panel.json"
+          done
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
             io.github.lxw112190.ppocr.benchmark.RecHotKernelPerformanceMain vector 30 30 all \

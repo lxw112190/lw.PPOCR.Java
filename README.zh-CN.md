@@ -171,6 +171,16 @@ Conv 参数、形状和张量绑定也在运行前完成预编译。可融合的
 分别关闭两条优化路径进行 A/B 对比。本机环境、优化前基线及完整 OCR 实测见
 [x64 基线记录](docs/local-x64-ocr-baseline-20260927.md)。
 
+大通道单 batch 1×1 卷积新增可复用的 32 像素输入面板，减少 Small/Medium
+通道扩展层反复扫描大特征图；不复制模型权重，也不改变浮点累加顺序。
+可用 `-Dlwppocr.disableLargePointwise=true` 关闭新路径进行同条件对照。
+实测、内存口径和复现命令见 [Medium 优化记录](docs/medium-optimization-20261007.md)。
+
+实验开关 `-Dlwppocr.vectorFma=true` 仅对符合条件的大通道 1×1 卷积使用融合
+FP32 运算；默认关闭，舍入方式会变化，启用前请验证实际模型和数据集。
+独立的 Windows [Java/C# 对照工具](docs/java-csharp-comparison-20261007.md)
+共享固定哈希模型和解码像素，记录框、文本及工作量差异，不改变 CI 性能门禁。
+
 可选的 JDK 25 Vector API 后端会加速 Tiny 模型使用的全部 Conv 配置、DET 2×
 上采样 ConvTranspose、MatMul、归约、激活函数和二元广播。它还会在校验张量连接、
 形状、常量和中间结果独占关系后，融合 Tiny 模型使用的精确五节点

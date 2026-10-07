@@ -29,6 +29,10 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
     private final VectorPreparedConv.Weights spatialWeights = new VectorPreparedConv.Weights();
 
     public PreparedConvBackend.Kernel prepareConv(float[] weights, int offset, int[] parameters) {
+        if (!Boolean.getBoolean("lwppocr.disableLargePointwise")) {
+            PreparedConvBackend.Kernel large = VectorLargePointwise.prepare(weights, offset, parameters);
+            if (large != null) return large;
+        }
         return Boolean.getBoolean("lwppocr.disableSpatialPanel") ? null
                 : VectorPreparedConv.prepare(spatialWeights, weights, offset, parameters);
     }

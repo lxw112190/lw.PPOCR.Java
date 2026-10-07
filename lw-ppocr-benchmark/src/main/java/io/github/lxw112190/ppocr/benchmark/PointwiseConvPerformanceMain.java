@@ -1,6 +1,7 @@
 package io.github.lxw112190.ppocr.benchmark;
 
 import io.github.lxw112190.ppocr.kernels.KernelBackend;
+import io.github.lxw112190.ppocr.kernels.PreparedConvBackend;
 import io.github.lxw112190.ppocr.kernels.ScalarBackend;
 import java.util.Arrays;
 import java.util.Locale;
@@ -23,27 +24,33 @@ public final class PointwiseConvPerformanceMain {
                 67, 0.0009765625f);
         float[] bias = fixture(shape.outputChannels, 31, 0.00390625f);
         float[] output = new float[shape.batch * shape.outputChannels * shape.plane];
+        PreparedConvBackend.Kernel prepared = args.length > 4 && "prepared".equals(args[4])
+                && backend instanceof PreparedConvBackend ? ((PreparedConvBackend) backend).prepareConv(
+                        weights, 0, new int[] {shape.batch, shape.channels, shape.height, shape.width,
+                            shape.outputChannels, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+                            shape.groups, shape.height, shape.width}) : null;
+        float[] scratch = prepared == null ? null : new float[prepared.scratchFloats()];
 
         for (int i = 0; i < warmup; i++) {
-            run(backend, shape, input, weights, bias, output);
+            run(backend, prepared, scratch, shape, input, weights, bias, output);
             consume(output, i);
         }
         long[] samples = new long[iterations];
         for (int i = 0; i < iterations; i++) {
             long start = System.nanoTime();
-            run(backend, shape, input, weights, bias, output);
+            run(backend, prepared, scratch, shape, input, weights, bias, output);
             samples[i] = System.nanoTime() - start;
             consume(output, i);
         }
         Arrays.sort(samples);
         System.out.printf(Locale.ROOT,
                 "{\"benchmark\":\"pointwise-conv\",\"backend\":\"%s\","
-                        + "\"profile\":\"%s\",\"batch\":%d,\"channels\":%d,"
+                        + "\"profile\":\"%s\",\"prepared\":%s,\"batch\":%d,\"channels\":%d,"
                         + "\"output_channels\":%d,\"height\":%d,\"width\":%d,"
                         + "\"groups\":%d,\"warmup\":%d,\"iterations\":%d,"
                         + "\"mean_ms\":%.3f,\"median_ms\":%.3f,\"p95_ms\":%.3f,"
                         + "\"checksum\":\"%s\"}%n",
-                backendName, profile, shape.batch, shape.channels, shape.outputChannels,
+                backendName, profile, Boolean.toString(prepared != null), shape.batch, shape.channels, shape.outputChannels,
                 shape.height, shape.width, shape.groups, warmup, iterations,
                 mean(samples) / 1_000_000.0,
                 samples[samples.length / 2] / 1_000_000.0,
@@ -52,8 +59,13 @@ public final class PointwiseConvPerformanceMain {
                 checksum(output));
     }
 
-    private static void run(KernelBackend backend, Shape shape, float[] input,
+    private static void run(KernelBackend backend, PreparedConvBackend.Kernel prepared, float[] scratch,
+                            Shape shape, float[] input,
                             float[] weights, float[] bias, float[] output) {
+        if (prepared != null) {
+            prepared.runRows(input, 0, bias, 0, output, 0, scratch, 0, prepared.outputRows());
+            return;
+        }
         backend.conv(input, 0, weights, 0, bias, 0, output, 0,
                 shape.batch, shape.channels, shape.height, shape.width,
                 shape.outputChannels, 1, 1, 1, 1, 1, 1,
@@ -121,10 +133,12 @@ public final class PointwiseConvPerformanceMain {
         }
 
         static Shape forProfile(String profile) {
+            if ("medium-expand".equals(profile)) return new Shape(1, 1024, 6, 240, 512, 1);
+            if ("medium-late".equals(profile)) return new Shape(1, 1536, 3, 240, 768, 1);
             if ("rec".equals(profile)) return new Shape(1, 320, 3, 240, 160, 1);
             if ("cls".equals(profile)) return new Shape(1, 128, 3, 80, 128, 1);
             if ("det".equals(profile)) return new Shape(1, 64, 80, 80, 32, 1);
-            throw new IllegalArgumentException("profile must be rec, cls, or det");
+            throw new IllegalArgumentException("profile must be rec, cls, det, medium-expand or medium-late");
         }
     }
 }
