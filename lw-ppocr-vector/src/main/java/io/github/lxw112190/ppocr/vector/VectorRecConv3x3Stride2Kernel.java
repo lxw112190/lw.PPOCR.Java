@@ -133,7 +133,11 @@ final class VectorRecConv3x3Stride2Kernel {
             for (int kh = khStart; kh < khEnd; kh++) {
                 int inputRow = inputBase + (oh * 2 - 1 + kh) * width + ow * 2 - 1;
                 for (int kw = 0; kw < 3; kw++) {
-                    FloatVector sample = VectorStrideTwoLoad.load(input, inputRow + kw);
+                    int source = inputRow + kw;
+                    FloatVector first = FloatVector.fromArray(SPECIES, input, source);
+                    FloatVector second = FloatVector.fromArray(SPECIES, input, source + SPECIES.length() - 1);
+                    FloatVector sample = first.rearrange(VectorStrideTwoLoad.EVEN)
+                            .blend(second.rearrange(VectorStrideTwoLoad.ODD), VectorStrideTwoLoad.UPPER);
                     int kernelIndex = kernelBase + kh * 3 + kw;
                     sum0 = sum0.add(sample.mul(weights[weightOffset
                             + outputChannel * 24 * 9 + kernelIndex]));

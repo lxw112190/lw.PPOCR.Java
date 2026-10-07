@@ -88,7 +88,12 @@ final class VectorConv3x3Stride2Kernel {
                 if (ih < 0 || ih >= height) continue;
                 int inputRow = inputBase + ih * width + ow * 2 - 1;
                 for (int kw = 0; kw < 3; kw++) {
-                    FloatVector sample = VectorStrideTwoLoad.load(input, inputRow + kw);
+                    // Array-entry kernel: never depend on a Vector-returning helper being inlined.
+                    int source = inputRow + kw;
+                    FloatVector first = FloatVector.fromArray(SPECIES, input, source);
+                    FloatVector second = FloatVector.fromArray(SPECIES, input, source + SPECIES.length() - 1);
+                    FloatVector sample = first.rearrange(VectorStrideTwoLoad.EVEN)
+                            .blend(second.rearrange(VectorStrideTwoLoad.ODD), VectorStrideTwoLoad.UPPER);
                     int kernelIndex = kernelBase + kh * 3 + kw;
                     sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex]));
                     sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex]));

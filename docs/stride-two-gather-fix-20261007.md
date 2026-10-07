@@ -3,6 +3,10 @@
 基线 `03f0c26`。本次为 `Unreleased` 修复，未修改公开 OCR API、模型、检测阈值、
 Scalar 归约顺序、CI 分配/延迟门槛或参考 C/C# 项目。
 
+本页记录首次 gather 修复（`0bfab24`）及当时的本机结果。后续 macOS 的 OC=4
+分配失败说明，仅用本机无 AVX 验证仍不充分；新的非内联边界修复见
+[stride-two-vector-boundary-20261007.md](stride-two-vector-boundary-20261007.md)。
+
 ## CI 故障与本机复现
 
 用户提供的 macOS Maven 日志中，core / ImageIO 测试通过，Vector 的

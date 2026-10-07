@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Stride-two hot kernels keep contiguous loads, shuffles and blends inside their
+  array-entry loops instead of returning a FloatVector from a user helper. This
+  removes the allocation dependency on helper inlining exposed by macOS OC=4.
+  The original 100 warmup calls, five measured calls and 100,000-byte limit stay
+  unchanged. All platforms also test non-inlined kernel boundaries and retain
+  JIT logs, with a fixed-budget allocation/JFR probe on failure.
+  See docs/stride-two-vector-boundary-20261007.md for controlled reproduction.
 - Stride-two Vector loads now use two overlapping contiguous loads and cached
   one-source shuffles instead of indexed gather. This removes fallback vector
   allocations on machines without hardware gather, including all dense, REC and

@@ -33,15 +33,26 @@ public final class VectorStrideTwoTileTest {
         Assume.assumeTrue(bean.isThreadAllocatedMemorySupported());
         if(!bean.isThreadAllocatedMemoryEnabled())bean.setThreadAllocatedMemoryEnabled(true);
         VectorBackend backend=new VectorBackend();
+        System.out.println("generic allocation environment: java="+System.getProperty("java.version")
+                +", arch="+System.getProperty("os.arch")+", cpus="+Runtime.getRuntime().availableProcessors());
         for(int oc:new int[]{1,4,8,12,16,25}) {
             float[] a=new float[3*32*160],w=new float[oc*3*9],b=new float[oc],out=new float[oc*16*80];
             Arrays.fill(a,.25f);Arrays.fill(w,.5f);Arrays.fill(b,.125f);
+            long warmupStart=System.nanoTime();
             for(int i=0;i<100;i++)generic(backend,a,w,b,out,oc);
-            long id=Thread.currentThread().threadId(),before=bean.getThreadAllocatedBytes(id);
-            for(int i=0;i<5;i++)generic(backend,a,w,b,out,oc);
-            long bytes=bean.getThreadAllocatedBytes(id)-before;
+            long warmupNanos=System.nanoTime()-warmupStart;
+            long[] perCall=new long[5];
+            long id=Thread.currentThread().threadId(),before=bean.getThreadAllocatedBytes(id),previous=before;
+            for(int i=0;i<5;i++) {
+                generic(backend,a,w,b,out,oc);
+                long after=bean.getThreadAllocatedBytes(id);
+                perCall[i]=after-previous;
+                previous=after;
+            }
+            long bytes=previous-before;
             System.out.println("hot generic stride-two: species_bits="+VectorSupport.F32.vectorBitSize()
-                    +", output_channels="+oc+", calls=5, allocated_bytes="+bytes);
+                    +", output_channels="+oc+", warmup_calls=100, warmup_ns="+warmupNanos
+                    +", calls=5, allocated_bytes="+bytes+", bytes_per_call="+Arrays.toString(perCall));
             assertTrue("generic stride-two allocation for OC="+oc+": "+bytes,bytes>=0 && bytes<=100000);
             assertEquals(3.5f,out[8*80+40],0);
         }

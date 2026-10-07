@@ -40,7 +40,13 @@ jobs:
           java-version: '25'
           cache: maven
       - name: Compile and test
-        run: mvn --batch-mode --no-transfer-progress verify
+        shell: bash
+        env:
+          JAVA_TOOL_OPTIONS: '-XX:+UnlockDiagnosticVMOptions -XX:+LogCompilation -XX:LogFile=target/jit-%p.xml'
+        run: |
+          # Surefire forks run from each module directory; keep logs in ignored target/.
+          mkdir -p target lw-ppocr-core/target lw-ppocr-imageio/target lw-ppocr-vector/target lw-ppocr-benchmark/target
+          mvn --batch-mode --no-transfer-progress verify
       - name: Check convolution kernels with fixed Vector species
         shell: bash
         run: |
@@ -54,6 +60,19 @@ jobs:
         shell: bash
         env:
           JAVA_TOOL_OPTIONS: '-XX:UseAVX=0'
+        run: |
+          mvn --batch-mode --no-transfer-progress -pl lw-ppocr-vector -am \
+            -Dtest=VectorStrideTwoTileTest,VectorStrideTwoLoadTest,VectorBackendTest,VectorFullOcrGoldenTest \
+            -Dsurefire.failIfNoSpecifiedTests=false test
+      - name: Check stride-two at non-inlined kernel boundaries
+        shell: bash
+        env:
+          JAVA_TOOL_OPTIONS: >-
+            -XX:CompileCommand=quiet
+            -XX:CompileCommand=dontinline,io.github.lxw112190.ppocr.vector.VectorStrideTwoLoad::load
+            -XX:CompileCommand=dontinline,io.github.lxw112190.ppocr.vector.VectorBackend::strideTwoRow*
+            -XX:CompileCommand=dontinline,io.github.lxw112190.ppocr.vector.VectorConv3x3Stride2Kernel::vectorTile
+            -XX:CompileCommand=dontinline,io.github.lxw112190.ppocr.vector.VectorRecConv3x3Stride2Kernel::vectorPixel
         run: |
           mvn --batch-mode --no-transfer-progress -pl lw-ppocr-vector -am \
             -Dtest=VectorStrideTwoTileTest,VectorStrideTwoLoadTest,VectorBackendTest,VectorFullOcrGoldenTest \
@@ -75,6 +94,38 @@ jobs:
           if [ "$found" -eq 0 ]; then
             echo "No failing Surefire text report was produced; inspect the failed Maven step."
           fi
+      - name: Diagnose stride-two allocation after failure
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          root=benchmark-results/stride-two-diagnostics
+          mkdir -p "$root"
+          if [ ! -f lw-ppocr-vector/target/test-classes/io/github/lxw112190/ppocr/vector/StrideTwoAllocationProbe.class ]; then
+            echo "Probe not compiled; inspect Maven and Surefire logs." | tee "$root/probe.txt"
+            exit 0
+          fi
+          sep=':'
+          if [ "$RUNNER_OS" = Windows ]; then sep=';'; fi
+          cp="lw-ppocr-core/target/classes${sep}lw-ppocr-vector/target/classes${sep}lw-ppocr-vector/target/test-classes"
+          java -XX:+UnlockDiagnosticVMOptions -XX:+LogCompilation \
+            -XX:LogFile="$root/probe-jit.xml" \
+            -XX:StartFlightRecording=filename="$root/probe.jfr",settings=profile,dumponexit=true \
+            --add-modules jdk.incubator.vector -cp "$cp" \
+            io.github.lxw112190.ppocr.vector.StrideTwoAllocationProbe | tee "$root/probe.txt"
+      - name: Upload test and JIT evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-jit-evidence-${{ matrix.os }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            **/target/surefire-reports/*.txt
+            **/target/surefire-reports/TEST-*.xml
+            **/target/surefire-reports/*.dump*
+            **/target/jit-*.xml
+            benchmark-results/stride-two-diagnostics/*
 
   onnx-compatibility:
     name: ONNX Small/Medium (${{ matrix.os }})

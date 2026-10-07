@@ -5,16 +5,19 @@ import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorShuffle;
 import jdk.incubator.vector.VectorSpecies;
 
-/** Portable stride-two input load: no gather, dynamic index vector or masked tail. */
+/** Cached portable stride-two permutations; kernels keep the Vector values local. */
 final class VectorStrideTwoLoad {
     private static final VectorSpecies<Float> S = VectorSupport.F32;
     private static final int L = S.length();
-    private static final VectorShuffle<Float> EVEN = VectorShuffle.fromOp(S, i -> (i * 2) % L);
-    private static final VectorShuffle<Float> ODD = VectorShuffle.fromOp(S, i -> (i * 2 + 1) % L);
-    private static final VectorMask<Float> UPPER = VectorMask.fromLong(S, -1L << (L / 2));
+    static final VectorShuffle<Float> EVEN = VectorShuffle.fromOp(S, i -> (i * 2) % L);
+    static final VectorShuffle<Float> ODD = VectorShuffle.fromOp(S, i -> (i * 2 + 1) % L);
+    static final VectorMask<Float> UPPER = VectorMask.fromLong(S, -1L << (L / 2));
 
     private VectorStrideTwoLoad() { }
 
+    // Reference for bit-pattern tests only. Hot kernels must perform this sequence
+    // in their own array-entry loop: a non-inlined Vector return allocates a box
+    // and payload, even when this method itself is fully C2-compiled.
     static FloatVector load(float[] input, int offset) {
         FloatVector first = FloatVector.fromArray(S, input, offset);
         // Overlap one element: the last load ends at offset+2*L-2, exactly the

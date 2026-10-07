@@ -956,7 +956,11 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                       float weight8, float weight9, float weight10, float weight11) {
         int ow = start;
         for (; ow < vectorEnd; ow += SPECIES.length()) {
-            FloatVector sample = VectorStrideTwoLoad.load(input, source);
+            // Keep the Vector in this compilation unit; do not return it from a helper.
+            FloatVector first = FloatVector.fromArray(SPECIES, input, source);
+            FloatVector second = FloatVector.fromArray(SPECIES, input, source + SPECIES.length() - 1);
+            FloatVector sample = first.rearrange(VectorStrideTwoLoad.EVEN)
+                    .blend(second.rearrange(VectorStrideTwoLoad.ODD), VectorStrideTwoLoad.UPPER);
             FloatVector.fromArray(SPECIES, output, destination0 + ow)
                     .add(sample.mul(weight0))
                     .intoArray(output, destination0 + ow);
@@ -1021,7 +1025,10 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                       float weight4, float weight5, float weight6, float weight7) {
         int ow = start;
         for (; ow < vectorEnd; ow += SPECIES.length()) {
-            FloatVector sample = VectorStrideTwoLoad.load(input, source);
+            FloatVector first = FloatVector.fromArray(SPECIES, input, source);
+            FloatVector second = FloatVector.fromArray(SPECIES, input, source + SPECIES.length() - 1);
+            FloatVector sample = first.rearrange(VectorStrideTwoLoad.EVEN)
+                    .blend(second.rearrange(VectorStrideTwoLoad.ODD), VectorStrideTwoLoad.UPPER);
             FloatVector.fromArray(SPECIES, output, destination0 + ow)
                     .add(sample.mul(weight0))
                     .intoArray(output, destination0 + ow);
@@ -1068,7 +1075,10 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                       float weight0, float weight1, float weight2, float weight3) {
         int ow = start;
         for (; ow < vectorEnd; ow += SPECIES.length()) {
-            FloatVector sample = VectorStrideTwoLoad.load(input, source);
+            FloatVector first = FloatVector.fromArray(SPECIES, input, source);
+            FloatVector second = FloatVector.fromArray(SPECIES, input, source + SPECIES.length() - 1);
+            FloatVector sample = first.rearrange(VectorStrideTwoLoad.EVEN)
+                    .blend(second.rearrange(VectorStrideTwoLoad.ODD), VectorStrideTwoLoad.UPPER);
             FloatVector.fromArray(SPECIES, output, destination0 + ow)
                     .add(sample.mul(weight0))
                     .intoArray(output, destination0 + ow);
@@ -1099,9 +1109,13 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                       float weight) {
         int ow = start;
         for (; ow < vectorEnd; ow += SPECIES.length()) {
+            FloatVector first = FloatVector.fromArray(SPECIES, input, source);
+            FloatVector second = FloatVector.fromArray(SPECIES, input, source + SPECIES.length() - 1);
+            FloatVector sample = first.rearrange(VectorStrideTwoLoad.EVEN)
+                    .blend(second.rearrange(VectorStrideTwoLoad.ODD), VectorStrideTwoLoad.UPPER);
             FloatVector result = FloatVector.fromArray(
                     SPECIES, output, destination + ow)
-                    .add(VectorStrideTwoLoad.load(input, source).mul(weight));
+                    .add(sample.mul(weight));
             result.intoArray(output, destination + ow);
             source += SPECIES.length() * 2;
         }
