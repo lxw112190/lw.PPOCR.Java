@@ -46,7 +46,7 @@ jobs:
         run: |
           for bits in 128 512; do
             mvn --batch-mode --no-transfer-progress -pl lw-ppocr-vector -am \
-              -Dtest=VectorLargePointwiseTest,VectorLargePointwiseFmaTest,VectorConvTransposeRowsTest,VectorParallelTransposeTest,VectorParallelEpilogueTest,VectorRegisterConvTest,VectorParallelRegisterConvTest -Dsurefire.failIfNoSpecifiedTests=false \
+              -Dtest=VectorLargePointwiseTest,VectorLargePointwiseFmaTest,VectorConvTransposeRowsTest,VectorParallelTransposeTest,VectorParallelEpilogueTest,VectorRegisterConvTest,VectorParallelRegisterConvTest,VectorStrideTwoTileTest -Dsurefire.failIfNoSpecifiedTests=false \
               -Dlwppocr.vectorBits=$bits test
           done
       - name: Report test failures
@@ -155,6 +155,12 @@ jobs:
           cache: maven
       - name: Build benchmark
         run: mvn --batch-mode --no-transfer-progress package -DskipTests
+      - name: Record performance runner
+        shell: bash
+        run: |
+          mkdir -p benchmark-results
+          lscpu | tee benchmark-results/cpu-info.txt
+          java -XshowSettings:vm -version 2>&1 | tee benchmark-results/jvm-info.txt
       - name: Run benchmark
         run: |
           mkdir -p benchmark-results
@@ -253,7 +259,7 @@ jobs:
             | tee benchmark-results/rec-stride-two-conv.json
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \
-            io.github.lxw112190.ppocr.benchmark.DetStrideTwoConvPerformanceMain vector stem \
+            io.github.lxw112190.ppocr.benchmark.DetStrideTwoConvPerformanceMain vector stem 100 30 1000 \
             | tee benchmark-results/det-stem-stride-two-conv.json
           java --add-modules jdk.incubator.vector \
             -cp "lw-ppocr-core/target/classes:lw-ppocr-vector/target/classes:lw-ppocr-benchmark/target/classes" \

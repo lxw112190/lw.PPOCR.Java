@@ -50,5 +50,57 @@ class LowCpuAllocationTests(unittest.TestCase):
                 self.check(dict(self.fixture(), **updates))
 
 
+class StemTimingTests(unittest.TestCase):
+    def fixture(self, median=1.5):
+        return dict(benchmark="det-stride-two-conv", backend="vector", workload="stem",
+                    input_width=320, input_height=320, input_channels=3,
+                    output_width=160, output_height=160, output_channels=16,
+                    requested_warmup=100, warmup=750, warmup_min_ms=1000,
+                    warmup_elapsed_ms=1001.0, iterations=30, median_ms=median,
+                    checksum="10973022362502076197", samples_ms=[median]*30)
+
+    def check(self, result):
+        CHECK.check_stem_contract(result, "stem.json")
+        with contextlib.redirect_stdout(io.StringIO()):
+            CHECK.require_lt(result, "median_ms", 5.0, "stem.json")
+
+    def test_steady_protocol_and_unchanged_strict_limit(self):
+        self.check(self.fixture())
+        self.check(self.fixture(4.999))
+        for median in (5.0, 8.525):
+            with self.subTest(median=median), self.assertRaises(SystemExit):
+                self.check(self.fixture(median))
+
+    def test_short_or_incomplete_warmup_is_not_accepted(self):
+        for updates in (dict(requested_warmup=10), dict(warmup=99),
+                        dict(requested_warmup=800), dict(warmup_min_ms=0),
+                        dict(warmup_elapsed_ms=999.9), dict(iterations=10),
+                        dict(warmup=float("nan")), dict(warmup_min_ms=float("inf")),
+                        dict(warmup_elapsed_ms=float("nan")), dict(requested_warmup=True)):
+            with self.subTest(updates=updates), self.assertRaises(SystemExit):
+                self.check(dict(self.fixture(), **updates))
+        for key in ("requested_warmup", "warmup_elapsed_ms", "samples_ms"):
+            result=self.fixture(); del result[key]
+            with self.subTest(key=key), self.assertRaises(SystemExit):
+                self.check(result)
+
+    def test_fixture_backend_and_shape_cannot_be_reduced(self):
+        for updates in (dict(input_width=160), dict(input_channels=1),
+                        dict(output_channels=8), dict(workload="downsample"),
+                        dict(backend="scalar"), dict(checksum="wrong")):
+            with self.subTest(updates=updates), self.assertRaises(SystemExit):
+                self.check(dict(self.fixture(), **updates))
+
+    def test_all_chronological_samples_must_back_reported_median(self):
+        for samples in ([1.5]*29, [1.5]*31, [1.0]*30,
+                        [True]+[1.5]*29, [0]+[1.5]*29,
+                        [float("nan")]+[1.5]*29, [float("inf")]+[1.5]*29):
+            with self.subTest(samples=samples), self.assertRaises(SystemExit):
+                self.check(dict(self.fixture(), samples_ms=samples))
+        # A minority of fast samples must never hide a slow upper median.
+        with self.assertRaises(SystemExit):
+            self.check(dict(self.fixture(), samples_ms=[1.5]*12+[8.525]*18))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import pathlib
 import sys
@@ -64,6 +65,39 @@ def check_low_cpu_allocation(result: dict, name: str) -> None:
     require_le(result, "gc_count_delta", 1.0, name)
 
 
+def check_stem_contract(result: dict, name: str) -> None:
+    # Keep the same fixture and 5 ms gate, but don't score a ten-call JIT startup.
+    for key, expected in {"input_width": 320, "input_height": 320,
+                          "input_channels": 3, "output_width": 160,
+                          "output_height": 160, "output_channels": 16}.items():
+        if number(result, key, name) != expected:
+            raise SystemExit(f"{name}: expected {key}={expected}")
+    for key, expected in {"benchmark": "det-stride-two-conv", "backend": "vector",
+                          "workload": "stem", "checksum": "10973022362502076197"}.items():
+        if result.get(key) != expected:
+            raise SystemExit(f"{name}: expected {key}={expected}")
+    for key, minimum in {"requested_warmup": 100, "warmup": 100,
+                         "warmup_min_ms": 1000, "iterations": 30}.items():
+        value = number(result, key, name)
+        if not math.isfinite(value) or not value.is_integer() or value < minimum:
+            raise SystemExit(f"{name}: expected integer {key}>={minimum}")
+    if number(result, "warmup", name) < number(result, "requested_warmup", name):
+        raise SystemExit(f"{name}: incomplete warmup count")
+    elapsed = number(result, "warmup_elapsed_ms", name)
+    if not math.isfinite(elapsed) or elapsed < number(result, "warmup_min_ms", name):
+        raise SystemExit(f"{name}: incomplete elapsed warmup")
+    samples = result.get("samples_ms")
+    if not isinstance(samples, list) or len(samples) != result["iterations"]:
+        raise SystemExit(f"{name}: missing chronological timing samples")
+    if any(isinstance(x, bool) or not isinstance(x, (float, int))
+           or not math.isfinite(x) or x <= 0 for x in samples):
+        raise SystemExit(f"{name}: invalid timing sample")
+    # Java reports the upper median for even sample counts. Never drop slow samples.
+    median = number(result, "median_ms", name)
+    if not math.isfinite(median) or abs(median - sorted(samples)[len(samples)//2]) > .001:
+        raise SystemExit(f"{name}: reported median does not match all samples")
+
+
 def main() -> int:
     focused = {
         "rec-projection-matmul.json": 5.0,
@@ -75,7 +109,10 @@ def main() -> int:
         "det-stride-one-conv-det960.json": 60.0,
     }
     for filename, limit in focused.items():
-        require_lt(load_json(filename), "median_ms", limit, filename)
+        result = load_json(filename)
+        if filename == "det-stem-stride-two-conv.json":
+            check_stem_contract(result, filename)
+        require_lt(result, "median_ms", limit, filename)
 
     full = load_json("full-ocr-allocation-vector.json")
     require_lt(full, "mean_ms", 400.0, "full-ocr-allocation-vector.json")

@@ -13,10 +13,15 @@ public final class DetStrideTwoConvPerformanceMain {
     private DetStrideTwoConvPerformanceMain() { }
 
     public static void main(String[] args) throws Exception {
+        if (args.length > 5) throw new IllegalArgumentException(
+                "backend workload [warmup [iterations [minimum-warmup-ms]]]");
         String backendName = args.length > 0 ? args[0] : "scalar";
         String workloadName = args.length > 1 ? args[1] : "downsample";
-        int warmup = args.length > 2 ? positive(args[2], "warmup") : 10;
+        int requestedWarmup = args.length > 2 ? positive(args[2], "warmup")
+                : "stem".equals(workloadName) ? 100 : 10;
         int iterations = args.length > 3 ? positive(args[3], "iterations") : 30;
+        int minimumWarmupMillis = args.length > 4 ? warmupMillis(args[4])
+                : "stem".equals(workloadName) ? 1000 : 0;
         Workload workload = workload(workloadName);
         KernelBackend backend = createBackend(backendName);
         int outputHeight = workload.height / 2;
@@ -28,10 +33,16 @@ public final class DetStrideTwoConvPerformanceMain {
         float[] bias = fixture(OUTPUT_CHANNELS, 31, 0.00390625f);
         float[] output = new float[OUTPUT_CHANNELS * outputHeight * outputWidth];
 
-        for (int i = 0; i < warmup; i++) {
+        // Fixed count AND elapsed-time floor, not an adaptive search for fast samples.
+        // A short stem invocation can finish ten warmups before C2 is ready on CI.
+        long warmupStart = System.nanoTime();
+        int warmup = 0;
+        do {
             run(backend, workload, input, weights, bias, output, outputHeight, outputWidth);
-            consume(output, i);
-        }
+            consume(output, warmup++);
+        } while (warmup < requestedWarmup
+                || System.nanoTime() - warmupStart < minimumWarmupMillis * 1_000_000L);
+        long warmupNanos = System.nanoTime() - warmupStart;
         long[] samples = new long[iterations];
         for (int i = 0; i < iterations; i++) {
             long start = System.nanoTime();
@@ -39,20 +50,32 @@ public final class DetStrideTwoConvPerformanceMain {
             samples[i] = System.nanoTime() - start;
             consume(output, i);
         }
+        // Keep chronological samples for diagnosing JIT ramps / runner stalls.
+        StringBuilder sampleJson = new StringBuilder("[");
+        for (int i = 0; i < samples.length; i++) {
+            if (i != 0) sampleJson.append(',');
+            sampleJson.append(String.format(Locale.ROOT, "%.6f", samples[i] / 1_000_000.0));
+        }
+        sampleJson.append(']');
         Arrays.sort(samples);
         System.out.printf(Locale.ROOT,
                 "{\"benchmark\":\"det-stride-two-conv\",\"workload\":\"%s\","
                         + "\"backend\":\"%s\",\"input_width\":%d,\"input_height\":%d,"
                         + "\"input_channels\":%d,\"output_width\":%d,"
                         + "\"output_height\":%d,\"output_channels\":%d,"
-                        + "\"warmup\":%d,\"iterations\":%d,\"mean_ms\":%.3f,"
-                        + "\"median_ms\":%.3f,\"p95_ms\":%.3f,\"checksum\":\"%s\"}%n",
+                        + "\"warmup\":%d,\"requested_warmup\":%d,"
+                        + "\"warmup_min_ms\":%d,\"warmup_elapsed_ms\":%.3f,"
+                        + "\"java_version\":\"%s\",\"available_processors\":%d,"
+                        + "\"iterations\":%d,\"mean_ms\":%.3f,"
+                        + "\"median_ms\":%.3f,\"p95_ms\":%.3f,\"checksum\":\"%s\",\"samples_ms\":%s}%n",
                 workloadName, backendName, workload.width, workload.height, workload.channels,
-                outputWidth, outputHeight, OUTPUT_CHANNELS, warmup, iterations,
+                outputWidth, outputHeight, OUTPUT_CHANNELS, warmup, requestedWarmup,
+                minimumWarmupMillis, warmupNanos / 1_000_000.0,
+                System.getProperty("java.version"), Runtime.getRuntime().availableProcessors(), iterations,
                 mean(samples) / 1_000_000.0, samples[samples.length / 2] / 1_000_000.0,
                 samples[(int) Math.min(samples.length - 1,
                         Math.ceil(samples.length * 0.95) - 1)] / 1_000_000.0,
-                checksum(output));
+                checksum(output), sampleJson);
     }
 
     private static void run(KernelBackend backend, Workload workload, float[] input,
@@ -87,6 +110,13 @@ public final class DetStrideTwoConvPerformanceMain {
         return parsed;
     }
 
+    private static int warmupMillis(String value) {
+        int parsed = Integer.parseInt(value);
+        if (parsed < 0 || parsed > 60_000)
+            throw new IllegalArgumentException("minimum warmup milliseconds must be 0..60000");
+        return parsed;
+    }
+
     private static float[] fixture(int length, int period, float scale) {
         float[] values = new float[length];
         int center = period / 2;
@@ -95,7 +125,7 @@ public final class DetStrideTwoConvPerformanceMain {
     }
 
     private static void consume(float[] values, int iteration) {
-        sink += values[(iteration * 7919) % values.length];
+        sink += values[(int) (((long) iteration * 7919) % values.length)];
     }
 
     private static double mean(long[] values) {

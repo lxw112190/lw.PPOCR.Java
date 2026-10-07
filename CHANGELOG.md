@@ -4,6 +4,15 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Outlined dense stride-two Vector tiles into a frequently invoked, array-only
+  microkernel, preserving Scalar reduction order and padding semantics.
+- DET stem performance validation requires at least 100 warmup calls and one
+  second before sampling; chronological samples and runner metadata are recorded.
+  The same fixture, checksum and strict 5 ms gate remain enforced.
+  See docs/det-stem-ci-stability-20261007.md for evidence and remaining limitations.
+
 ## [0.3.1] - 2026-10-07
 
 ### Fixed
