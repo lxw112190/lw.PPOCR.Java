@@ -1,6 +1,8 @@
 # DET stem CI 时序稳定性修复（2026-10-07）
 
-基线 `d915a29`；原远程标签 `v0.3.1` 指向该提交，本次修复在 `Unreleased`，未提交或推送。
+基线 `d915a29`；原远程标签 `v0.3.1` 指向该提交，此时序修复已提交为 `03f0c26`，
+仍记录在 `Unreleased`，不包含在原标签中。后续 macOS 分配失败及 gather 修复见
+[stride-two-gather-fix-20261007.md](stride-two-gather-fix-20261007.md)。
 
 ## 证据与边界
 

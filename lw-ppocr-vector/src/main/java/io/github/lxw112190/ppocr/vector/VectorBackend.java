@@ -25,7 +25,6 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
         ProjectionArgMaxBackend, InPlaceElementwiseBackend, ConvEpilogueBackend, PreparedConvBackend,
         ConvTransposeRowsBackend, PreparedConvEpilogueRowsBackend {
     private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
-    private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
     private static final VectorShuffle<Float> ZIP_LOW = VectorShuffle.fromOp(SPECIES, i -> i / 2);
     private static final VectorShuffle<Float> ZIP_HIGH = VectorShuffle.fromOp(SPECIES, i -> SPECIES.length() / 2 + i / 2);
     private static final VectorMask<Float> ZIP_ODD = VectorMask.fromLong(SPECIES, 0xAAAAAAAAAAAAAAAAL);
@@ -769,64 +768,13 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                     int destination9 = outputBase9 + oh * outputWidth;
                                     int destination10 = outputBase10 + oh * outputWidth;
                                     int destination11 = outputBase11 + oh * outputWidth;
-                                    int ow = start;
-                                    for (; ow < vectorEnd; ow += SPECIES.length()) {
-                                        FloatVector sample = FloatVector.fromArray(
-                                                SPECIES, input, source, STRIDE_TWO_INDEXES, 0);
-                                        FloatVector.fromArray(SPECIES, output, destination0 + ow)
-                                                .add(sample.mul(weight0))
-                                                .intoArray(output, destination0 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination1 + ow)
-                                                .add(sample.mul(weight1))
-                                                .intoArray(output, destination1 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination2 + ow)
-                                                .add(sample.mul(weight2))
-                                                .intoArray(output, destination2 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination3 + ow)
-                                                .add(sample.mul(weight3))
-                                                .intoArray(output, destination3 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination4 + ow)
-                                                .add(sample.mul(weight4))
-                                                .intoArray(output, destination4 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination5 + ow)
-                                                .add(sample.mul(weight5))
-                                                .intoArray(output, destination5 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination6 + ow)
-                                                .add(sample.mul(weight6))
-                                                .intoArray(output, destination6 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination7 + ow)
-                                                .add(sample.mul(weight7))
-                                                .intoArray(output, destination7 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination8 + ow)
-                                                .add(sample.mul(weight8))
-                                                .intoArray(output, destination8 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination9 + ow)
-                                                .add(sample.mul(weight9))
-                                                .intoArray(output, destination9 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination10 + ow)
-                                                .add(sample.mul(weight10))
-                                                .intoArray(output, destination10 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination11 + ow)
-                                                .add(sample.mul(weight11))
-                                                .intoArray(output, destination11 + ow);
-                                        source += SPECIES.length() * 2;
-                                    }
-                                    for (; ow < end; ow++) {
-                                        float sample = input[source];
-                                        output[destination0 + ow] += sample * weight0;
-                                        output[destination1 + ow] += sample * weight1;
-                                        output[destination2 + ow] += sample * weight2;
-                                        output[destination3 + ow] += sample * weight3;
-                                        output[destination4 + ow] += sample * weight4;
-                                        output[destination5 + ow] += sample * weight5;
-                                        output[destination6 + ow] += sample * weight6;
-                                        output[destination7 + ow] += sample * weight7;
-                                        output[destination8 + ow] += sample * weight8;
-                                        output[destination9 + ow] += sample * weight9;
-                                        output[destination10 + ow] += sample * weight10;
-                                        output[destination11 + ow] += sample * weight11;
-                                        source += 2;
-                                    }
+                                    strideTwoRow12(input, source, output, start, end, vectorEnd,
+                                            destination0, destination1, destination2, destination3,
+                                            destination4, destination5, destination6, destination7,
+                                            destination8, destination9, destination10, destination11,
+                                            weight0, weight1, weight2, weight3,
+                                            weight4, weight5, weight6, weight7,
+                                            weight8, weight9, weight10, weight11);
                                 }
                             }
                         }
@@ -901,48 +849,10 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                     int destination5 = outputBase5 + oh * outputWidth;
                                     int destination6 = outputBase6 + oh * outputWidth;
                                     int destination7 = outputBase7 + oh * outputWidth;
-                                    int ow = start;
-                                    for (; ow < vectorEnd; ow += SPECIES.length()) {
-                                        FloatVector sample = FloatVector.fromArray(
-                                                SPECIES, input, source, STRIDE_TWO_INDEXES, 0);
-                                        FloatVector.fromArray(SPECIES, output, destination0 + ow)
-                                                .add(sample.mul(weight0))
-                                                .intoArray(output, destination0 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination1 + ow)
-                                                .add(sample.mul(weight1))
-                                                .intoArray(output, destination1 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination2 + ow)
-                                                .add(sample.mul(weight2))
-                                                .intoArray(output, destination2 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination3 + ow)
-                                                .add(sample.mul(weight3))
-                                                .intoArray(output, destination3 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination4 + ow)
-                                                .add(sample.mul(weight4))
-                                                .intoArray(output, destination4 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination5 + ow)
-                                                .add(sample.mul(weight5))
-                                                .intoArray(output, destination5 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination6 + ow)
-                                                .add(sample.mul(weight6))
-                                                .intoArray(output, destination6 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination7 + ow)
-                                                .add(sample.mul(weight7))
-                                                .intoArray(output, destination7 + ow);
-                                        source += SPECIES.length() * 2;
-                                    }
-                                    for (; ow < end; ow++) {
-                                        float sample = input[source];
-                                        output[destination0 + ow] += sample * weight0;
-                                        output[destination1 + ow] += sample * weight1;
-                                        output[destination2 + ow] += sample * weight2;
-                                        output[destination3 + ow] += sample * weight3;
-                                        output[destination4 + ow] += sample * weight4;
-                                        output[destination5 + ow] += sample * weight5;
-                                        output[destination6 + ow] += sample * weight6;
-                                        output[destination7 + ow] += sample * weight7;
-                                        source += 2;
-                                    }
+                                    strideTwoRow8(input, source, output, start, end, vectorEnd,
+                                            destination0, destination1, destination2, destination3,
+                                            destination4, destination5, destination6, destination7,
+                                            weight0, weight1, weight2, weight3, weight4, weight5, weight6, weight7);
                                 }
                             }
                         }
@@ -993,32 +903,9 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                     int destination1 = outputBase1 + oh * outputWidth;
                                     int destination2 = outputBase2 + oh * outputWidth;
                                     int destination3 = outputBase3 + oh * outputWidth;
-                                    int ow = start;
-                                    for (; ow < vectorEnd; ow += SPECIES.length()) {
-                                        FloatVector sample = FloatVector.fromArray(
-                                                SPECIES, input, source, STRIDE_TWO_INDEXES, 0);
-                                        FloatVector.fromArray(SPECIES, output, destination0 + ow)
-                                                .add(sample.mul(weight0))
-                                                .intoArray(output, destination0 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination1 + ow)
-                                                .add(sample.mul(weight1))
-                                                .intoArray(output, destination1 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination2 + ow)
-                                                .add(sample.mul(weight2))
-                                                .intoArray(output, destination2 + ow);
-                                        FloatVector.fromArray(SPECIES, output, destination3 + ow)
-                                                .add(sample.mul(weight3))
-                                                .intoArray(output, destination3 + ow);
-                                        source += SPECIES.length() * 2;
-                                    }
-                                    for (; ow < end; ow++) {
-                                        float sample = input[source];
-                                        output[destination0 + ow] += sample * weight0;
-                                        output[destination1 + ow] += sample * weight1;
-                                        output[destination2 + ow] += sample * weight2;
-                                        output[destination3 + ow] += sample * weight3;
-                                        source += 2;
-                                    }
+                                    strideTwoRow4(input, source, output, start, end, vectorEnd,
+                                            destination0, destination1, destination2, destination3,
+                                            weight0, weight1, weight2, weight3);
                                 }
                             }
                         }
@@ -1046,19 +933,9 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
                                     if (ih < 0 || ih >= height) continue;
                                     int source = inputBase + ih * width + start * 2 - shift;
                                     int destination = outputBase + oh * outputWidth;
-                                    int ow = start;
-                                    for (; ow < vectorEnd; ow += SPECIES.length()) {
-                                        FloatVector result = FloatVector.fromArray(
-                                                SPECIES, output, destination + ow)
-                                                .add(FloatVector.fromArray(SPECIES, input, source,
-                                                        STRIDE_TWO_INDEXES, 0).mul(weight));
-                                        result.intoArray(output, destination + ow);
-                                        source += SPECIES.length() * 2;
-                                    }
-                                    for (; ow < end; ow++) {
-                                        output[destination + ow] += input[source] * weight;
-                                        source += 2;
-                                    }
+                                    strideTwoRow1(input, source, output, start, end, vectorEnd,
+                                            destination,
+                                            weight);
                                 }
                             }
                         }
@@ -1068,14 +945,174 @@ public final class VectorBackend implements KernelBackend, FusedGeluBackend,
         }
     }
 
-    private static int ceilDiv(int value, int divisor) {
-        return -Math.floorDiv(-value, divisor);
+    // Array/scalar entry points keep Vector temporaries within a compact C2 loop.
+    private static void strideTwoRow12(float[] input, int source, float[] output,
+                                      int start, int end, int vectorEnd,
+                                      int destination0, int destination1, int destination2, int destination3,
+                                      int destination4, int destination5, int destination6, int destination7,
+                                      int destination8, int destination9, int destination10, int destination11,
+                                      float weight0, float weight1, float weight2, float weight3,
+                                      float weight4, float weight5, float weight6, float weight7,
+                                      float weight8, float weight9, float weight10, float weight11) {
+        int ow = start;
+        for (; ow < vectorEnd; ow += SPECIES.length()) {
+            FloatVector sample = VectorStrideTwoLoad.load(input, source);
+            FloatVector.fromArray(SPECIES, output, destination0 + ow)
+                    .add(sample.mul(weight0))
+                    .intoArray(output, destination0 + ow);
+            FloatVector.fromArray(SPECIES, output, destination1 + ow)
+                    .add(sample.mul(weight1))
+                    .intoArray(output, destination1 + ow);
+            FloatVector.fromArray(SPECIES, output, destination2 + ow)
+                    .add(sample.mul(weight2))
+                    .intoArray(output, destination2 + ow);
+            FloatVector.fromArray(SPECIES, output, destination3 + ow)
+                    .add(sample.mul(weight3))
+                    .intoArray(output, destination3 + ow);
+            FloatVector.fromArray(SPECIES, output, destination4 + ow)
+                    .add(sample.mul(weight4))
+                    .intoArray(output, destination4 + ow);
+            FloatVector.fromArray(SPECIES, output, destination5 + ow)
+                    .add(sample.mul(weight5))
+                    .intoArray(output, destination5 + ow);
+            FloatVector.fromArray(SPECIES, output, destination6 + ow)
+                    .add(sample.mul(weight6))
+                    .intoArray(output, destination6 + ow);
+            FloatVector.fromArray(SPECIES, output, destination7 + ow)
+                    .add(sample.mul(weight7))
+                    .intoArray(output, destination7 + ow);
+            FloatVector.fromArray(SPECIES, output, destination8 + ow)
+                    .add(sample.mul(weight8))
+                    .intoArray(output, destination8 + ow);
+            FloatVector.fromArray(SPECIES, output, destination9 + ow)
+                    .add(sample.mul(weight9))
+                    .intoArray(output, destination9 + ow);
+            FloatVector.fromArray(SPECIES, output, destination10 + ow)
+                    .add(sample.mul(weight10))
+                    .intoArray(output, destination10 + ow);
+            FloatVector.fromArray(SPECIES, output, destination11 + ow)
+                    .add(sample.mul(weight11))
+                    .intoArray(output, destination11 + ow);
+            source += SPECIES.length() * 2;
+        }
+        for (; ow < end; ow++) {
+            float sample = input[source];
+            output[destination0 + ow] += sample * weight0;
+            output[destination1 + ow] += sample * weight1;
+            output[destination2 + ow] += sample * weight2;
+            output[destination3 + ow] += sample * weight3;
+            output[destination4 + ow] += sample * weight4;
+            output[destination5 + ow] += sample * weight5;
+            output[destination6 + ow] += sample * weight6;
+            output[destination7 + ow] += sample * weight7;
+            output[destination8 + ow] += sample * weight8;
+            output[destination9 + ow] += sample * weight9;
+            output[destination10 + ow] += sample * weight10;
+            output[destination11 + ow] += sample * weight11;
+            source += 2;
+        }
     }
 
-    private static int[] strideIndexes(int stride) {
-        int[] indexes = new int[SPECIES.length()];
-        for (int lane = 0; lane < indexes.length; lane++) indexes[lane] = lane * stride;
-        return indexes;
+    private static void strideTwoRow8(float[] input, int source, float[] output,
+                                      int start, int end, int vectorEnd,
+                                      int destination0, int destination1, int destination2, int destination3,
+                                      int destination4, int destination5, int destination6, int destination7,
+                                      float weight0, float weight1, float weight2, float weight3,
+                                      float weight4, float weight5, float weight6, float weight7) {
+        int ow = start;
+        for (; ow < vectorEnd; ow += SPECIES.length()) {
+            FloatVector sample = VectorStrideTwoLoad.load(input, source);
+            FloatVector.fromArray(SPECIES, output, destination0 + ow)
+                    .add(sample.mul(weight0))
+                    .intoArray(output, destination0 + ow);
+            FloatVector.fromArray(SPECIES, output, destination1 + ow)
+                    .add(sample.mul(weight1))
+                    .intoArray(output, destination1 + ow);
+            FloatVector.fromArray(SPECIES, output, destination2 + ow)
+                    .add(sample.mul(weight2))
+                    .intoArray(output, destination2 + ow);
+            FloatVector.fromArray(SPECIES, output, destination3 + ow)
+                    .add(sample.mul(weight3))
+                    .intoArray(output, destination3 + ow);
+            FloatVector.fromArray(SPECIES, output, destination4 + ow)
+                    .add(sample.mul(weight4))
+                    .intoArray(output, destination4 + ow);
+            FloatVector.fromArray(SPECIES, output, destination5 + ow)
+                    .add(sample.mul(weight5))
+                    .intoArray(output, destination5 + ow);
+            FloatVector.fromArray(SPECIES, output, destination6 + ow)
+                    .add(sample.mul(weight6))
+                    .intoArray(output, destination6 + ow);
+            FloatVector.fromArray(SPECIES, output, destination7 + ow)
+                    .add(sample.mul(weight7))
+                    .intoArray(output, destination7 + ow);
+            source += SPECIES.length() * 2;
+        }
+        for (; ow < end; ow++) {
+            float sample = input[source];
+            output[destination0 + ow] += sample * weight0;
+            output[destination1 + ow] += sample * weight1;
+            output[destination2 + ow] += sample * weight2;
+            output[destination3 + ow] += sample * weight3;
+            output[destination4 + ow] += sample * weight4;
+            output[destination5 + ow] += sample * weight5;
+            output[destination6 + ow] += sample * weight6;
+            output[destination7 + ow] += sample * weight7;
+            source += 2;
+        }
+    }
+
+    private static void strideTwoRow4(float[] input, int source, float[] output,
+                                      int start, int end, int vectorEnd,
+                                      int destination0, int destination1, int destination2, int destination3,
+                                      float weight0, float weight1, float weight2, float weight3) {
+        int ow = start;
+        for (; ow < vectorEnd; ow += SPECIES.length()) {
+            FloatVector sample = VectorStrideTwoLoad.load(input, source);
+            FloatVector.fromArray(SPECIES, output, destination0 + ow)
+                    .add(sample.mul(weight0))
+                    .intoArray(output, destination0 + ow);
+            FloatVector.fromArray(SPECIES, output, destination1 + ow)
+                    .add(sample.mul(weight1))
+                    .intoArray(output, destination1 + ow);
+            FloatVector.fromArray(SPECIES, output, destination2 + ow)
+                    .add(sample.mul(weight2))
+                    .intoArray(output, destination2 + ow);
+            FloatVector.fromArray(SPECIES, output, destination3 + ow)
+                    .add(sample.mul(weight3))
+                    .intoArray(output, destination3 + ow);
+            source += SPECIES.length() * 2;
+        }
+        for (; ow < end; ow++) {
+            float sample = input[source];
+            output[destination0 + ow] += sample * weight0;
+            output[destination1 + ow] += sample * weight1;
+            output[destination2 + ow] += sample * weight2;
+            output[destination3 + ow] += sample * weight3;
+            source += 2;
+        }
+    }
+
+    private static void strideTwoRow1(float[] input, int source, float[] output,
+                                      int start, int end, int vectorEnd,
+                                      int destination,
+                                      float weight) {
+        int ow = start;
+        for (; ow < vectorEnd; ow += SPECIES.length()) {
+            FloatVector result = FloatVector.fromArray(
+                    SPECIES, output, destination + ow)
+                    .add(VectorStrideTwoLoad.load(input, source).mul(weight));
+            result.intoArray(output, destination + ow);
+            source += SPECIES.length() * 2;
+        }
+        for (; ow < end; ow++) {
+            output[destination + ow] += input[source] * weight;
+            source += 2;
+        }
+    }
+
+    private static int ceilDiv(int value, int divisor) {
+        return -Math.floorDiv(-value, divisor);
     }
 
     private static void generalStrideOne(float[] input, int inputOffset, float[] weights,

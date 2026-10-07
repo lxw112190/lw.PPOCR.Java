@@ -6,17 +6,8 @@ import jdk.incubator.vector.VectorSpecies;
 /** Vector microkernel for the common 3x3, same-padding, stride-two convolution. */
 final class VectorConv3x3Stride2Kernel {
     private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
-    private static final int[] STRIDE_TWO_INDEXES = strideIndexes(2);
 
     private VectorConv3x3Stride2Kernel() { }
-
-    private static int[] strideIndexes(int stride) {
-        int[] indexes = new int[SPECIES.length()];
-        for (int i = 0; i < indexes.length; i++) {
-            indexes[i] = i * stride;
-        }
-        return indexes;
-    }
 
     static void apply(float[] input, int inputOffset, float[] weights, int weightOffset,
                       float[] bias, int biasOffset, float[] output, int outputOffset,
@@ -97,8 +88,7 @@ final class VectorConv3x3Stride2Kernel {
                 if (ih < 0 || ih >= height) continue;
                 int inputRow = inputBase + ih * width + ow * 2 - 1;
                 for (int kw = 0; kw < 3; kw++) {
-                    FloatVector sample = FloatVector.fromArray(
-                            SPECIES, input, inputRow + kw, STRIDE_TWO_INDEXES, 0);
+                    FloatVector sample = VectorStrideTwoLoad.load(input, inputRow + kw);
                     int kernelIndex = kernelBase + kh * 3 + kw;
                     sum0 = sum0.add(sample.mul(weights[weightBase0 + kernelIndex]));
                     sum1 = sum1.add(sample.mul(weights[weightBase1 + kernelIndex]));

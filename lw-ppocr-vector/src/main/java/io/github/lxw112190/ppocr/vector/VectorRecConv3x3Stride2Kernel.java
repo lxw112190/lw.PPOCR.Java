@@ -6,7 +6,6 @@ import jdk.incubator.vector.VectorSpecies;
 /** Fixed-shape NCHW kernel for the first 3x3 stride-two REC convolution. */
 final class VectorRecConv3x3Stride2Kernel {
     private static final VectorSpecies<Float> SPECIES = VectorSupport.F32;
-    private static final int[] STRIDE_TWO_INDEXES = strideIndexes();
 
     private VectorRecConv3x3Stride2Kernel() { }
 
@@ -134,8 +133,7 @@ final class VectorRecConv3x3Stride2Kernel {
             for (int kh = khStart; kh < khEnd; kh++) {
                 int inputRow = inputBase + (oh * 2 - 1 + kh) * width + ow * 2 - 1;
                 for (int kw = 0; kw < 3; kw++) {
-                    FloatVector sample = FloatVector.fromArray(
-                            SPECIES, input, inputRow + kw, STRIDE_TWO_INDEXES, 0);
+                    FloatVector sample = VectorStrideTwoLoad.load(input, inputRow + kw);
                     int kernelIndex = kernelBase + kh * 3 + kw;
                     sum0 = sum0.add(sample.mul(weights[weightOffset
                             + outputChannel * 24 * 9 + kernelIndex]));
@@ -221,9 +219,4 @@ final class VectorRecConv3x3Stride2Kernel {
         output[outputRow7 + ow] = value7;
     }
 
-    private static int[] strideIndexes() {
-        int[] indexes = new int[SPECIES.length()];
-        for (int i = 0; i < indexes.length; i++) indexes[i] = i * 2;
-        return indexes;
-    }
 }

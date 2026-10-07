@@ -6,6 +6,14 @@ All notable changes to this project are documented in this file.
 
 ### Fixed
 
+- Stride-two Vector loads now use two overlapping contiguous loads and cached
+  one-source shuffles instead of indexed gather. This removes fallback vector
+  allocations on machines without hardware gather, including all dense, REC and
+  generic stride-two paths; selected elements and Scalar arithmetic are unchanged.
+  Generic 12/8/4/1-channel row loops use compact array/scalar entry points to keep
+  the replacement load in a C2-compiled, allocation-free hot loop.
+  Allocation limits remain unchanged, with a Linux x64 no-AVX regression added.
+  See docs/stride-two-gather-fix-20261007.md for reproduction and validation.
 - Outlined dense stride-two Vector tiles into a frequently invoked, array-only
   microkernel, preserving Scalar reduction order and padding semantics.
 - DET stem performance validation requires at least 100 warmup calls and one

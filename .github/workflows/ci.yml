@@ -46,9 +46,18 @@ jobs:
         run: |
           for bits in 128 512; do
             mvn --batch-mode --no-transfer-progress -pl lw-ppocr-vector -am \
-              -Dtest=VectorLargePointwiseTest,VectorLargePointwiseFmaTest,VectorConvTransposeRowsTest,VectorParallelTransposeTest,VectorParallelEpilogueTest,VectorRegisterConvTest,VectorParallelRegisterConvTest,VectorStrideTwoTileTest -Dsurefire.failIfNoSpecifiedTests=false \
+              -Dtest=VectorLargePointwiseTest,VectorLargePointwiseFmaTest,VectorConvTransposeRowsTest,VectorParallelTransposeTest,VectorParallelEpilogueTest,VectorRegisterConvTest,VectorParallelRegisterConvTest,VectorStrideTwoTileTest,VectorStrideTwoLoadTest -Dsurefire.failIfNoSpecifiedTests=false \
               -Dlwppocr.vectorBits=$bits test
           done
+      - name: Check stride-two without AVX gather on x64
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        shell: bash
+        env:
+          JAVA_TOOL_OPTIONS: '-XX:UseAVX=0'
+        run: |
+          mvn --batch-mode --no-transfer-progress -pl lw-ppocr-vector -am \
+            -Dtest=VectorStrideTwoTileTest,VectorStrideTwoLoadTest,VectorBackendTest,VectorFullOcrGoldenTest \
+            -Dsurefire.failIfNoSpecifiedTests=false test
       - name: Report test failures
         if: failure()
         shell: bash
